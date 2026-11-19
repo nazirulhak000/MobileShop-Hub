@@ -1,0 +1,213 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Branch {
+  id               String            @id @default(cuid())
+  name             String
+  code             String            @unique
+  address          String?
+  phone            String?
+  taxId            String?
+  users            User[]
+  repairJobs       RepairJob[]
+  stockItems       StockItem[]
+  deviceImeis      DeviceIMEI[]
+  sales            Sale[]
+  tradeInContracts TradeInContract[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model User {
+  id              String      @id @default(cuid())
+  name            String
+  username        String      @unique
+  password        String
+  email           String?
+  role            String      @default("CASHIER") // ADMIN, MANAGER, TECHNICIAN, CASHIER
+  branchId        String
+  branch          Branch      @relation(fields: [branchId], references: [id])
+  assignedRepairs RepairJob[]
+  sales           Sale[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model Customer {
+  id               String            @id @default(cuid())
+  name             String
+  phone            String            @unique
+  nationalId       String?
+  lineId           String?
+  address          String?
+  repairJobs       RepairJob[]
+  sales            Sale[]
+  tradeInContracts TradeInContract[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model RepairJob {
+  id                String            @id @default(cuid())
+  trackingCode      String            @unique // e.g. REP-202611-0001
+  branchId          String
+  branch            Branch            @relation(fields: [branchId], references: [id])
+  customerId        String
+  customer          Customer          @relation(fields: [customerId], references: [id])
+  technicianId      String?
+  technician        User?             @relation(fields: [technicianId], references: [id])
+  deviceBrand       String
+  deviceModel       String
+  deviceColor       String?
+  serialIMEI        String?
+  passcode          String?
+  patternLock       String?           // 3x3 pattern sequence e.g. "0-1-2-4-6"
+  preCheckData      String?           // JSON: { screen: "pass", touch: "pass", ... }
+  postCheckData     String?           // JSON: { screen: "pass", ... }
+  issueDescription  String
+  customerSignature String?           // Base64 SVG or PNG data URL
+  status            String            @default("PENDING") // PENDING, DIAGNOSING, WAITING_PARTS, REPAIRING, QC_PASSED, READY, COMPLETED, CANCELLED
+  estimatedFinish   DateTime?
+  completedAt       DateTime?
+  laborFee          Float             @default(0)
+  estimatedCost     Float             @default(0)
+  totalCost         Float             @default(0)
+  customerApproved  Boolean           @default(true)
+  notes             String?
+  photos            String?           // JSON array string of photo URLs/Mocks
+  warrantyDays      Int               @default(90)
+  partUsages        RepairPartUsage[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+model Product {
+  id               String            @id @default(cuid())
+  code             String            @unique
+  name             String
+  category         String            // ACCESSORY, SPARE_PART, DEVICE
+  brand            String?
+  model            String?
+  compatibleModels String?           // JSON array string of compatible devices
+  costPrice        Float             @default(0)
+  sellPrice        Float             @default(0)
+  minStock         Int               @default(5)
+  stockItems       StockItem[]
+  imeis            DeviceIMEI[]
+  partUsages       RepairPartUsage[]
+  saleItems        SaleItem[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model StockItem {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, branchId])
+}
+
+model DeviceIMEI {
+  id                String           @id @default(cuid())
+  productId         String
+  product           Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId          String
+  branch            Branch           @relation(fields: [branchId], references: [id])
+  imei              String           @unique
+  serialNo          String?
+  conditionGrade    String           @default("A") // A, B, C
+  status            String           @default("IN_STOCK") // IN_STOCK, SOLD, IN_REPAIR, PAWNED, RETURNED
+  costPrice         Float            @default(0)
+  sellPrice         Float            @default(0)
+  tradeInContractId String?
+  tradeInContract   TradeInContract? @relation(fields: [tradeInContractId], references: [id])
+  saleItem          SaleItem?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model RepairPartUsage {
+  id          String    @id @default(cuid())
+  repairJobId String
+  repairJob   RepairJob @relation(fields: [repairJobId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  quantity    Int       @default(1)
+  costPrice   Float     @default(0)
+  sellPrice   Float     @default(0)
+  createdAt   DateTime  @default(now())
+}
+
+model Sale {
+  id             String     @id @default(cuid())
+  invoiceNo      String     @unique // INV-202611-0001
+  branchId       String
+  branch         Branch     @relation(fields: [branchId], references: [id])
+  customerId     String?
+  customer       Customer?  @relation(fields: [customerId], references: [id])
+  cashierId      String?
+  cashier        User?      @relation(fields: [cashierId], references: [id])
+  totalAmount    Float      @default(0)
+  discount       Float      @default(0)
+  vatAmount      Float      @default(0)
+  netAmount      Float      @default(0)
+  paymentMethod  String     @default("CASH") // CASH, PROMPTPAY, CARD, SPLIT
+  paymentDetails String?    // JSON string for split details or card info
+  status         String     @default("COMPLETED") // COMPLETED, VOID
+  items          SaleItem[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model SaleItem {
+  id           String      @id @default(cuid())
+  saleId       String
+  sale         Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product     @relation(fields: [productId], references: [id])
+  deviceImeiId String?     @unique
+  deviceImei   DeviceIMEI? @relation(fields: [deviceImeiId], references: [id])
+  quantity     Int         @default(1)
+  unitPrice    Float       @default(0)
+  costPrice    Float       @default(0)
+  subtotal     Float       @default(0)
+}
+
+model TradeInContract {
+  id                  String       @id @default(cuid())
+  contractNo          String       @unique // TC-202611-0001
+  type                String       @default("BUYBACK") // BUYBACK, PAWN
+  branchId            String
+  branch              Branch       @relation(fields: [branchId], references: [id])
+  customerId          String
+  customer            Customer     @relation(fields: [customerId], references: [id])
+  nationalId          String
+  deviceBrand         String
+  deviceModel         String
+  imei                String
+  conditionGrade      String       @default("A") // A, B, C
+  inspectionData      String?      // JSON check details
+  declarationAgreed   Boolean      @default(true)
+  customerPhoto       String?      // Mock photo URL
+  agreedPrice         Float        @default(0) // Buyback price or Pawn loan amount
+  interestRateMonthly Float        @default(2.5) // % per month
+  durationMonths      Int          @default(1)
+  startDate           DateTime     @default(now())
+  dueDate             DateTime?
+  status              String       @default("ACTIVE") // ACTIVE, REDEEMED, FORFEITED, COMPLETED
+  deviceImeis         DeviceIMEI[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
