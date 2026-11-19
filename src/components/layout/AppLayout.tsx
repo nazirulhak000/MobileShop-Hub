@@ -2,28 +2,37 @@
 
 import React, { useState } from "react";
 import { usePathname } from "next/navigation";
-import { AppProvider } from "@/context/AppContext";
+import { AppProvider, useApp } from "@/context/AppContext";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
-import { MessageCircle, Megaphone, Bell, X, ChevronRight } from "lucide-react";
+import { Megaphone, Bell, X, ChevronRight } from "lucide-react";
+
+// Public (non-staff) route segments; match whole segments so /customers, /customer-access,
+// /settings, /shift, /suppliers... are NOT treated as public pages.
+const PUBLIC_SEGMENTS = ["/store", "/track", "/landing", "/customer", "/s"];
+const isUnder = (path: string, prefix: string) => path === prefix || path.startsWith(prefix + "/");
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPublicTrackPage = pathname.startsWith("/track");
-  const [showAnnouncement, setShowAnnouncement] = useState(true);
+  const isCleanPage =
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/register" ||
+    PUBLIC_SEGMENTS.some(prefix => isUnder(pathname, prefix));
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(true);
 
   return (
     <AppProvider>
-      {isPublicTrackPage ? (
+      {isCleanPage ? (
         <div className="min-h-screen bg-slate-50">{children}</div>
       ) : (
-        <div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans">
+        <StaffReady><div className="min-h-screen bg-slate-50 text-slate-900 flex font-sans">
           <Sidebar />
-          <div className="flex-1 flex flex-col lg:pl-64 min-w-0 transition-all">
+          <div className="flex-1 flex flex-col lg:pl-72 min-w-0 transition-all">
             <Header />
 
-            <div className="flex-1 p-4 md:p-6 lg:p-7 max-w-7xl w-full mx-auto space-y-4">
+            <div className="flex-1 p-4 md:p-6 lg:p-8 max-w-[1720px] w-full mx-auto space-y-5">
               {/* Top Announcement Banner - Matching Screenshot */}
               {showAnnouncement && (
                 <div className="rounded-2xl border border-sky-200/70 bg-sky-50/80 px-4 py-2.5 text-xs text-sky-900 flex items-center justify-between shadow-2xs animate-fade-in">
@@ -85,19 +94,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <main>{children}</main>
             </div>
 
-            {/* Floating Action Button (FAB) - 'มีคำถาม? ทักเรา' Matching Screenshot */}
-            <div className="fixed bottom-6 right-6 z-40">
-              <button
-                type="button"
-                className="group flex items-center gap-2 rounded-full bg-teal-600 hover:bg-teal-700 text-white px-5 py-3 shadow-lg shadow-teal-700/20 font-medium text-xs sm:text-sm transition-all hover:scale-105 active:scale-95 cursor-pointer"
-              >
-                <MessageCircle className="h-4 w-4 transition-transform group-hover:rotate-12" />
-                <span>มีคำถาม? ทักเรา</span>
-              </button>
-            </div>
           </div>
-        </div>
+        </div></StaffReady>
       )}
     </AppProvider>
   );
+}
+
+function StaffReady({ children }: { children: React.ReactNode }) {
+  const { loading } = useApp();
+  return loading ? <div role="status" className="min-h-screen grid place-items-center text-slate-700">กำลังโหลดข้อมูลร้าน…</div> : <>{children}</>;
 }

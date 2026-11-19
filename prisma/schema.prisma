@@ -1,61 +1,413 @@
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
   provider = "prisma-client-js"
 }
 
+model StaffSession {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  tenantId  String
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, tenantId])
+  @@index([expiresAt])
+}
+
+model PublicTrackingToken {
+  id          String    @id @default(cuid())
+  tenantId    String
+  repairJobId String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId, repairJobId])
+}
+
+model CustomerAccount {
+  id          String   @id @default(cuid())
+  tenantId    String
+  phone       String
+  displayName String
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, phone])
+}
+
+model CustomerAccountLink {
+  id         String   @id @default(cuid())
+  tenantId   String
+  accountId  String   @unique
+  customerId String   @unique
+  approvedBy String
+  evidence   String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+model CustomerSession {
+  id        String    @id @default(cuid())
+  tenantId  String
+  accountId String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, accountId])
+}
+
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  tenantId   String
+  phone      String
+  secretHash String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, phone])
+  @@index([expiresAt])
+}
+
+model RepairStatusEvent {
+  id              String   @id @default(cuid())
+  tenantId        String?
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  repairJobId     String
+  status          String
+  customerMessage String
+  actorId         String
+  occurredAt      DateTime @default(now())
+
+  @@index([tenantId, repairJobId])
+}
+
+model RepairQuote {
+  id           String    @id @default(cuid())
+  tenantId     String
+  repairJobId  String
+  version      Int
+  description  String
+  amountSatang Int
+  status       String    @default("PENDING")
+  expiresAt    DateTime
+  decidedAt    DateTime?
+  decidedBy    String?
+  createdAt    DateTime  @default(now())
+
+  @@unique([repairJobId, version])
+  @@index([tenantId, repairJobId])
+}
+
+model BookingPolicy {
+  id             String  @id @default(cuid())
+  tenantId       String
+  branchId       String  @unique
+  opensMinute    Int     @default(540)
+  closesMinute   Int     @default(1200)
+  capacity       Int     @default(1)
+  closedWeekdays String  @default("[]")
+  closedDates    String  @default("[]")
+  active         Boolean @default(true)
+}
+
+model BookingSlot {
+  id            String   @id @default(cuid())
+  tenantId      String
+  branchId      String
+  startsAt      DateTime
+  endsAt        DateTime
+  capacity      Int
+  reservedCount Int      @default(0)
+
+  @@unique([branchId, startsAt])
+  @@index([tenantId, startsAt])
+}
+
+model Appointment {
+  id               String   @id @default(cuid())
+  tenantId         String
+  branchId         String
+  accountId        String
+  slotId           String
+  service          String
+  deviceModel      String
+  issueDescription String
+  status           String   @default("CONFIRMED")
+  bookingRef       String   @unique
+  repairJobId      String?  @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, accountId])
+  @@index([branchId])
+  @@index([slotId])
+}
+
+model AppointmentEvent {
+  id            String   @id @default(cuid())
+  tenantId      String
+  appointmentId String
+  action        String
+  actorId       String
+  details       String
+  createdAt     DateTime @default(now())
+
+  @@index([appointmentId])
+}
+
+model BookingRequest {
+  id            String @id @default(cuid())
+  tenantId      String
+  accountId     String
+  action        String
+  key           String
+  payloadHash   String
+  appointmentId String
+
+  @@unique([tenantId, accountId, action, key])
+}
+
+model CustomerNotification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  accountId String
+  eventKey  String    @unique
+  message   String
+  href      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, accountId])
+}
+
+model AuthThrottle {
+  key      String   @id
+  attempts Int      @default(0)
+  resetsAt DateTime
+
+  @@index([resetsAt])
+}
+
+model StaffBranchAccess {
+  id       String @id @default(cuid())
+  tenantId String
+  userId   String
+  branchId String
+
+  @@unique([userId, branchId])
+}
+
+// ==========================================
+// 1. ROOT MULTI-TENANT & SUBSCRIPTION SAAS
+// ==========================================
+
+model Tenant {
+  id                   String                @id @default(cuid())
+  name                 String
+  slug                 String                @unique // Subdomain e.g. store1.mobileshophub.com
+  taxId                String?
+  logoUrl              String?
+  plan                 String                @default("STARTER") // STARTER, PRO, ENTERPRISE
+  status               String                @default("TRIAL") // TRIAL, ACTIVE, PAST_DUE, CANCELLED
+  maxBranches          Int                   @default(1)
+  maxUsers             Int                   @default(5)
+  subscription         Subscription?
+  storefrontConfig     StorefrontConfig?
+  branches             Branch[]
+  users                User[]
+  customers            Customer[]
+  auditLogs            AuditLog[]
+  repairStatusEvents   RepairStatusEvent[]
+  repairJobs           RepairJob[]
+  products             Product[]
+  stockItems           StockItem[]
+  deviceImeis          DeviceIMEI[]
+  repairPartUsages     RepairPartUsage[]
+  sales                Sale[]
+  saleItems            SaleItem[]
+  tradeInContracts     TradeInContract[]
+  installmentContracts InstallmentContract[]
+  installmentPayments  InstallmentPayment[]
+  expenses             ShopExpense[]
+  attendanceRecords    AttendanceRecord[]
+  payrollSlips         PayrollSlip[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+}
+
+model StorefrontConfig {
+  id                     String   @id @default(cuid())
+  tenantId               String   @unique
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  themeColor             String   @default("emerald") // emerald, cyan, blue, purple, amber, slate
+  headline               String?
+  subheadline            String?
+  badge                  String?
+  announcementText       String?
+  announcementEnabled    Boolean  @default(true)
+  phone                  String?
+  lineId                 String?
+  lineQrUrl              String?
+  googleMapsUrl          String?
+  showLiveTracking       Boolean  @default(true)
+  showHardwareScanner    Boolean  @default(true)
+  showServicesBento      Boolean  @default(true)
+  showInspectionBench    Boolean  @default(true)
+  showPriceEstimator     Boolean  @default(true)
+  showBeforeAfterSlider  Boolean  @default(true)
+  showCustomerReviews    Boolean  @default(true)
+  showLocationSection    Boolean  @default(true)
+  showFaqSection         Boolean  @default(true)
+  showMobileQuickBar     Boolean  @default(true)
+  customBeforeAfterCases String?  // JSON string
+  customPricingRates     String?  // JSON string
+  customFaqs             String?  // JSON string
+  updatedAt              DateTime @updatedAt
+}
+
+model Subscription {
+  id                 String           @id @default(cuid())
+  tenantId           String           @unique
+  tenant             Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan               String           @default("STARTER") // STARTER, PRO, ENTERPRISE
+  status             String           @default("TRIAL") // TRIAL, ACTIVE, PAST_DUE, CANCELLED
+  billingCycle       String           @default("MONTHLY") // MONTHLY, YEARLY
+  pricePerMonth      Float            @default(990)
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime         @default(now())
+  currentPeriodEnd   DateTime
+  cancelledAt        DateTime?
+  invoices           BillingInvoice[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model BillingInvoice {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  invoiceNo      String       @unique
+  amount         Float
+  taxAmount      Float        @default(0)
+  totalAmount    Float
+  status         String       @default("PENDING") // PENDING, PAID, FAILED, VOID
+  dueDate        DateTime
+  paidAt         DateTime?
+  paymentRef     String?
+  createdAt      DateTime     @default(now())
+
+  @@index([subscriptionId, status])
+}
+
+// Atomic counter table for concurrency-safe sequential numbers (INV, REP, TC, INS, EXP)
+model SequenceCounter {
+  tenantId String?
+  id       String  @id // e.g. "INV-202611", "REP-202611", "TC-202611", "INS-202611"
+  current  Int     @default(0)
+}
+
+// ==========================================
+// 2. STORE BRANCHES & USERS
+// ==========================================
+
 model Branch {
-  id               String            @id @default(cuid())
-  name             String
-  code             String            @unique
-  address          String?
-  phone            String?
-  taxId            String?
-  users            User[]
-  repairJobs       RepairJob[]
-  stockItems       StockItem[]
-  deviceImeis      DeviceIMEI[]
-  sales            Sale[]
-  tradeInContracts TradeInContract[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                   String                @id @default(cuid())
+  tenantId             String?
+  tenant               Tenant?               @relation(fields: [tenantId], references: [id])
+  name                 String
+  code                 String
+  address              String?
+  phone                String?
+  taxId                String?
+  users                User[]
+  repairJobs           RepairJob[]
+  stockItems           StockItem[]
+  deviceImeis          DeviceIMEI[]
+  sales                Sale[]
+  tradeInContracts     TradeInContract[]
+  installmentContracts InstallmentContract[]
+  expenses             ShopExpense[]
+  attendance           AttendanceRecord[]
+  payrollSlips         PayrollSlip[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 model User {
-  id              String      @id @default(cuid())
+  isActive        Boolean            @default(true)
+  id              String             @id @default(cuid())
+  tenantId        String?
+  tenant          Tenant?            @relation(fields: [tenantId], references: [id])
   name            String
-  username        String      @unique
-  password        String
+  username        String
+  password        String // Bcrypt hashed
   email           String?
-  role            String      @default("CASHIER") // ADMIN, MANAGER, TECHNICIAN, CASHIER
+  role            String             @default("CASHIER") // ADMIN, MANAGER, TECHNICIAN, CASHIER
   branchId        String
-  branch          Branch      @relation(fields: [branchId], references: [id])
+  branch          Branch             @relation(fields: [branchId], references: [id])
   assignedRepairs RepairJob[]
   sales           Sale[]
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  expensesCreated ShopExpense[]
+  attendance      AttendanceRecord[]
+  payrollSlips    PayrollSlip[]
+  auditLogs       AuditLog[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([tenantId, username])
+  @@index([tenantId])
 }
+
+// ==========================================
+// 3. CRM & CUSTOMERS
+// ==========================================
 
 model Customer {
-  id               String            @id @default(cuid())
-  name             String
-  phone            String            @unique
-  nationalId       String?
-  lineId           String?
-  address          String?
-  repairJobs       RepairJob[]
-  sales            Sale[]
-  tradeInContracts TradeInContract[]
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                   String                @id @default(cuid())
+  tenantId             String?
+  tenant               Tenant?               @relation(fields: [tenantId], references: [id])
+  name                 String
+  phone                String
+  nationalId           String?
+  lineId               String?
+  address              String?
+  repairJobs           RepairJob[]
+  sales                Sale[]
+  tradeInContracts     TradeInContract[]
+  installmentContracts InstallmentContract[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([tenantId, phone])
+  @@index([nationalId])
+  @@index([tenantId])
 }
 
+// ==========================================
+// 4. REPAIR TICKETS & OPERATIONS
+// ==========================================
+
 model RepairJob {
+  tenantId          String?
+  tenant            Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id                String            @id @default(cuid())
-  trackingCode      String            @unique // e.g. REP-202611-0001
+  trackingCode      String // e.g. REP-202611-0001
   branchId          String
   branch            Branch            @relation(fields: [branchId], references: [id])
   customerId        String
@@ -67,11 +419,11 @@ model RepairJob {
   deviceColor       String?
   serialIMEI        String?
   passcode          String?
-  patternLock       String?           // 3x3 pattern sequence e.g. "0-1-2-4-6"
-  preCheckData      String?           // JSON: { screen: "pass", touch: "pass", ... }
-  postCheckData     String?           // JSON: { screen: "pass", ... }
+  patternLock       String? // 3x3 pattern sequence e.g. "0-1-2-4-6"
+  preCheckData      String? // JSON: { screen: "pass", touch: "pass", ... }
+  postCheckData     String? // JSON: { screen: "pass", ... }
   issueDescription  String
-  customerSignature String?           // Base64 SVG or PNG data URL
+  customerSignature String? // Base64 SVG or PNG data URL
   status            String            @default("PENDING") // PENDING, DIAGNOSING, WAITING_PARTS, REPAIRING, QC_PASSED, READY, COMPLETED, CANCELLED
   estimatedFinish   DateTime?
   completedAt       DateTime?
@@ -80,21 +432,35 @@ model RepairJob {
   totalCost         Float             @default(0)
   customerApproved  Boolean           @default(true)
   notes             String?
-  photos            String?           // JSON array string of photo URLs/Mocks
+  photos            String? // JSON array string of photo URLs/Mocks
   warrantyDays      Int               @default(90)
   partUsages        RepairPartUsage[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+
+  @@unique([tenantId, trackingCode])
+  @@index([branchId, status])
+  @@index([serialIMEI])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([tenantId, createdAt])
 }
 
+// ==========================================
+// 5. INVENTORY & SERIAL IMEI TRACKING
+// ==========================================
+
 model Product {
+  tenantId         String?
+  tenant           Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id               String            @id @default(cuid())
-  code             String            @unique
+  code             String
   name             String
-  category         String            // ACCESSORY, SPARE_PART, DEVICE
+  category         String // ACCESSORY, SPARE_PART, DEVICE
   brand            String?
   model            String?
-  compatibleModels String?           // JSON array string of compatible devices
+  compatibleModels String? // JSON array string of compatible devices
   costPrice        Float             @default(0)
   sellPrice        Float             @default(0)
   minStock         Int               @default(5)
@@ -104,12 +470,18 @@ model Product {
   saleItems        SaleItem[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([category])
+  @@index([tenantId])
 }
 
 model StockItem {
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id        String   @id @default(cuid())
   productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
   branchId  String
   branch    Branch   @relation(fields: [branchId], references: [id])
   quantity  Int      @default(0)
@@ -117,15 +489,18 @@ model StockItem {
   updatedAt DateTime @updatedAt
 
   @@unique([productId, branchId])
+  @@index([branchId, quantity])
 }
 
 model DeviceIMEI {
+  tenantId          String?
+  tenant            Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id                String           @id @default(cuid())
   productId         String
-  product           Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product           Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
   branchId          String
   branch            Branch           @relation(fields: [branchId], references: [id])
-  imei              String           @unique
+  imei              String
   serialNo          String?
   conditionGrade    String           @default("A") // A, B, C
   status            String           @default("IN_STOCK") // IN_STOCK, SOLD, IN_REPAIR, PAWNED, RETURNED
@@ -136,9 +511,17 @@ model DeviceIMEI {
   saleItem          SaleItem?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@unique([tenantId, imei])
+  @@index([branchId, status])
+  @@index([tenantId])
+  @@index([productId])
+  @@index([tradeInContractId])
 }
 
 model RepairPartUsage {
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id          String    @id @default(cuid())
   repairJobId String
   repairJob   RepairJob @relation(fields: [repairJobId], references: [id], onDelete: Cascade)
@@ -148,11 +531,20 @@ model RepairPartUsage {
   costPrice   Float     @default(0)
   sellPrice   Float     @default(0)
   createdAt   DateTime  @default(now())
+
+  @@index([repairJobId])
+  @@index([productId])
 }
 
+// ==========================================
+// 6. POS SALES & INVOICES
+// ==========================================
+
 model Sale {
+  tenantId       String?
+  tenant         Tenant?    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id             String     @id @default(cuid())
-  invoiceNo      String     @unique // INV-202611-0001
+  invoiceNo      String // INV-202611-0001
   branchId       String
   branch         Branch     @relation(fields: [branchId], references: [id])
   customerId     String?
@@ -164,14 +556,22 @@ model Sale {
   vatAmount      Float      @default(0)
   netAmount      Float      @default(0)
   paymentMethod  String     @default("CASH") // CASH, PROMPTPAY, CARD, SPLIT
-  paymentDetails String?    // JSON string for split details or card info
+  paymentDetails String? // JSON string for split details or card info
   status         String     @default("COMPLETED") // COMPLETED, VOID
   items          SaleItem[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+
+  @@unique([tenantId, invoiceNo])
+  @@index([branchId, createdAt])
+  @@index([customerId])
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
 }
 
 model SaleItem {
+  tenantId     String?
+  tenant       Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id           String      @id @default(cuid())
   saleId       String
   sale         Sale        @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -183,11 +583,20 @@ model SaleItem {
   unitPrice    Float       @default(0)
   costPrice    Float       @default(0)
   subtotal     Float       @default(0)
+
+  @@index([saleId])
+  @@index([productId])
 }
 
+// ==========================================
+// 7. FINANCIAL SERVICES (INSTALLMENTS, TRADE-IN, PAWN)
+// ==========================================
+
 model TradeInContract {
+  tenantId            String?
+  tenant              Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   id                  String       @id @default(cuid())
-  contractNo          String       @unique // TC-202611-0001
+  contractNo          String // TC-202611-0001
   type                String       @default("BUYBACK") // BUYBACK, PAWN
   branchId            String
   branch              Branch       @relation(fields: [branchId], references: [id])
@@ -198,9 +607,9 @@ model TradeInContract {
   deviceModel         String
   imei                String
   conditionGrade      String       @default("A") // A, B, C
-  inspectionData      String?      // JSON check details
+  inspectionData      String? // JSON check details
   declarationAgreed   Boolean      @default(true)
-  customerPhoto       String?      // Mock photo URL
+  customerPhoto       String? // Mock photo URL
   agreedPrice         Float        @default(0) // Buyback price or Pawn loan amount
   interestRateMonthly Float        @default(2.5) // % per month
   durationMonths      Int          @default(1)
@@ -210,4 +619,163 @@ model TradeInContract {
   deviceImeis         DeviceIMEI[]
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
+
+  @@unique([tenantId, contractNo])
+  @@index([branchId, status, dueDate])
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([tenantId, type])
+}
+
+model InstallmentContract {
+  tenantId            String?
+  tenant              Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id                  String               @id @default(cuid())
+  contractNo          String // INS-202611-001
+  branchId            String?
+  branch              Branch?              @relation(fields: [branchId], references: [id])
+  customerId          String?
+  customer            Customer?            @relation(fields: [customerId], references: [id])
+  customerName        String
+  customerPhone       String
+  nationalId          String
+  deviceModel         String
+  imei                String
+  totalPrice          Float
+  downPayment         Float
+  financedAmount      Float
+  termMonths          Int
+  monthlyInterestRate Float                @default(1.5)
+  monthlyPayment      Float
+  startDate           DateTime             @default(now())
+  status              String               @default("ACTIVE") // ACTIVE, OVERDUE, COMPLETED, CANCELLED
+  paidMonths          Int                  @default(0)
+  nextDueDate         DateTime?
+  isOverdue           Boolean              @default(false)
+  overdueDays         Int                  @default(0)
+  payments            InstallmentPayment[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([tenantId, contractNo])
+  @@index([branchId, status])
+  @@index([customerPhone])
+  @@index([tenantId])
+  @@index([customerId])
+}
+
+model InstallmentPayment {
+  tenantId    String?
+  tenant      Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id          String              @id @default(cuid())
+  contractId  String
+  contract    InstallmentContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  monthNumber Int
+  dueDate     DateTime
+  amount      Float
+  paidDate    DateTime?
+  paymentRef  String?
+  status      String              @default("PENDING") // PENDING, PAID, OVERDUE
+  createdAt   DateTime            @default(now())
+
+  @@index([contractId])
+  @@index([dueDate, status])
+}
+
+// ==========================================
+// 8. SHOP EXPENSES & HR (ATTENDANCE & PAYROLL)
+// ==========================================
+
+model ShopExpense {
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id          String   @id @default(cuid())
+  expenseNo   String // EXP-202611-001
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  category    String // RENT, UTILITIES, CONSUMABLES, MARKETING, MAINTENANCE, WELFARE, OTHER
+  title       String
+  amount      Float
+  date        DateTime @default(now())
+  receiptUrl  String?
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, expenseNo])
+  @@index([branchId, date])
+  @@index([tenantId])
+}
+
+model AttendanceRecord {
+  tenantId   String?
+  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  branchId   String
+  branch     Branch    @relation(fields: [branchId], references: [id])
+  date       DateTime
+  clockIn    DateTime?
+  clockOut   DateTime?
+  totalHours Float?
+  status     String    @default("ON_TIME") // ON_TIME, LATE, ABSENT, LEAVE
+  notes      String?
+  verifiedBy String?
+  createdAt  DateTime  @default(now())
+
+  @@unique([userId, date])
+  @@index([branchId, date])
+}
+
+model PayrollSlip {
+  tenantId         String?
+  tenant           Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  branchId         String
+  branch           Branch    @relation(fields: [branchId], references: [id])
+  month            String // YYYY-MM
+  baseSalary       Float
+  repairCommission Float     @default(0)
+  salesCommission  Float     @default(0)
+  allowance        Float     @default(0)
+  overtimePay      Float     @default(0)
+  ssoDeduction     Float     @default(0)
+  taxDeduction     Float     @default(0)
+  otherDeductions  Float     @default(0)
+  netPayout        Float
+  status           String    @default("PENDING") // PENDING, APPROVED, PAID
+  paidDate         DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([userId, month])
+  @@index([branchId, month])
+}
+
+// ==========================================
+// 9. SECURITY AUDIT LOGGING
+// ==========================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id])
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  module     String // POS, REPAIRS, INVENTORY, USERS, EXPENSES, SETTINGS
+  action     String // CREATE, UPDATE, DELETE, STATUS_CHANGE
+  targetId   String?
+  details    String
+  beforeJson String?
+  afterJson  String?
+  severity   String   @default("INFO") // INFO, WARNING, DANGER
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([module, createdAt])
+  @@index([tenantId, createdAt])
 }

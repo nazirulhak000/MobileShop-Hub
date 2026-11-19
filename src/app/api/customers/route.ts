@@ -1,10 +1,14 @@
+import { AccessError } from "@/lib/staff-context";
+import { safeError } from "@/lib/staff-http";
+import { withStaff } from "@/lib/staff-http";
+import { staffTenantId } from "@/lib/staff-context";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/customers?search=081 or ?q=081
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || searchParams.get("q") || "";
@@ -22,19 +26,29 @@ export async function GET(request: NextRequest) {
 
     const customers = await prisma.customer.findMany({
       where,
+      include: {
+        _count: {
+          select: {
+            repairJobs: true,
+            sales: true,
+            tradeInContracts: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
-      take: 20,
+      take: 50,
     });
 
     return NextResponse.json({ success: true, data: customers, customers });
   } catch (error: any) {
-    console.error("GET /api/customers error:", error);
+    if (error instanceof AccessError) return safeError(error);
+    console.error("GET /api/customers error:");
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 // POST /api/customers - Create or update customer
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     const body = await request.json();
     const { name, phone, nationalId, lineId, address } = body;
@@ -47,7 +61,7 @@ export async function POST(request: NextRequest) {
     }
 
     const customer = await prisma.customer.upsert({
-      where: { phone: phone.trim() },
+      where: { tenantId_phone: { tenantId: staffTenantId(), phone: phone.trim() } },
       update: {
         name: name.trim(),
         nationalId: nationalId ? nationalId.trim() : undefined,
@@ -65,7 +79,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: customer, customer });
   } catch (error: any) {
-    console.error("POST /api/customers error:", error);
+    if (error instanceof AccessError) return safeError(error);
+    console.error("POST /api/customers error:");
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export const GET = withStaff(handleGET, ["ADMIN","MANAGER","CASHIER"]);
+
+export const POST = withStaff(handlePOST, ["ADMIN","MANAGER","CASHIER"]);

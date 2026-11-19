@@ -1,7 +1,33 @@
+import { AccessError } from "@/lib/staff-context";
+import { reqId, safeError, withStaff } from "@/lib/staff-http";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+function reqText(value: unknown, field: string, max: number): string {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > max) throw new AccessError(400, `ข้อมูลไม่ถูกต้อง: ${field}`);
+  return value.trim();
+}
+
+/** Optional free-text field: undefined = not provided, ""/null = clear. */
+function optText(value: unknown, field: string, max: number): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || value.trim().length > max) throw new AccessError(400, `ข้อมูลไม่ถูกต้อง: ${field}`);
+  return value.trim() || null;
+}
+
+function reqCode(value: unknown): string {
+  const code = reqText(value, "code", 30).toUpperCase();
+  if (!/^[A-Z0-9_-]+$/.test(code)) throw new AccessError(400, "รหัสสาขาใช้ได้เฉพาะ A-Z, 0-9, - และ _");
+  return code;
+}
+
+function isPrismaError(error: unknown, code: string) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
+}
+
+async function handleGET() {
   try {
     const branches = await prisma.branch.findMany({
       include: {
@@ -17,81 +43,92 @@ export async function GET() {
       orderBy: { createdAt: "asc" },
     });
     return NextResponse.json(branches);
-  } catch (error: any) {
-    console.error("Error fetching branches:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   try {
     const body = await req.json();
-    const { name, code, address, phone, taxId } = body;
+    const name = reqText(body.name, "name", 150);
+    const code = reqCode(body.code);
 
-    if (!name || !code) {
-      return NextResponse.json({ error: "Name and code are required" }, { status: 400 });
+    // Plan limit (Tenant.maxBranches).
+    const tenant = await prisma.tenant.findFirst({ select: { maxBranches: true } });
+    if (tenant && (await prisma.branch.count()) >= tenant.maxBranches) {
+      throw new AccessError(409, "เกินจำนวนสาขาตามแพ็กเกจ");
     }
 
     const branch = await prisma.branch.create({
       data: {
         name,
-        code: code.toUpperCase().trim(),
-        address,
-        phone,
-        taxId,
+        code,
+        address: optText(body.address, "address", 500) ?? null,
+        phone: optText(body.phone, "phone", 50) ?? null,
+        taxId: optText(body.taxId, "taxId", 20) ?? null,
       },
     });
-
     return NextResponse.json(branch, { status: 201 });
-  } catch (error: any) {
-    console.error("Error creating branch:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (isPrismaError(error, "P2002")) return safeError(new AccessError(409, "รหัสสาขานี้มีอยู่แล้ว"));
+    return safeError(error);
   }
 }
 
-export async function PUT(req: Request) {
+async function handlePUT(req: Request) {
   try {
     const body = await req.json();
-    const { id, name, code, address, phone, taxId } = body;
+    const id = reqId(body.id, "id");
 
-    if (!id) {
-      return NextResponse.json({ error: "Branch ID is required" }, { status: 400 });
-    }
+    // Only update fields that are present in the request body.
+    const data: Prisma.BranchUpdateInput = {};
+    if (body.name !== undefined) data.name = reqText(body.name, "name", 150);
+    if (body.code !== undefined) data.code = reqCode(body.code);
+    const address = optText(body.address, "address", 500);
+    if (address !== undefined) data.address = address;
+    const phone = optText(body.phone, "phone", 50);
+    if (phone !== undefined) data.phone = phone;
+    const taxId = optText(body.taxId, "taxId", 20);
+    if (taxId !== undefined) data.taxId = taxId;
 
-    const branch = await prisma.branch.update({
-      where: { id },
-      data: {
-        name,
-        code: code.toUpperCase().trim(),
-        address,
-        phone,
-        taxId,
-      },
-    });
+    const existing = await prisma.branch.findFirst({ where: { id }, select: { id: true } });
+    if (!existing) throw new AccessError(404, "ไม่พบสาขา");
 
+    const branch = await prisma.branch.update({ where: { id }, data });
     return NextResponse.json(branch);
-  } catch (error: any) {
-    console.error("Error updating branch:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (isPrismaError(error, "P2002")) return safeError(new AccessError(409, "รหัสสาขานี้มีอยู่แล้ว"));
+    return safeError(error);
   }
 }
 
-export async function DELETE(req: Request) {
+const IN_USE_MESSAGE = "ลบสาขาไม่ได้เพราะมีข้อมูลผูกอยู่ (พนักงาน งานซ่อม สต็อก การขาย ฯลฯ) กรุณาย้ายหรือปิดข้อมูลเหล่านั้นก่อน";
+
+async function handleDELETE(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
+    const id = reqId(new URL(req.url).searchParams.get("id"), "id");
 
-    if (!id) {
-      return NextResponse.json({ error: "Branch ID is required" }, { status: 400 });
-    }
+    const branch = await prisma.branch.findFirst({ where: { id }, include: { _count: true } });
+    if (!branch) throw new AccessError(404, "ไม่พบสาขา");
 
-    await prisma.branch.delete({
-      where: { id },
-    });
+    // Pre-check FK relations plus tables that reference branchId without a Prisma relation.
+    const relationCount = Object.values(branch._count as Record<string, number>).reduce((sum, n) => sum + n, 0);
+    const [appointments, slots] = await Promise.all([
+      prisma.appointment.count({ where: { branchId: id } }),
+      prisma.bookingSlot.count({ where: { branchId: id } }),
+    ]);
+    if (relationCount + appointments + slots > 0) throw new AccessError(409, IN_USE_MESSAGE);
 
+    await prisma.branch.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Error deleting branch:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    if (isPrismaError(error, "P2003")) return safeError(new AccessError(409, IN_USE_MESSAGE));
+    return safeError(error);
   }
 }
+
+export const GET = withStaff(handleGET, ["ADMIN", "MANAGER", "CASHIER", "TECHNICIAN"]);
+export const POST = withStaff(handlePOST, ["ADMIN"]);
+export const PUT = withStaff(handlePUT, ["ADMIN"]);
+export const DELETE = withStaff(handleDELETE, ["ADMIN"]);

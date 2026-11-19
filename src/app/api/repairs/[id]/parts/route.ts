@@ -1,213 +1,161 @@
+import { AccessError, staffContext } from "@/lib/staff-context";
+import { withStaff, reqId, reqInt, requireRole } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { staffUserSelect, redactDeviceLock } from "@/lib/repairs";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+// Jobs in these states are closed; parts can no longer be added or returned.
+const LOCKED_STATUSES = ["COMPLETED", "CANCELLED"];
+
+const JOB_INCLUDE = {
+  customer: true,
+  branch: true,
+  technician: { select: staffUserSelect },
+  partUsages: { include: { product: true } },
+} as const;
+
+async function readJson(request: NextRequest) {
   try {
-    const { productId, quantity = 1 } = await request.json();
-
-    if (!productId) {
-      return NextResponse.json(
-        { success: false, error: "กรุณาระบุรหัสสินค้าอะไหล่" },
-        { status: 400 }
-      );
-    }
-
-    const job = await prisma.repairJob.findUnique({
-      where: { id: params.id },
-      include: { partUsages: true },
-    });
-
-    if (!job) {
-      return NextResponse.json(
-        { success: false, error: "ไม่พบข้อมูลใบงานซ่อม" },
-        { status: 404 }
-      );
-    }
-
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-    });
-
-    if (!product) {
-      return NextResponse.json(
-        { success: false, error: "ไม่พบข้อมูลสินค้าอะไหล่" },
-        { status: 404 }
-      );
-    }
-
-    const qtyToDeduct = Number(quantity) || 1;
-
-    // Check & Deduct Stock
-    const stock = await prisma.stockItem.findUnique({
-      where: {
-        productId_branchId: {
-          productId,
-          branchId: job.branchId,
-        },
-      },
-    });
-
-    if (!stock || stock.quantity < qtyToDeduct) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `สต็อกคงเหลือไม่เพียงพอ (คงเหลือ ${stock ? stock.quantity : 0} ชิ้น)`,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Deduct stock in transaction
-    const [usage, updatedStock] = await prisma.$transaction([
-      prisma.stockItem.update({
-        where: { id: stock.id },
-        data: { quantity: { decrement: qtyToDeduct } },
-      }),
-      prisma.repairPartUsage.create({
-        data: {
-          repairJobId: job.id,
-          productId,
-          quantity: qtyToDeduct,
-          costPrice: product.costPrice,
-          sellPrice: product.sellPrice,
-        },
-        include: {
-          product: true,
-        },
-      }),
-    ]);
-
-    // Recalculate total cost
-    const allUsages = await prisma.repairPartUsage.findMany({
-      where: { repairJobId: job.id },
-    });
-    const partsTotal = allUsages.reduce(
-      (sum, p) => sum + p.sellPrice * p.quantity,
-      0
-    );
-    const newTotalCost = job.laborFee + partsTotal;
-
-    const updatedJob = await prisma.repairJob.update({
-      where: { id: job.id },
-      data: { totalCost: newTotalCost },
-      include: {
-        customer: true,
-        branch: true,
-        technician: true,
-        partUsages: {
-          include: {
-            product: true,
-          },
-        },
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: updatedJob,
-      message: `เบิกอะไหล่ ${product.name} จำนวน ${qtyToDeduct} ชิ้น เรียบร้อยแล้ว`,
-    });
-  } catch (error: any) {
-    console.error("Error adding spare part:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to add spare part" },
-      { status: 500 }
-    );
+    return await request.json();
+  } catch {
+    throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const usageId = searchParams.get("usageId");
+/** Recompute job totalCost = laborFee + sum(parts sellPrice * qty), inside the given tx. */
+async function recomputeTotal(tx: Prisma.TransactionClient, jobId: string, laborFee: number) {
+  const usages = await tx.repairPartUsage.findMany({ where: { repairJobId: jobId } });
+  const partsTotal = usages.reduce((sum, p) => sum + p.sellPrice * p.quantity, 0);
+  const totalCost = Math.round((laborFee + partsTotal) * 100) / 100;
+  return tx.repairJob.update({
+    where: { id: jobId },
+    data: { totalCost },
+    include: JOB_INCLUDE,
+  });
+}
 
-    if (!usageId) {
-      return NextResponse.json(
-        { success: false, error: "กรุณาระบุ usageId ที่ต้องการยกเลิก" },
-        { status: 400 }
-      );
+async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
+  const actor = staffContext();
+  const jobId = reqId(params?.id, "id");
+  const body = await readJson(request);
+  const productId = reqId(body?.productId, "productId");
+  const quantity = reqInt(body?.quantity, "quantity", 1, 100);
+
+  const { updatedJob, productName } = await prisma.$transaction(async (tx) => {
+    const job = await tx.repairJob.findFirst({ where: { id: jobId } });
+    if (!job) throw new AccessError(404, "ไม่พบข้อมูลใบงานซ่อม");
+    if (LOCKED_STATUSES.includes(job.status)) {
+      throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถเบิกอะไหล่เพิ่มได้");
     }
 
-    const usage = await prisma.repairPartUsage.findUnique({
+    const product = await tx.product.findFirst({ where: { id: productId } });
+    if (!product) throw new AccessError(404, "ไม่พบข้อมูลสินค้าอะไหล่");
+
+    // Atomic guarded decrement: fails if another request consumed the stock first.
+    const { count } = await tx.stockItem.updateMany({
+      where: { productId, branchId: job.branchId, quantity: { gte: quantity } },
+      data: { quantity: { decrement: quantity } },
+    });
+    if (count !== 1) throw new AccessError(409, "อะไหล่ในสต็อกไม่พอ");
+
+    const usage = await tx.repairPartUsage.create({
+      data: {
+        repairJobId: job.id,
+        productId,
+        quantity,
+        costPrice: product.costPrice,
+        sellPrice: product.sellPrice,
+      },
+    });
+
+    const updated = await recomputeTotal(tx, job.id, job.laborFee);
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: actor.tenantId,
+        userId: actor.id,
+        module: "REPAIRS",
+        action: "PART_ADD",
+        targetId: job.id,
+        details: JSON.stringify({ usageId: usage.id, productId, quantity, sellPrice: product.sellPrice }),
+        beforeJson: JSON.stringify({ totalCost: job.totalCost }),
+        afterJson: JSON.stringify({ totalCost: updated.totalCost }),
+        severity: "INFO",
+      },
+    });
+
+    return { updatedJob: updated, productName: product.name };
+  });
+
+  return NextResponse.json({
+    success: true,
+    data: redactDeviceLock(updatedJob),
+    message: `เบิกอะไหล่ ${productName} จำนวน ${quantity} ชิ้น เรียบร้อยแล้ว`,
+  });
+}
+
+async function handleDELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const actor = staffContext();
+  requireRole(actor.role, ["ADMIN", "MANAGER"]);
+  const jobId = reqId(params?.id, "id");
+  const { searchParams } = new URL(request.url);
+  const usageId = reqId(searchParams.get("usageId"), "usageId");
+
+  const updatedJob = await prisma.$transaction(async (tx) => {
+    const usage = await tx.repairPartUsage.findFirst({
       where: { id: usageId },
-      include: {
-        repairJob: true,
-      },
+      include: { repairJob: true },
     });
-
-    if (!usage || usage.repairJobId !== params.id) {
-      return NextResponse.json(
-        { success: false, error: "ไม่พบรายการเบิกอะไหล่นี้" },
-        { status: 404 }
-      );
+    if (!usage || usage.repairJobId !== jobId) throw new AccessError(404, "ไม่พบรายการเบิกอะไหล่นี้");
+    if (LOCKED_STATUSES.includes(usage.repairJob.status)) {
+      throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถคืนอะไหล่ได้");
     }
 
-    // Restore stock and delete usage
-    await prisma.$transaction([
-      prisma.stockItem.upsert({
-        where: {
-          productId_branchId: {
-            productId: usage.productId,
-            branchId: usage.repairJob.branchId,
-          },
-        },
-        create: {
-          productId: usage.productId,
-          branchId: usage.repairJob.branchId,
-          quantity: usage.quantity,
-        },
-        update: {
-          quantity: { increment: usage.quantity },
-        },
-      }),
-      prisma.repairPartUsage.delete({
-        where: { id: usageId },
-      }),
-    ]);
+    // Delete first (deleteMany guards against a concurrent double-return).
+    const del = await tx.repairPartUsage.deleteMany({ where: { id: usageId, repairJobId: jobId } });
+    if (del.count !== 1) throw new AccessError(409, "รายการนี้ถูกยกเลิกไปแล้ว");
 
-    // Recalculate total cost
-    const remainingUsages = await prisma.repairPartUsage.findMany({
-      where: { repairJobId: params.id },
+    await tx.stockItem.upsert({
+      where: {
+        productId_branchId: { productId: usage.productId, branchId: usage.repairJob.branchId },
+      },
+      create: {
+        productId: usage.productId,
+        branchId: usage.repairJob.branchId,
+        quantity: usage.quantity,
+      },
+      update: { quantity: { increment: usage.quantity } },
     });
-    const partsTotal = remainingUsages.reduce(
-      (sum, p) => sum + p.sellPrice * p.quantity,
-      0
-    );
-    const newTotalCost = usage.repairJob.laborFee + partsTotal;
 
-    const updatedJob = await prisma.repairJob.update({
-      where: { id: params.id },
-      data: { totalCost: newTotalCost },
-      include: {
-        customer: true,
-        branch: true,
-        technician: true,
-        partUsages: {
-          include: {
-            product: true,
-          },
-        },
+    const updated = await recomputeTotal(tx, jobId, usage.repairJob.laborFee);
+
+    await tx.auditLog.create({
+      data: {
+        tenantId: actor.tenantId,
+        userId: actor.id,
+        module: "REPAIRS",
+        action: "PART_RETURN",
+        targetId: jobId,
+        details: JSON.stringify({ usageId, productId: usage.productId, quantity: usage.quantity }),
+        beforeJson: JSON.stringify({ totalCost: usage.repairJob.totalCost }),
+        afterJson: JSON.stringify({ totalCost: updated.totalCost }),
+        severity: "WARNING",
       },
     });
 
-    return NextResponse.json({
-      success: true,
-      data: updatedJob,
-      message: "คืนอะไหล่เข้าสต็อกเรียบร้อยแล้ว",
-    });
-  } catch (error: any) {
-    console.error("Error removing spare part:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to remove spare part" },
-      { status: 500 }
-    );
-  }
+    return updated;
+  });
+
+  return NextResponse.json({
+    success: true,
+    data: redactDeviceLock(updatedJob),
+    message: "คืนอะไหล่เข้าสต็อกเรียบร้อยแล้ว",
+  });
 }
+
+export const POST = withStaff(handlePOST, ["ADMIN", "MANAGER", "CASHIER", "TECHNICIAN"]);
+
+export const DELETE = withStaff(handleDELETE, ["ADMIN", "MANAGER"]);

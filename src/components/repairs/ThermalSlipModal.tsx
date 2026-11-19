@@ -11,6 +11,7 @@ interface ThermalSlipModalProps {
   isOpen: boolean;
   onClose: () => void;
   job: {
+    id?: string;
     trackingCode: string;
     createdAt?: Date | string;
     branch?: {
@@ -29,6 +30,8 @@ interface ThermalSlipModalProps {
     serialIMEI?: string | null;
     passcode?: string | null;
     patternLock?: string | null;
+    hasPasscode?: boolean;
+    hasPatternLock?: boolean;
     issueDescription: string;
     preCheckData?: string | null;
     laborFee?: number;
@@ -47,22 +50,26 @@ export function ThermalSlipModal({
   const printRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (job?.trackingCode) {
-      // In production or dev, QR code links to host /track/[trackingCode]
+    setQrCodeDataUrl("");
+    if (isOpen && job?.id) {
+      let cancelled = false;
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const trackingUrl = `${origin}/track/${job.trackingCode}`;
-      QRCode.toDataURL(trackingUrl, {
+      fetch(`/api/repairs/${encodeURIComponent(job.id)}/tracking-token`, { method: "POST" }).then(async response => {
+        if (!response.ok) throw new Error("ไม่สามารถสร้าง QR ติดตามได้");
+        const { token } = await response.json();
+        return QRCode.toDataURL(`${origin}/track/${token}`, {
         width: 160,
         margin: 1,
         color: {
           dark: "#000000",
           light: "#ffffff",
         },
-      })
-        .then((url) => setQrCodeDataUrl(url))
+      }); })
+        .then((url) => { if (!cancelled) setQrCodeDataUrl(url); })
         .catch((err) => console.error("Error generating QR code:", err));
+      return () => { cancelled = true; };
     }
-  }, [job?.trackingCode]);
+  }, [job?.id, isOpen]);
 
   if (!job) return null;
 
@@ -188,7 +195,8 @@ export function ThermalSlipModal({
               <div className="flex justify-between">
                 <span className="text-gray-600">รหัสปลดล็อก:</span>
                 <span>
-                  {job.passcode ? `PIN: ${job.passcode}` : job.patternLock ? `Pattern: ${job.patternLock}` : "ไม่มีรหัส"}
+                  {/* Customer copy: never print the actual PIN/pattern. */}
+                  {job.passcode || job.patternLock || job.hasPasscode || job.hasPatternLock ? "มีรหัสล็อกเครื่อง: แจ้งพนักงานแล้ว" : "ไม่มีรหัส"}
                 </span>
               </div>
             </div>

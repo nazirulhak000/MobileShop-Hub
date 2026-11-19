@@ -1,199 +1,264 @@
+import { AccessError, staffContext } from "@/lib/staff-context";
+import {
+  safeError,
+  withStaff,
+  reqId,
+  reqInt,
+  reqMoney,
+  bangkokYYYYMM,
+  bangkokDateString,
+  addMonthsClamped,
+  takeParam,
+} from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-// Initial mock installment contracts if none in DB
-let mockInstallments: any[] = [
-  {
-    id: "inst-001",
-    contractNo: "INS-202611-001",
-    customerName: "คุณธนกร รัตนสิทธิ",
-    customerPhone: "081-234-5678",
-    nationalId: "1100400123451",
-    deviceModel: "iPhone 14 Pro Max 256GB Deep Purple",
-    imei: "354928110293847",
-    totalPrice: 28900,
-    downPayment: 8900,
-    financedAmount: 20000,
-    termMonths: 10,
-    monthlyInterestRate: 1.5,
-    monthlyPayment: 2300,
-    startDate: "2026-08-01",
-    status: "ACTIVE",
-    paidMonths: 4,
-    nextDueDate: "2026-12-01",
-    isOverdue: false,
-    payments: [
-      { month: 1, dueDate: "2026-09-01", amount: 2300, paidDate: "2026-09-01", status: "PAID", ref: "TXN-9012" },
-      { month: 2, dueDate: "2026-10-01", amount: 2300, paidDate: "2026-09-30", status: "PAID", ref: "TXN-9034" },
-      { month: 3, dueDate: "2026-11-01", amount: 2300, paidDate: "2026-11-01", status: "PAID", ref: "TXN-9088" },
-      { month: 4, dueDate: "2026-12-01", amount: 2300, paidDate: "2026-11-28", status: "PAID", ref: "TXN-9110" },
-      { month: 5, dueDate: "2027-01-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-      { month: 6, dueDate: "2027-02-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-      { month: 7, dueDate: "2027-03-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-      { month: 8, dueDate: "2027-04-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-      { month: 9, dueDate: "2027-05-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-      { month: 10, dueDate: "2027-06-01", amount: 2300, paidDate: null, status: "PENDING", ref: null },
-    ],
-  },
-  {
-    id: "inst-002",
-    contractNo: "INS-202611-002",
-    customerName: "คุณพิมพ์ชนก สิริพร",
-    customerPhone: "089-876-5432",
-    nationalId: "3100500987654",
-    deviceModel: "Samsung Galaxy S23 Ultra 512GB",
-    imei: "359182736451099",
-    totalPrice: 24900,
-    downPayment: 6900,
-    financedAmount: 18000,
-    termMonths: 6,
-    monthlyInterestRate: 0,
-    monthlyPayment: 3000,
-    startDate: "2026-06-15",
-    status: "OVERDUE",
-    paidMonths: 3,
-    nextDueDate: "2026-10-15",
-    isOverdue: true,
-    overdueDays: 35,
-    payments: [
-      { month: 1, dueDate: "2026-07-15", amount: 3000, paidDate: "2026-07-14", status: "PAID", ref: "TXN-8762" },
-      { month: 2, dueDate: "2026-08-15", amount: 3000, paidDate: "2026-08-15", status: "PAID", ref: "TXN-8891" },
-      { month: 3, dueDate: "2026-09-15", amount: 3000, paidDate: "2026-09-18", status: "PAID", ref: "TXN-8945" },
-      { month: 4, dueDate: "2026-10-15", amount: 3000, paidDate: null, status: "OVERDUE", ref: null },
-      { month: 5, dueDate: "2026-11-15", amount: 3000, paidDate: null, status: "OVERDUE", ref: null },
-      { month: 6, dueDate: "2026-12-15", amount: 3000, paidDate: null, status: "PENDING", ref: null },
-    ],
-  },
-  {
-    id: "inst-003",
-    contractNo: "INS-202610-008",
-    customerName: "คุณอนันต์ พัฒนเดช",
-    customerPhone: "095-555-1234",
-    nationalId: "1100600456789",
-    deviceModel: "iPhone 13 128GB Midnight",
-    imei: "354928110293848",
-    totalPrice: 14900,
-    downPayment: 4900,
-    financedAmount: 10000,
-    termMonths: 4,
-    monthlyInterestRate: 1.0,
-    monthlyPayment: 2600,
-    startDate: "2026-07-01",
-    status: "COMPLETED",
-    paidMonths: 4,
-    nextDueDate: null,
-    isOverdue: false,
-    payments: [
-      { month: 1, dueDate: "2026-08-01", amount: 2600, paidDate: "2026-08-01", status: "PAID", ref: "TXN-8011" },
-      { month: 2, dueDate: "2026-09-01", amount: 2600, paidDate: "2026-09-01", status: "PAID", ref: "TXN-8120" },
-      { month: 3, dueDate: "2026-10-01", amount: 2600, paidDate: "2026-10-01", status: "PAID", ref: "TXN-8245" },
-      { month: 4, dueDate: "2026-11-01", amount: 2600, paidDate: "2026-11-01", status: "PAID", ref: "TXN-8390" },
-    ],
-  },
-];
+// Payment statuses that still need to be collected.
+const UNPAID = ["PENDING", "OVERDUE"];
 
-export async function GET(request: NextRequest) {
-  return NextResponse.json({ success: true, data: mockInstallments });
+type ContractWithPayments = {
+  startDate: Date;
+  nextDueDate: Date | null;
+  payments: { monthNumber: number; dueDate: Date; amount: number; paidDate: Date | null; status: string; paymentRef: string | null }[];
+  [key: string]: unknown;
+};
+
+// Shape a contract for the client UI (Bangkok-local date strings, sorted payments).
+function formatContract(c: ContractWithPayments) {
+  return {
+    ...c,
+    startDate: bangkokDateString(c.startDate),
+    nextDueDate: c.nextDueDate ? bangkokDateString(c.nextDueDate) : null,
+    payments: [...c.payments]
+      .sort((a, b) => a.monthNumber - b.monthNumber)
+      .map((p) => ({
+        month: p.monthNumber,
+        dueDate: bangkokDateString(p.dueDate),
+        amount: p.amount,
+        paidDate: p.paidDate ? bangkokDateString(p.paidDate) : null,
+        status: p.status,
+        ref: p.paymentRef,
+      })),
+  };
 }
 
-export async function POST(request: NextRequest) {
+async function handleGET(request: NextRequest) {
+  try {
+    const contracts = await prisma.installmentContract.findMany({
+      include: {
+        payments: {
+          orderBy: { monthNumber: "asc" },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: takeParam(new URL(request.url).searchParams.get("take"), 200, 500),
+    });
+
+    return NextResponse.json({ success: true, data: contracts.map(formatContract) });
+  } catch (err: any) {
+    if (err instanceof AccessError) return safeError(err);
+    console.error("GET /api/installments error:");
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+function reqText(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new AccessError(400, `กรุณากรอก${field}`);
+  return value.trim();
+}
+
+async function handlePOST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      customerName,
-      customerPhone,
-      nationalId,
-      deviceModel,
-      imei,
-      totalPrice,
-      downPayment,
-      termMonths,
-      monthlyInterestRate,
-    } = body;
 
-    const financedAmount = Number(totalPrice) - Number(downPayment);
-    const interestTotal = financedAmount * (Number(monthlyInterestRate) / 100) * Number(termMonths);
-    const monthlyPayment = Math.round((financedAmount + interestTotal) / Number(termMonths));
+    const customerName = reqText(body.customerName, "ชื่อลูกค้า");
+    const customerPhone = reqText(body.customerPhone, "เบอร์โทรศัพท์");
+    const deviceModel = reqText(body.deviceModel, "รุ่นอุปกรณ์");
+    const nationalId = typeof body.nationalId === "string" && body.nationalId.trim() ? body.nationalId.trim() : "-";
+    const imei = typeof body.imei === "string" && body.imei.trim() ? body.imei.trim() : "-";
 
-    const contractNo = `INS-202611-${String(mockInstallments.length + 1).padStart(3, "0")}`;
+    const termMonths = reqInt(body.termMonths, "จำนวนงวด", 1, 36);
+    const totalPrice = reqMoney(body.totalPrice, "ราคาสินค้า", 0.01);
+    const downPayment = reqMoney(body.downPayment ?? 0, "เงินดาวน์", 0, totalPrice);
+    if (downPayment >= totalPrice) throw new AccessError(400, "เงินดาวน์ต้องน้อยกว่าราคาสินค้า");
+    // Only fall back to the schema default when the field is omitted; NaN/invalid is rejected.
+    const monthlyInterestRate =
+      body.monthlyInterestRate === undefined ? 1.5 : reqMoney(body.monthlyInterestRate, "อัตราดอกเบี้ย", 0, 5);
 
-    const payments = [];
+    // All schedule math in integer satang so the periods sum exactly to the total payable.
+    const financedSatang = Math.round(totalPrice * 100) - Math.round(downPayment * 100);
+    const interestSatang = Math.round((financedSatang * monthlyInterestRate * termMonths) / 100);
+    const totalPayableSatang = financedSatang + interestSatang;
+    const perPeriodSatang = Math.floor(totalPayableSatang / termMonths);
+    const lastPeriodSatang = totalPayableSatang - perPeriodSatang * (termMonths - 1);
+
+    const financedAmount = financedSatang / 100;
+    const monthlyPayment = perPeriodSatang / 100;
+
     const now = new Date();
-    for (let m = 1; m <= Number(termMonths); m++) {
-      const dueDate = new Date(now);
-      dueDate.setMonth(dueDate.getMonth() + m);
-      payments.push({
-        month: m,
-        dueDate: dueDate.toISOString().split("T")[0],
-        amount: monthlyPayment,
-        paidDate: null,
-        status: "PENDING",
-        ref: null,
+    const yyyymm = bangkokYYYYMM(now);
+    const actor = staffContext();
+
+    // Transactional creation with atomic counter
+    const contract = await prisma.$transaction(async (tx) => {
+      const counter = await tx.sequenceCounter.upsert({
+        where: { id: `INS-${yyyymm}` },
+        update: { current: { increment: 1 } },
+        create: { id: `INS-${yyyymm}`, current: 1 },
       });
-    }
+      const contractNo = `INS-${yyyymm}-${String(counter.current).padStart(3, "0")}`;
 
-    const newContract = {
-      id: `inst-${Date.now()}`,
-      contractNo,
-      customerName,
-      customerPhone,
-      nationalId,
-      deviceModel,
-      imei,
-      totalPrice: Number(totalPrice),
-      downPayment: Number(downPayment),
-      financedAmount,
-      termMonths: Number(termMonths),
-      monthlyInterestRate: Number(monthlyInterestRate),
-      monthlyPayment,
-      startDate: now.toISOString().split("T")[0],
-      status: "ACTIVE",
-      paidMonths: 0,
-      nextDueDate: payments[0]?.dueDate,
-      isOverdue: false,
-      payments,
-    };
+      const paymentsData = [];
+      for (let m = 1; m <= termMonths; m++) {
+        paymentsData.push({
+          monthNumber: m,
+          dueDate: addMonthsClamped(now, m),
+          amount: (m === termMonths ? lastPeriodSatang : perPeriodSatang) / 100,
+          status: "PENDING",
+        });
+      }
 
-    mockInstallments.unshift(newContract);
+      const created = await tx.installmentContract.create({
+        data: {
+          contractNo,
+          customerName,
+          customerPhone,
+          nationalId,
+          deviceModel,
+          imei,
+          totalPrice,
+          downPayment,
+          financedAmount,
+          termMonths,
+          monthlyInterestRate,
+          monthlyPayment,
+          startDate: now,
+          status: "ACTIVE",
+          paidMonths: 0,
+          nextDueDate: paymentsData[0].dueDate,
+          isOverdue: false,
+          overdueDays: 0,
+          payments: {
+            create: paymentsData,
+          },
+        },
+        include: {
+          payments: true,
+        },
+      });
 
-    return NextResponse.json({ success: true, data: newContract }, { status: 201 });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      await tx.auditLog.create({
+        data: {
+          tenantId: actor.tenantId,
+          userId: actor.id,
+          module: "INSTALLMENTS",
+          action: "CREATE",
+          targetId: created.id,
+          details: JSON.stringify({ contractNo, totalPrice, downPayment, termMonths, monthlyInterestRate, totalPayable: totalPayableSatang / 100 }),
+        },
+      });
+
+      return created;
+    });
+
+    return NextResponse.json({ success: true, data: formatContract(contract) });
+  } catch (err: any) {
+    if (err instanceof AccessError) return safeError(err);
+    console.error("POST /api/installments error:");
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contractId, monthIndex, paymentRef } = body;
+    const contractId = reqId(body.contractId, "contractId");
+    // `monthIndex` accepted for backward compatibility: the old UI sent the 0-based row index.
+    const rawMonth =
+      body.month !== undefined ? body.month : typeof body.monthIndex === "number" ? body.monthIndex + 1 : body.monthIndex;
+    const paymentRef = typeof body.paymentRef === "string" && body.paymentRef.trim() ? body.paymentRef.trim().slice(0, 100) : null;
+    const actor = staffContext();
 
-    const contract = mockInstallments.find((c) => c.id === contractId);
-    if (!contract) {
-      return NextResponse.json({ success: false, error: "Contract not found" }, { status: 404 });
-    }
-
-    const payment = contract.payments[monthIndex];
-    if (payment) {
-      payment.status = "PAID";
-      payment.paidDate = new Date().toISOString().split("T")[0];
-      payment.ref = paymentRef || `TXN-${Math.floor(1000 + Math.random() * 9000)}`;
-      contract.paidMonths += 1;
-
-      if (contract.paidMonths >= contract.termMonths) {
-        contract.status = "COMPLETED";
-        contract.nextDueDate = null;
-        contract.isOverdue = false;
-      } else {
-        const nextPending = contract.payments.find((p: any) => p.status === "PENDING" || p.status === "OVERDUE");
-        contract.nextDueDate = nextPending ? nextPending.dueDate : null;
-        contract.isOverdue = contract.payments.some((p: any) => p.status === "OVERDUE");
+    const updated = await prisma.$transaction(async (tx) => {
+      const contract = await tx.installmentContract.findFirst({
+        where: { id: contractId },
+        include: { payments: { orderBy: { monthNumber: "asc" } } },
+      });
+      if (!contract) throw new AccessError(404, "ไม่พบสัญญาผ่อนชำระ");
+      if (!["ACTIVE", "OVERDUE"].includes(contract.status)) {
+        throw new AccessError(409, "สัญญานี้ปิดแล้วหรือถูกยกเลิก ไม่สามารถรับชำระได้");
       }
-    }
 
-    return NextResponse.json({ success: true, data: contract });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+      const month = reqInt(rawMonth, "งวดที่", 1, contract.termMonths);
+      const period = contract.payments.find((p) => p.monthNumber === month);
+      if (!period) throw new AccessError(409, "งวดนี้ชำระแล้วหรือไม่พบ");
+      const amount = reqMoney(body.amount, "จำนวนเงิน", 0.01);
+      if (Math.round(amount * 100) < Math.round(period.amount * 100)) {
+        throw new AccessError(400, `จำนวนเงินต้องไม่น้อยกว่ายอดงวด (${period.amount.toFixed(2)} บาท)`);
+      }
+
+      const now = new Date();
+      // Conditional update: only an unpaid period can be marked paid (prevents double collection).
+      const marked = await tx.installmentPayment.updateMany({
+        where: { contractId, monthNumber: month, status: { in: UNPAID } },
+        data: { status: "PAID", paidDate: now, paymentRef },
+      });
+      if (marked.count !== 1) throw new AccessError(409, "งวดนี้ชำระแล้วหรือไม่พบ");
+
+      const paidCount = await tx.installmentPayment.count({ where: { contractId, status: "PAID" } });
+      // Earliest unpaid period of the contract (any month), not just after the one paid now.
+      const nextPending = await tx.installmentPayment.findFirst({
+        where: { contractId, status: { in: UNPAID } },
+        orderBy: { monthNumber: "asc" },
+      });
+      const stillOverdue = nextPending ? nextPending.dueDate.getTime() < now.getTime() : false;
+
+      const result = await tx.installmentContract.update({
+        where: { id: contractId },
+        data: {
+          paidMonths: paidCount,
+          status: nextPending ? (stillOverdue ? "OVERDUE" : "ACTIVE") : "COMPLETED",
+          isOverdue: stillOverdue,
+          overdueDays: stillOverdue ? contract.overdueDays : 0,
+          nextDueDate: nextPending ? nextPending.dueDate : null,
+        },
+        include: { payments: { orderBy: { monthNumber: "asc" } } },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: actor.tenantId,
+          userId: actor.id,
+          module: "INSTALLMENTS",
+          action: "PAYMENT",
+          targetId: contractId,
+          details: JSON.stringify({
+            contractNo: contract.contractNo,
+            month,
+            periodAmount: period.amount,
+            amountReceived: amount,
+            overpaid: Math.round(amount * 100 - period.amount * 100) / 100,
+            paymentRef,
+            completed: !nextPending,
+          }),
+        },
+      });
+
+      return result;
+    });
+
+    return NextResponse.json({ success: true, data: formatContract(updated) });
+  } catch (err: any) {
+    if (err instanceof AccessError) return safeError(err);
+    console.error("PATCH /api/installments error:");
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
+
+export const GET = withStaff(handleGET, ["ADMIN","MANAGER","CASHIER"]);
+
+export const POST = withStaff(handlePOST, ["ADMIN","MANAGER","CASHIER"]);
+
+export const PATCH = withStaff(handlePATCH, ["ADMIN","MANAGER","CASHIER"]);

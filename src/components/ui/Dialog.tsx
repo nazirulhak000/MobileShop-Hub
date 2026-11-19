@@ -8,12 +8,17 @@ interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  /** When true, Escape and backdrop clicks do not close the dialog (e.g. while saving). */
+  preventClose?: boolean;
+  /** Custom max width, e.g. "max-w-4xl", "max-w-5xl". Defaults to "max-w-lg". */
+  maxWidth?: string;
+  className?: string;
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, preventClose = false, maxWidth, className }: DialogProps) {
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange(false);
+      if (e.key === "Escape" && !preventClose) onOpenChange(false);
     };
     if (open) {
       document.body.style.overflow = "hidden";
@@ -25,19 +30,29 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       document.body.style.overflow = "";
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, preventClose]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 print:p-0">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in"
-        onClick={() => onOpenChange(false)}
+        className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in print:hidden"
+        onClick={() => {
+          if (!preventClose) onOpenChange(false);
+        }}
       />
       {/* Dialog container */}
-      <div className="relative z-50 w-full max-w-lg transform overflow-hidden rounded-2xl bg-white p-6 text-left shadow-2xl transition-all">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "relative z-50 w-full max-h-[92dvh] transform overflow-y-auto rounded-2xl bg-white p-6 text-left shadow-2xl transition-all print:p-0 print:shadow-none print:max-w-none print:max-h-none print:overflow-visible print:rounded-none",
+          maxWidth || "max-w-lg",
+          className
+        )}
+      >
         {children}
       </div>
     </div>
@@ -80,6 +95,13 @@ export function DialogTitle({
       )}
     </div>
   );
+}
+
+export function DialogDescription({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLParagraphElement>) {
+  return <p className={cn("text-xs text-slate-500", className)} {...props} />;
 }
 
 export function DialogContent({

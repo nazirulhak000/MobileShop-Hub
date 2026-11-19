@@ -1,111 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { getRepairJobByTrackingCode } from "@/lib/repairs";
-
+import { db } from "@/lib/db";
+import { hashToken, throttle } from "@/lib/staff-auth";
+import { safeError } from "@/lib/staff-http";
+import { clientIp, isKnownIp } from "@/lib/client-ip";
 export const dynamic = "force-dynamic";
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { code: string } }
-) {
+const TOKEN_FORMAT = /^[a-f0-9]{64}$/;
+export async function GET(request: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   try {
-    const job = await getRepairJobByTrackingCode(params.code);
-    if (!job) {
-      return NextResponse.json(
-        { success: false, error: "ไม่พบข้อมูลหมายเลขติดตามงานซ่อมนี้" },
-        { status: 404 }
-      );
-    }
-
-    // Sanitize for customer: exclude internal password / pattern lock
-    const sanitized = {
-      id: job.id,
-      trackingCode: job.trackingCode,
-      deviceBrand: job.deviceBrand,
-      deviceModel: job.deviceModel,
-      deviceColor: job.deviceColor,
-      serialIMEI: job.serialIMEI ? `••••••••${job.serialIMEI.slice(-4)}` : null,
-      issueDescription: job.issueDescription,
-      status: job.status,
-      estimatedFinish: job.estimatedFinish,
-      completedAt: job.completedAt,
-      laborFee: job.laborFee,
-      estimatedCost: job.estimatedCost,
-      totalCost: job.totalCost,
-      customerApproved: job.customerApproved,
-      notes: job.notes,
-      photos: job.photos ? JSON.parse(job.photos) : [],
-      warrantyDays: job.warrantyDays,
-      createdAt: job.createdAt,
-      updatedAt: job.updatedAt,
-      customerName: job.customer.name,
-      customerPhone: job.customer.phone.replace(/(\d{3})\d{4}(\d{3})/, "$1-XXXX-$2"),
-      branch: {
-        name: job.branch.name,
-        phone: job.branch.phone,
-        address: job.branch.address,
-      },
-      technician: job.technician
-        ? {
-            name: job.technician.name,
-          }
-        : null,
-      partUsages: job.partUsages.map((pu) => ({
-        id: pu.id,
-        name: pu.product.name,
-        quantity: pu.quantity,
-        sellPrice: pu.sellPrice,
-      })),
-    };
-
-    return NextResponse.json({ success: true, data: sanitized });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch tracking data" },
-      { status: 500 }
-    );
-  }
+    const code = (await params).code.toLowerCase();
+    // Format check happens before any DB access (no throttle rows, no lookups for junk input).
+    if (!TOKEN_FORMAT.test(code)) return NextResponse.json({ error: "กรุณาสแกน QR จากใบรับซ่อมฉบับใหม่ หรือติดต่อร้านเพื่อรับลิงก์ติดตาม" }, { status: 404 });
+    // Throttle per client IP (one row per source) rather than per token hash, so random guesses cannot
+    // create unbounded AuthThrottle rows. Without a trustworthy IP, fall back to one shared, generous bucket.
+    const ip = clientIp(request);
+    if (isKnownIp(ip)) await throttle(`tracking-ip:${ip}`, 60, 60_000);
+    else await throttle("tracking-ip:unknown", 1000, 60_000);
+    const token = await db.publicTrackingToken.findUnique({ where: { tokenHash: hashToken(code) } });
+    if (!token || token.revokedAt || token.expiresAt <= new Date()) return NextResponse.json({ error: "ลิงก์ไม่พร้อมใช้งาน กรุณาติดต่อร้าน" }, { status: 404 });
+    const job = await db.repairJob.findFirst({ where: { id: token.repairJobId, tenantId: token.tenantId, branch: { tenantId: token.tenantId, tenant: { status: { in: ["ACTIVE", "TRIAL"] } } } }, select: { trackingCode: true, deviceBrand: true, deviceModel: true, status: true, estimatedFinish: true, updatedAt: true, branch: { select: { name: true, phone: true } } } });
+    if (!job) return NextResponse.json({ error: "ไม่พบงานซ่อม" }, { status: 404 });
+    return NextResponse.json({ data: job }, { headers: { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
+  } catch (error) { return safeError(error); }
 }
-
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { code: string } }
-) {
-  try {
-    const body = await request.json();
-    const { action } = body; // "approve" or "reject"
-
-    const job = await prisma.repairJob.findUnique({
-      where: { trackingCode: params.code },
-    });
-
-    if (!job) {
-      return NextResponse.json(
-        { success: false, error: "ไม่พบข้อมูลหมายเลขติดตามงานซ่อมนี้" },
-        { status: 404 }
-      );
-    }
-
-    const updated = await prisma.repairJob.update({
-      where: { id: job.id },
-      data: {
-        customerApproved: action === "approve",
-        status: action === "approve" && job.status === "PENDING" ? "DIAGNOSING" : job.status,
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message:
-        action === "approve"
-          ? "ท่านได้ยืนยันอนุมัติการซ่อมเรียบร้อยแล้ว ทางช่างจะเร่งดำเนินการให้ทันที"
-          : "ท่านได้ปฏิเสธการซ่อม เจ้าหน้าที่จะติดต่อกลับ",
-      data: updated,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to approve quote" },
-      { status: 500 }
-    );
-  }
+// Tracking links grant limited read access only. Decisions require authenticated ownership.
+export async function POST() {
+  return NextResponse.json({ error: "กรุณาเข้าบัญชีลูกค้าเพื่อตัดสินใจใบเสนอราคา" }, { status: 403 });
 }

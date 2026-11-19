@@ -1,9 +1,51 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+
+// ---------------------------------------------------------------------------
+// Safety guards (demo data only — never point this at a real database).
+//  - Refuses NODE_ENV=production, or a DATABASE_URL that is not a local SQLite file,
+//    unless ALLOW_SEED=true.
+//  - Wiping existing rows requires SEED_RESET=true; otherwise a non-empty DB aborts.
+//  - Passwords: SEED_PASSWORD (>= 12 chars) or a random one printed once. Stored as bcrypt (cost 12).
+// ---------------------------------------------------------------------------
+// tsx does not load .env; Prisma would, so mirror that for the guard.
+if (!process.env.DATABASE_URL) { try { (process as unknown as { loadEnvFile?: (p: string) => void }).loadEnvFile?.(".env"); } catch { /* no .env */ } }
+const databaseUrl = process.env.DATABASE_URL ?? "";
+const looksLocalSqlite = /^file:(?!\/\/)[^?]*\.(db|sqlite|sqlite3)(\?.*)?$/i.test(databaseUrl);
+if ((process.env.NODE_ENV === "production" || !looksLocalSqlite) && process.env.ALLOW_SEED !== "true") {
+  console.error(
+    `Refusing to seed: ${process.env.NODE_ENV === "production" ? "NODE_ENV=production" : "DATABASE_URL is not a local SQLite file (file:./something.db)"}.\n` +
+    "Seed data is demo-only. Set ALLOW_SEED=true only if you are certain this database may receive demo data.",
+  );
+  process.exit(1);
+}
+const seedPasswordFromEnv = process.env.SEED_PASSWORD;
+if (seedPasswordFromEnv !== undefined && seedPasswordFromEnv.length < 12) {
+  console.error("SEED_PASSWORD must be at least 12 characters.");
+  process.exit(1);
+}
+const seedPassword = seedPasswordFromEnv ?? randomBytes(12).toString("base64url");
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("Cleaning old database records...");
+  const existing = (await prisma.user.count()) + (await prisma.branch.count()) + (await prisma.product.count());
+  if (existing > 0 && process.env.SEED_RESET !== "true") {
+    console.error(`Database already contains data (${existing} users/branches/products). Seeding would DELETE it.\nRe-run with SEED_RESET=true to wipe and reseed (destructive).`);
+    process.exitCode = 1;
+    return;
+  }
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
+  if (process.env.SEED_RESET === "true") {
+  console.warn("WARNING: SEED_RESET=true — deleting ALL existing rows in the seeded tables...");
+  // Children that reference User/Branch/Customer with onDelete: Restrict must go first
+  await prisma.installmentPayment.deleteMany();
+  await prisma.installmentContract.deleteMany();
+  await prisma.attendanceRecord.deleteMany();
+  await prisma.payrollSlip.deleteMany();
+  await prisma.shopExpense.deleteMany();
+  await prisma.auditLog.deleteMany();
   await prisma.repairPartUsage.deleteMany();
   await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();
@@ -15,6 +57,7 @@ async function main() {
   await prisma.user.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.branch.deleteMany();
+  }
 
   console.log("Seeding Branches...");
   const hq = await prisma.branch.create({
@@ -42,7 +85,7 @@ async function main() {
     data: {
       name: "สมชาย ผู้จัดการใหญ่",
       username: "admin",
-      password: "password123",
+      password: passwordHash,
       email: "admin@mobileshop.co.th",
       role: "ADMIN",
       branchId: hq.id,
@@ -53,7 +96,7 @@ async function main() {
     data: {
       name: "วิภาดา สาขาเก้า",
       username: "manager2",
-      password: "password123",
+      password: passwordHash,
       email: "vipada@mobileshop.co.th",
       role: "MANAGER",
       branchId: branch2.id,
@@ -64,7 +107,7 @@ async function main() {
     data: {
       name: "ช่างเอก มือทอง",
       username: "tech_ek",
-      password: "password123",
+      password: passwordHash,
       email: "ek@mobileshop.co.th",
       role: "TECHNICIAN",
       branchId: hq.id,
@@ -75,7 +118,7 @@ async function main() {
     data: {
       name: "ช่างนนท์ สายไว",
       username: "tech_non",
-      password: "password123",
+      password: passwordHash,
       email: "non@mobileshop.co.th",
       role: "TECHNICIAN",
       branchId: branch2.id,
@@ -86,7 +129,7 @@ async function main() {
     data: {
       name: "น้องแพรว แคชเชียร์",
       username: "cashier1",
-      password: "password123",
+      password: passwordHash,
       email: "praew@mobileshop.co.th",
       role: "CASHIER",
       branchId: hq.id,
@@ -97,7 +140,7 @@ async function main() {
     data: {
       name: "น้องก้อย แคชเชียร์",
       username: "cashier2",
-      password: "password123",
+      password: passwordHash,
       email: "koi@mobileshop.co.th",
       role: "CASHIER",
       branchId: branch2.id,
@@ -756,6 +799,8 @@ async function main() {
   });
 
   console.log("Database seeded successfully!");
+  if (seedPasswordFromEnv === undefined) console.log(`Generated password for ALL seeded staff users (shown once, not stored in plaintext): ${seedPassword}`);
+  else console.log("Seeded staff users use the password from SEED_PASSWORD.");
 }
 
 main()

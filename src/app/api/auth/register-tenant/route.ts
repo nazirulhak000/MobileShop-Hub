@@ -1,0 +1,131 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db as prisma } from "@/lib/db";
+import bcrypt from "bcryptjs";
+import { checkOrigin, throttle } from "@/lib/staff-auth";
+import { safeError } from "@/lib/staff-http";
+import { clientIp, isKnownIp } from "@/lib/client-ip";
+
+const HOUR = 3_600_000;
+// Per-IP limits run first so a single source is stopped before it drains the global bucket; the global
+// bucket is a much higher circuit breaker so one attacker cannot block every legitimate signup.
+const LIMITS = { ipHourly: 3, ipDaily: 10, globalPerMinute: 30 };
+
+export async function POST(req: NextRequest) {
+  try {
+    checkOrigin(req);
+    const ip = clientIp(req);
+    if (isKnownIp(ip)) {
+      await throttle(`tenant-registration-ip:${ip}`, LIMITS.ipHourly, HOUR);
+      await throttle(`tenant-registration-ip-day:${ip}`, LIMITS.ipDaily, 24 * HOUR);
+    }
+    await throttle("tenant-registration", LIMITS.globalPerMinute, 60_000);
+    const body = await req.json();
+    const { shopName, shopSlug, ownerName, username, password, phone } = body;
+
+    if (![shopName, shopSlug, ownerName, username, password].every(value => typeof value === "string" && value.trim().length > 0 && value.length <= 100) || password.length < 12) {
+      return NextResponse.json(
+        { error: "กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน" },
+        { status: 400 }
+      );
+    }
+
+    // Clean and validate slug (alphanumeric and dashes only)
+    const cleanedSlug = String(shopSlug)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    if (cleanedSlug.length < 3) {
+      return NextResponse.json(
+        { error: "รหัสร้านค้า (Shop Slug) ต้องมีความยาวอย่างน้อย 3 ตัวอักษร (ภาษาอังกฤษหรือตัวเลข)" },
+        { status: 400 }
+      );
+    }
+
+    // Check if tenant slug already exists
+    const existingTenant = await prisma.tenant.findUnique({
+      where: { slug: cleanedSlug },
+    });
+
+    if (existingTenant) {
+      return NextResponse.json(
+        { error: `รหัสร้านค้า "${cleanedSlug}" มีผู้ใช้งานแล้ว กรุณาเลือกรหัสอื่น` },
+        { status: 409 }
+      );
+    }
+
+    // Usernames are unique inside the newly created tenant, not across all shops.
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Create Tenant, Subscription, Branch, and User in a transaction
+    const trialDays = 14;
+    const trialEndsAt = new Date();
+    trialEndsAt.setDate(trialEndsAt.getDate() + trialDays);
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Create Tenant
+      const tenant = await tx.tenant.create({
+        data: {
+          name: String(shopName).trim(),
+          slug: cleanedSlug,
+          plan: "STARTER",
+          status: "TRIAL",
+          maxBranches: 1,
+          maxUsers: 5,
+        },
+      });
+
+      // 2. Create Subscription
+      await tx.subscription.create({
+        data: {
+          tenantId: tenant.id,
+          plan: "STARTER",
+          status: "TRIAL",
+          billingCycle: "MONTHLY",
+          pricePerMonth: 990,
+          trialEndsAt: trialEndsAt,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: trialEndsAt,
+        },
+      });
+
+      // 3. Create Default Branch (HQ)
+      const branch = await tx.branch.create({
+        data: {
+          tenantId: tenant.id,
+          name: `${String(shopName).trim()} (สาขาหลัก)`,
+          code: "HQ",
+          phone: phone ? String(phone).trim() : null,
+          address: "กรุงเทพมหานคร",
+        },
+      });
+
+      // 4. Create Admin User
+      const user = await tx.user.create({
+        data: {
+          tenantId: tenant.id,
+          branchId: branch.id,
+          name: String(ownerName).trim(),
+          username: String(username).trim(),
+          password: passwordHash,
+          role: "ADMIN",
+        },
+      });
+
+      return { tenant, branch, user };
+    });
+
+    return NextResponse.json({
+      success: true,
+      shopSlug: result.tenant.slug,
+      shopName: result.tenant.name,
+      username: result.user.username,
+      message: "สร้างร้านค้าสำเร็จเรียบร้อย พร้อมเริ่มทดลองใช้งานฟรี 14 วัน",
+    });
+  } catch (error) {
+    console.error("Register tenant error:");
+    return safeError(error);
+  }
+}

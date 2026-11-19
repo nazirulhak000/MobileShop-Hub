@@ -1,11 +1,53 @@
 import prisma from "@/lib/prisma";
+import { staffContext } from "@/lib/staff-context";
 
 export interface RepairFilters {
   status?: string;
   branchId?: string;
   technicianId?: string;
   search?: string;
+  /** Max rows to return (default 200, capped at 500). */
+  take?: number;
 }
+
+/** Public-safe user projection: never expose credentials or contact data of staff. */
+export const staffUserSelect = { id: true, name: true } as const;
+
+/** Customer projection for staff lists: no national ID / address. */
+const customerListSelect = { id: true, name: true, phone: true } as const;
+
+/**
+ * RepairJob scalar fields returned by list endpoints.
+ * Deliberately excludes `passcode` and `patternLock` (device unlock secrets).
+ */
+const repairJobListScalars = {
+  id: true,
+  tenantId: true,
+  trackingCode: true,
+  branchId: true,
+  customerId: true,
+  technicianId: true,
+  deviceBrand: true,
+  deviceModel: true,
+  deviceColor: true,
+  serialIMEI: true,
+  preCheckData: true,
+  postCheckData: true,
+  issueDescription: true,
+  customerSignature: true,
+  status: true,
+  estimatedFinish: true,
+  completedAt: true,
+  laborFee: true,
+  estimatedCost: true,
+  totalCost: true,
+  customerApproved: true,
+  notes: true,
+  photos: true,
+  warrantyDays: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 export async function getRepairJobs(filters: RepairFilters = {}) {
   const where: any = {};
@@ -34,12 +76,15 @@ export async function getRepairJobs(filters: RepairFilters = {}) {
     ];
   }
 
-  return await prisma.repairJob.findMany({
+  const jobs = await prisma.repairJob.findMany({
     where,
-    include: {
-      customer: true,
+    select: {
+      ...repairJobListScalars,
+      passcode: true,
+      patternLock: true,
+      customer: { select: customerListSelect },
       branch: true,
-      technician: true,
+      technician: { select: staffUserSelect },
       partUsages: {
         include: {
           product: true,
@@ -49,16 +94,30 @@ export async function getRepairJobs(filters: RepairFilters = {}) {
     orderBy: {
       createdAt: "desc",
     },
+    take: Math.min(Math.max(1, Math.trunc(filters.take ?? 200) || 200), 500),
   });
+  // Only expose whether a lock exists, never the secret itself.
+  return jobs.map(({ passcode, patternLock, ...job }) => ({
+    ...job,
+    hasPasscode: Boolean(passcode),
+    hasPatternLock: Boolean(patternLock),
+  }));
+}
+
+/** ADMIN/MANAGER or the assigned technician may see device unlock secrets. */
+function canSeeDeviceLock(technicianId: string | null): boolean {
+  const actor = staffContext();
+  if (actor.role === "ADMIN" || actor.role === "MANAGER") return true;
+  return actor.role === "TECHNICIAN" && technicianId === actor.id;
 }
 
 export async function getRepairJobById(id: string) {
-  return await prisma.repairJob.findUnique({
+  const job = await prisma.repairJob.findUnique({
     where: { id },
     include: {
       customer: true,
       branch: true,
-      technician: true,
+      technician: { select: staffUserSelect },
       partUsages: {
         include: {
           product: true,
@@ -66,15 +125,28 @@ export async function getRepairJobById(id: string) {
       },
     },
   });
+  if (!job) return null;
+  return redactDeviceLock(job);
+}
+
+/**
+ * Hide passcode/patternLock unless the current actor may see them.
+ * Always adds `hasPasscode` / `hasPatternLock` flags for UI display.
+ */
+export function redactDeviceLock<T extends { passcode: string | null; patternLock: string | null; technicianId: string | null }>(job: T) {
+  const hasPasscode = Boolean(job.passcode);
+  const hasPatternLock = Boolean(job.patternLock);
+  if (canSeeDeviceLock(job.technicianId)) return { ...job, hasPasscode, hasPatternLock };
+  return { ...job, passcode: null, patternLock: null, hasPasscode, hasPatternLock };
 }
 
 export async function getRepairJobByTrackingCode(trackingCode: string) {
-  return await prisma.repairJob.findUnique({
+  return await prisma.repairJob.findFirst({
     where: { trackingCode },
     include: {
       customer: true,
       branch: true,
-      technician: true,
+      technician: { select: staffUserSelect },
       partUsages: {
         include: {
           product: true,
@@ -84,32 +156,19 @@ export async function getRepairJobByTrackingCode(trackingCode: string) {
   });
 }
 
-export async function generateNextTrackingCode(): Promise<string> {
+export async function generateNextTrackingCode(tx?: any): Promise<string> {
+  const client = tx || prisma;
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, "0");
-  const prefix = `REP-${year}${month}-`;
+  const yyyymm = `${year}${month}`;
+  const prefix = `REP-${yyyymm}-`;
 
-  const latestJob = await prisma.repairJob.findFirst({
-    where: {
-      trackingCode: {
-        startsWith: prefix,
-      },
-    },
-    orderBy: {
-      trackingCode: "desc",
-    },
-    select: {
-      trackingCode: true,
-    },
+  const counter = await client.sequenceCounter.upsert({
+    where: { id: `REP-${yyyymm}` },
+    update: { current: { increment: 1 } },
+    create: { id: `REP-${yyyymm}`, current: 1 },
   });
 
-  if (!latestJob) {
-    return `${prefix}0001`;
-  }
-
-  const parts = latestJob.trackingCode.split("-");
-  const lastSeq = parseInt(parts[2] || "0", 10);
-  const nextSeq = String(lastSeq + 1).padStart(4, "0");
-  return `${prefix}${nextSeq}`;
+  return `${prefix}${String(counter.current).padStart(4, "0")}`;
 }

@@ -1,8 +1,10 @@
+import { AccessError, staffContext, staffTenantId } from "@/lib/staff-context";
+import { safeError, withStaff, reqEnum, reqInt, reqMoney, bangkokYYYYMM, addMonthsClamped, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 // GET /api/trade-in - List contracts
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const branchCode = searchParams.get("branch");
@@ -41,6 +43,7 @@ export async function GET(request: NextRequest) {
         deviceImeis: true,
       },
       orderBy: { createdAt: "desc" },
+      take: takeParam(searchParams.get("take"), 200, 500),
     });
 
     const now = new Date();
@@ -73,182 +76,216 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, contracts: formatted });
   } catch (error: any) {
-    console.error("GET /api/trade-in error:", error);
+    if (error instanceof AccessError) return safeError(error);
+    console.error("GET /api/trade-in error:");
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
+const CONTRACT_TYPES = ["BUYBACK", "PAWN"] as const;
+const GRADES = ["A", "B", "C"] as const;
+
+function reqText(value: unknown, label: string, max = 200): string {
+  if (typeof value !== "string" || !value.trim()) throw new AccessError(400, `กรุณากรอก${label}`);
+  return value.trim().slice(0, max);
+}
+
+// Collapse whitespace so "iPhone 14  Pro" and "iPhone 14 Pro" map to the same product.
+function normaliseModel(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 // POST /api/trade-in - Create new Buyback or Pawn contract
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      type, // "BUYBACK" | "PAWN"
-      branchCode,
-      customerName,
-      customerPhone,
-      nationalId,
-      customerAddress,
-      deviceBrand,
-      deviceModel,
-      imei,
-      conditionGrade = "A",
-      inspectionData,
-      declarationAgreed = true,
-      customerPhoto,
-      agreedPrice,
-      interestRateMonthly = 2.5,
-      durationMonths = 1,
-    } = body;
+    const actor = staffContext();
 
-    if (!type || !deviceBrand || !deviceModel || !imei || !agreedPrice) {
-      return NextResponse.json(
-        { success: false, error: "กรุณากรอกข้อมูลสำคัญให้ครบถ้วน" },
-        { status: 400 }
-      );
-    }
+    const type = reqEnum(body.type, "type", CONTRACT_TYPES);
+    const customerName = reqText(body.customerName, "ชื่อลูกค้า");
+    const customerPhone = reqText(body.customerPhone, "เบอร์โทรศัพท์ลูกค้า", 30);
+    const deviceBrand = reqText(body.deviceBrand, "ยี่ห้อเครื่อง", 100);
+    const deviceModel = normaliseModel(reqText(body.deviceModel, "รุ่นเครื่อง"));
+    const imei = reqText(body.imei, "หมายเลข IMEI", 30).replace(/\s+/g, "");
+    const conditionGrade = body.conditionGrade === undefined ? "A" : reqEnum(body.conditionGrade, "conditionGrade", GRADES);
+    const customerAddress = typeof body.customerAddress === "string" && body.customerAddress.trim() ? body.customerAddress.trim() : null;
+    const customerPhoto = typeof body.customerPhoto === "string" && body.customerPhoto.trim() ? body.customerPhoto.trim() : null;
+    const declarationAgreed = body.declarationAgreed === undefined ? true : body.declarationAgreed === true;
+    if (!declarationAgreed) throw new AccessError(400, "ลูกค้าต้องยอมรับหนังสือยืนยันกรรมสิทธิ์");
 
-    if (!nationalId || nationalId.length < 13) {
+    const nationalId = typeof body.nationalId === "string" ? body.nationalId.replace(/[\s-]/g, "") : "";
+    if (!/^\d{13}$/.test(nationalId)) {
       return NextResponse.json(
         { success: false, error: "กรุณากรอกเลขบัตรประจำตัวประชาชน 13 หลักให้ถูกต้อง" },
         { status: 400 }
       );
     }
 
-    // Resolve branch
+    const priceNum = reqMoney(body.agreedPrice, "ราคาที่ตกลง", 0.01);
+    // Interest/duration only apply to pawns; a buyback is a one-off purchase.
+    const interestRateMonthly =
+      type === "PAWN"
+        ? body.interestRateMonthly === undefined
+          ? 2.5
+          : reqMoney(body.interestRateMonthly, "อัตราดอกเบี้ย", 0, 5)
+        : 0;
+    const durationMonths = type === "PAWN" ? reqInt(body.durationMonths ?? 1, "ระยะเวลาสัญญา", 1, 12) : 1;
+    const inspectionData =
+      body.inspectionData && typeof body.inspectionData === "object" ? JSON.stringify(body.inspectionData) : null;
+
+    // Resolve branch (scoped to branches this staff member can access)
+    const branchCode = typeof body.branchCode === "string" ? body.branchCode.trim() : "";
+    if (!branchCode) throw new AccessError(400, "กรุณาระบุสาขา");
     const branch = await prisma.branch.findFirst({
-      where: { OR: [{ code: branchCode || "HQ" }, { id: branchCode || "HQ" }] },
+      where: { OR: [{ code: branchCode }, { id: branchCode }] },
     });
     if (!branch) {
       return NextResponse.json({ success: false, error: "ไม่พบสาขา" }, { status: 404 });
     }
 
-    // Find or create customer
-    const customer = await prisma.customer.upsert({
-      where: { phone: customerPhone || "0000000000" },
-      update: {
-        name: customerName,
-        nationalId,
-        address: customerAddress || undefined,
-      },
-      create: {
-        name: customerName,
-        phone: customerPhone || "0000000000",
-        nationalId,
-        address: customerAddress || null,
-      },
-    });
-
-    // Generate contract number: TC-YYYYMM-XXXX
     const now = new Date();
-    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const contractCount = await prisma.tradeInContract.count({
-      where: { contractNo: { startsWith: `TC-${yyyymm}` } },
-    });
-    const contractNo = `TC-${yyyymm}-${String(contractCount + 1).padStart(4, "0")}`;
+    const yyyymm = bangkokYYYYMM(now);
+    const dueDate = type === "PAWN" ? addMonthsClamped(now, durationMonths) : null;
+    const sellPrice = Math.round(priceNum * 1.3); // Recommended markup
+    const imeiStatus = type === "PAWN" ? "PAWNED" : "IN_STOCK";
 
-    // Calculate due date for Pawn
-    let dueDate: Date | null = null;
-    if (type === "PAWN") {
-      dueDate = new Date();
-      dueDate.setMonth(dueDate.getMonth() + Number(durationMonths || 1));
-    }
-
-    const priceNum = Number(agreedPrice);
-
-    // Create contract
-    const contract = await prisma.tradeInContract.create({
-      data: {
-        contractNo,
-        type,
-        branchId: branch.id,
-        customerId: customer.id,
-        nationalId,
-        deviceBrand,
-        deviceModel,
-        imei,
-        conditionGrade,
-        inspectionData: inspectionData ? JSON.stringify(inspectionData) : null,
-        declarationAgreed: Boolean(declarationAgreed),
-        customerPhoto: customerPhoto || null,
-        agreedPrice: priceNum,
-        interestRateMonthly: Number(interestRateMonthly) || 2.5,
-        durationMonths: Number(durationMonths) || 1,
-        dueDate,
-        status: type === "PAWN" ? "ACTIVE" : "COMPLETED",
-      },
-      include: {
-        customer: true,
-        branch: true,
-      },
-    });
-
-    // Auto-create or link Product in inventory
-    let product = await prisma.product.findFirst({
-      where: {
-        category: "DEVICE",
-        model: { contains: deviceModel },
-      },
-    });
-
-    if (!product) {
-      const codeSuffix = Math.floor(1000 + Math.random() * 9000);
-      product = await prisma.product.create({
-        data: {
-          code: `DEV-USED-${codeSuffix}`,
-          name: `${deviceBrand} ${deviceModel} (มือสอง เกรด ${conditionGrade})`,
-          category: "DEVICE",
-          brand: deviceBrand,
-          model: deviceModel,
-          costPrice: priceNum,
-          sellPrice: Math.round(priceNum * 1.3), // Recommended markup
-          minStock: 1,
+    // Contract, customer, product, IMEI and stock are created atomically.
+    const contract = await prisma.$transaction(async (tx) => {
+      // Find or create customer; never overwrite an existing customer's identity data.
+      const customer = await tx.customer.upsert({
+        where: { tenantId_phone: { tenantId: staffTenantId(), phone: customerPhone } },
+        update: {},
+        create: {
+          name: customerName,
+          phone: customerPhone,
+          nationalId,
+          address: customerAddress,
         },
       });
-    }
 
-    // Register IMEI
-    const imeiStatus = type === "PAWN" ? "PAWNED" : "IN_STOCK";
-    await prisma.deviceIMEI.create({
-      data: {
+      // IMEI pre-check: a device already in stock, in repair or pawned cannot be taken in again.
+      const existingImei = await tx.deviceIMEI.findFirst({ where: { imei } });
+      if (existingImei && !["SOLD", "RETURNED"].includes(existingImei.status)) {
+        throw new AccessError(409, `IMEI ${imei} อยู่ในระบบแล้ว (สถานะ ${existingImei.status})`);
+      }
+
+      const counter = await tx.sequenceCounter.upsert({
+        where: { id: `TC-${yyyymm}` },
+        update: { current: { increment: 1 } },
+        create: { id: `TC-${yyyymm}`, current: 1 },
+      });
+      const contractNo = `TC-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
+
+      const created = await tx.tradeInContract.create({
+        data: {
+          contractNo,
+          type,
+          branchId: branch.id,
+          customerId: customer.id,
+          nationalId,
+          deviceBrand,
+          deviceModel,
+          imei,
+          conditionGrade,
+          inspectionData,
+          declarationAgreed,
+          customerPhoto,
+          agreedPrice: priceNum,
+          interestRateMonthly,
+          durationMonths,
+          dueDate,
+          status: type === "PAWN" ? "ACTIVE" : "COMPLETED",
+        },
+        include: {
+          customer: true,
+          branch: true,
+        },
+      });
+
+      // Link to an existing device product by exact (normalised) model, else create one.
+      let product = await tx.product.findFirst({
+        where: { category: "DEVICE", model: deviceModel },
+      });
+      if (!product) {
+        // Sequence-based code: collision-safe, unlike a random 4-digit suffix.
+        const productCounter = await tx.sequenceCounter.upsert({
+          where: { id: "DEV-USED" },
+          update: { current: { increment: 1 } },
+          create: { id: "DEV-USED", current: 1 },
+        });
+        product = await tx.product.create({
+          data: {
+            code: `DEV-USED-${String(productCounter.current).padStart(5, "0")}`,
+            name: `${deviceBrand} ${deviceModel} (มือสอง เกรด ${conditionGrade})`,
+            category: "DEVICE",
+            brand: deviceBrand,
+            model: deviceModel,
+            costPrice: priceNum,
+            sellPrice,
+            minStock: 1,
+          },
+        });
+      }
+
+      const imeiData = {
         productId: product.id,
         branchId: branch.id,
-        imei,
         conditionGrade,
         status: imeiStatus,
         costPrice: priceNum,
-        sellPrice: Math.round(priceNum * 1.3),
-        tradeInContractId: contract.id,
-      },
-    });
+        sellPrice,
+        tradeInContractId: created.id,
+      };
+      if (existingImei) {
+        // Device came back (sold or redeemed earlier): reuse the IMEI record instead of failing on unique.
+        const reused = await tx.deviceIMEI.updateMany({
+          where: { id: existingImei.id, status: { in: ["SOLD", "RETURNED"] } },
+          data: imeiData,
+        });
+        if (reused.count !== 1) throw new AccessError(409, `IMEI ${imei} ถูกใช้งานโดยรายการอื่นแล้ว`);
+      } else {
+        await tx.deviceIMEI.create({ data: { ...imeiData, imei } });
+      }
 
-    // If BUYBACK, increment inventory stock count
-    if (type === "BUYBACK") {
-      await prisma.stockItem.upsert({
-        where: {
-          productId_branchId: {
-            productId: product.id,
-            branchId: branch.id,
-          },
-        },
-        update: {
-          quantity: { increment: 1 },
-        },
-        create: {
-          productId: product.id,
-          branchId: branch.id,
-          quantity: 1,
+      // BUYBACK goes straight into sellable stock; a pawned device is only collateral.
+      if (type === "BUYBACK") {
+        await tx.stockItem.upsert({
+          where: { productId_branchId: { productId: product.id, branchId: branch.id } },
+          update: { quantity: { increment: 1 } },
+          create: { productId: product.id, branchId: branch.id, quantity: 1 },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: actor.tenantId,
+          userId: actor.id,
+          module: type === "PAWN" ? "PAWN" : "TRADE_IN",
+          action: "CREATE",
+          targetId: created.id,
+          details: JSON.stringify({ contractNo, type, imei, agreedPrice: priceNum, reusedImei: Boolean(existingImei) }),
         },
       });
-    }
+
+      return created;
+    });
 
     return NextResponse.json({
       success: true,
-      message: `สร้างสัญญาเลขที่ ${contractNo} เรียบร้อยแล้ว`,
+      message: `สร้างสัญญาเลขที่ ${contract.contractNo} เรียบร้อยแล้ว`,
       contract,
     });
   } catch (error: any) {
-    console.error("POST /api/trade-in error:", error);
+    if (error instanceof AccessError) return safeError(error);
+    // Unique violation (e.g. IMEI registered in a branch this user cannot see).
+    if (error?.code === "P2002") {
+      return NextResponse.json({ success: false, error: "IMEI หรือข้อมูลนี้มีอยู่ในระบบแล้ว" }, { status: 409 });
+    }
+    console.error("POST /api/trade-in error:");
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export const GET = withStaff(handleGET, ["ADMIN","MANAGER","CASHIER"]);
+
+export const POST = withStaff(handlePOST, ["ADMIN","MANAGER","CASHIER"]);

@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Anuphan:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,8 +8,10 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
-  --font-sans: var(--font-plus-jakarta), var(--font-anuphan), system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-plus-jakarta), var(--font-anuphan), system-ui, -apple-system, sans-serif;
+  --font-plus-jakarta: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-anuphan: "Anuphan", system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", "Anuphan", system-ui, -apple-system, sans-serif;
+  --font-mono: "Plus Jakarta Sans", "Anuphan", monospace;
 
   /* Card resize */
   --resize-dur: 300ms;
@@ -88,6 +92,10 @@
   --shake-ease: cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
 
+body {
+  font-family: "Plus Jakarta Sans", "Anuphan", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
 @layer base {
   body {
     background-color: var(--background);
@@ -157,11 +165,25 @@
               transform var(--dropdown-open-dur) var(--dropdown-ease);
 }
 
-/* Print Styles for 80mm Thermal Slips & A4 Invoices */
+/* Print Styles for 80mm Thermal Slips & Real A4 Invoices */
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
 @media print {
-  body {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html, body {
     background: #ffffff !important;
     color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   /* Hide navigation, sidebar, header, buttons during print */
@@ -191,13 +213,19 @@
     page-break-after: always;
   }
 
-  /* A4 Invoice formatting */
-  .invoice-a4 {
+  /* True A4 Invoice & Receipt formatting */
+  .invoice-a4,
+  .invoice-a4-preview,
+  .a4-sheet {
     width: 100% !important;
     max-width: 210mm !important;
-    padding: 10mm !important;
+    min-height: auto !important;
+    padding: 0 !important;
     margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
     page-break-after: always;
+    border-radius: 0 !important;
   }
 }
 

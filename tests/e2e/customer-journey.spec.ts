@@ -1,0 +1,78 @@
+import { test, expect, APIRequestContext } from "@playwright/test";
+const origin = "http://localhost:3107";
+async function login(api: APIRequestContext, shopSlug = "e2e-a", username = "admin") {
+  const response = await api.post("/api/auth/login", { headers: { Origin: origin }, data: { shopSlug, username, password: "test-password-1234" } });
+  expect(response.status()).toBe(200);
+}
+test("private endpoints reject anonymous requests, wrong origin and simulated roles", async ({ playwright }) => {
+  const api = await playwright.request.newContext({ baseURL: origin });
+  expect((await api.get("/api/customers")).status()).toBe(401);
+  expect((await api.get("/api/users")).status()).toBe(401);
+  expect((await api.post("/api/auth/login", { data: { shopSlug: "e2e-a", username: "admin", password: "test-password-1234" } })).status()).toBe(403);
+  await login(api, "e2e-a", "cashier");
+  expect((await api.get("/api/users")).status()).toBe(403);
+  const response = await api.get("/api/customers");
+  expect((await response.json()).customers.every((row: { tenantId: string }) => row.tenantId === "e2e-a")).toBe(true);
+  await api.dispose();
+});
+test("OTP, historical linking, quotes, tracking and booking/check-in work across isolated accounts", async ({ page, playwright }) => {
+  const staff = await playwright.request.newContext({ baseURL: origin }); await login(staff);
+  const other = await playwright.request.newContext({ baseURL: origin }); await login(other, "e2e-b");
+  expect((await other.get("/api/repairs/e2e-a-repair")).status()).toBe(404);
+  expect((await other.patch("/api/repairs/e2e-a-repair", { headers: { Origin: origin }, data: { status: "COMPLETED" } })).status()).toBe(404);
+  await page.goto("/s/e2e-a");
+  await expect(page.getByRole("heading", { name: "เข้าบัญชีลูกค้า" })).toBeVisible();
+  await page.getByLabel("ชื่อของคุณ").fill("คุณลูกค้าทดสอบ"); await page.getByLabel("เบอร์มือถือ").fill("0811111111");
+  await page.getByRole("button", { name: "รับรหัสทาง SMS" }).click();
+  const development = page.getByText(/โหมดทดสอบในเครื่อง/); await expect(development).toBeVisible();
+  const code = (await development.innerText()).match(/รหัส (\d{6})/)![1];
+  await page.getByLabel("รหัสยืนยัน 6 หลัก").fill(code); await page.getByRole("button", { name: "ยืนยันและเข้าสู่ระบบ" }).click();
+  await expect(page.getByRole("heading", { name: "สวัสดี คุณลูกค้าทดสอบ" })).toBeVisible();
+  await page.screenshot({ path: ".local/qa/customer-home-mobile.png", fullPage: true });
+  let portal = await (await page.request.get("/api/customer/portal?shopSlug=e2e-a")).json();
+  expect(portal.account.linked).toBe(false); expect(portal.repairs).toHaveLength(0);
+  expect((await page.request.get("/api/customer/portal?shopSlug=e2e-b")).status()).toBe(401);
+  const accounts = await (await staff.get("/api/customer-access")).json();
+  const account = accounts.accounts.find((row: { phone: string }) => row.phone === "0811111111");
+  expect((await staff.post("/api/customer-access", { headers: { Origin: origin }, data: { accountId: account.id, customerId: "e2e-a-customer", evidence: "ตรวจใบรับซ่อมต้นฉบับและเครื่องต่อหน้าลูกค้าแล้ว" } })).status()).toBe(200);
+  const first = await (await staff.post("/api/repairs/e2e-a-repair/quotes", { headers: { Origin: origin }, data: { amountSatang: 100000, description: "ตรวจและเปลี่ยนจอ" } })).json();
+  const second = await (await staff.post("/api/repairs/e2e-a-repair/quotes", { headers: { Origin: origin }, data: { amountSatang: 120000, description: "ตรวจและเปลี่ยนจอฉบับปรับปรุง" } })).json();
+  expect((await page.request.post("/api/customer/quotes", { headers: { Origin: origin }, data: { shopSlug: "e2e-a", quoteId: first.id, version: first.version, action: "APPROVED" } })).status()).toBe(409);
+  await page.reload(); await page.getByRole("button", { name: "งานของฉัน", exact: true }).click();
+  await page.locator("summary").filter({ hasText: "iPhone 14" }).click();
+  page.once("dialog", dialog => dialog.accept()); await page.getByRole("button", { name: "อนุมัติราคา", exact: true }).click();
+  await expect(page.getByText("อนุมัติแล้ว", { exact: false })).toBeVisible();
+  expect((await staff.patch("/api/repairs/e2e-a-repair", { headers: { Origin: origin }, data: { status: "REPAIRING" } })).status()).toBe(200);
+  portal = await (await page.request.get("/api/customer/portal?shopSlug=e2e-a")).json();
+  const text = JSON.stringify(portal);
+  for (const forbidden of ["never-public", "private-pattern", "private-signature", "private-national-id", "private-internal-note", '"password"', '"costPrice"']) expect(text).not.toContain(forbidden);
+  expect(portal.repairs[0].status).toBe("REPAIRING"); expect(portal.repairs[0].events).toHaveLength(1);
+  const issued = await staff.post("/api/repairs/e2e-a-repair/tracking-token", { headers: { Origin: origin } }); const token = (await issued.json()).token;
+  const publicResponse = await page.request.get(`/api/track/${token}`); expect(publicResponse.status()).toBe(200);
+  expect(JSON.stringify(await publicResponse.json())).not.toContain('"customerName"');
+  expect((await page.request.post(`/api/track/${token}`, { data: { action: "approve" } })).status()).toBe(403);
+  expect((await page.request.get("/api/track/REP-202611-0001")).status()).toBe(404);
+  await page.getByRole("button", { name: "จองคิว", exact: true }).click();
+  await page.getByRole("combobox", { name: "สาขา", exact: true }).selectOption("e2e-a-hq"); await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  await page.getByLabel("ยี่ห้อ / รุ่นเครื่อง").fill("Samsung S24"); await page.getByLabel("อาการที่ต้องการให้ตรวจ").fill("แบตหมดไว"); await page.getByRole("button", { name: "ถัดไป", exact: true }).click();
+  const date = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10); await page.getByLabel("วันที่", { exact: true }).fill(date);
+  const time = page.getByRole("combobox", { name: "เวลา", exact: true }); await expect(time).toBeVisible(); await expect(time.locator("option")).not.toHaveCount(1); await time.selectOption({ index: 1 });
+  await page.getByRole("button", { name: "ถัดไป", exact: true }).click(); await page.getByRole("button", { name: "ถัดไป", exact: true }).click(); await page.getByRole("button", { name: "ยืนยันการจอง", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "จองคิวเรียบร้อยแล้ว" })).toBeVisible();
+  const list = await (await staff.get("/api/appointments")).json(); const appointment = list.appointments[0];
+  const checkIn = await staff.post("/api/appointments", { headers: { Origin: origin }, data: { id: appointment.id, action: "CHECKED_IN" } }); expect(checkIn.status()).toBe(200); const checked = await checkIn.json();
+  const again = await staff.post("/api/appointments", { headers: { Origin: origin }, data: { id: appointment.id, action: "CHECKED_IN" } }); expect((await again.json()).repairJobId).toBe(checked.repairJobId);
+  await page.screenshot({ path: ".local/qa/customer-mobile.png", fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 900 }); await page.screenshot({ path: ".local/qa/customer-desktop.png", fullPage: true });
+  for (const width of [360, 768]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: `.local/qa/customer-${width}.png`, fullPage: true });
+  }
+  expect((await page.request.post("/api/customer/auth/logout", { headers: { Origin: origin }, data: { shopSlug: "e2e-a", all: true } })).status()).toBe(200);
+  expect((await page.request.get("/api/customer/portal?shopSlug=e2e-a")).status()).toBe(401);
+  expect((await staff.post("/api/auth/logout?all=true", { headers: { Origin: origin } })).status()).toBe(200);
+  expect((await staff.get("/api/customers")).status()).toBe(401);
+  await staff.dispose(); await other.dispose();
+});

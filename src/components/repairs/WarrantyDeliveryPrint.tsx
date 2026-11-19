@@ -22,16 +22,22 @@ export function WarrantyDeliveryPrint({
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
   useEffect(() => {
-    if (job?.trackingCode) {
+    setQrCodeDataUrl("");
+    // The public /track page only accepts an opaque token, never the tracking code.
+    if (isOpen && job?.id) {
+      let cancelled = false;
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      QRCode.toDataURL(`${origin}/track/${job.trackingCode}`, {
-        width: 140,
-        margin: 1,
-      })
-        .then((url) => setQrCodeDataUrl(url))
+      fetch(`/api/repairs/${encodeURIComponent(job.id)}/tracking-token`, { method: "POST" })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("ไม่สามารถสร้าง QR ติดตามได้");
+          const { token } = await response.json();
+          return QRCode.toDataURL(`${origin}/track/${token}`, { width: 140, margin: 1 });
+        })
+        .then((url) => { if (!cancelled) setQrCodeDataUrl(url); })
         .catch(console.error);
+      return () => { cancelled = true; };
     }
-  }, [job?.trackingCode]);
+  }, [job?.id, isOpen]);
 
   if (!job) return null;
 
@@ -46,8 +52,12 @@ export function WarrantyDeliveryPrint({
     ) || 0;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0">
+    <Dialog
+      open={isOpen}
+      onOpenChange={onClose}
+      maxWidth={printFormat === "A4" ? "max-w-5xl" : "max-w-md"}
+    >
+      <DialogContent className="w-full max-h-[90vh] overflow-y-auto p-0">
         <DialogHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
           <DialogTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-emerald-600" />

@@ -52,9 +52,15 @@
 # 1. ติดตั้ง dependencies
 npm install
 
-# 2. เตรียมฐานข้อมูลและ Seed ข้อมูลตัวอย่าง
-npx prisma db push
-npx tsx prisma/seed.ts
+# 2. เตรียมฐานข้อมูล (ต้องมีไฟล์ .env — คัดลอกจาก .env.example)
+cp .env.example .env
+npm run db:migrate
+# (ตัวเลือก) ข้อมูลตัวอย่าง — ห้ามรันบน production
+SEED_PASSWORD="<รหัสอย่างน้อย 12 ตัว>" npx tsx prisma/seed.ts
+
+# ทดสอบ (ใช้ฐานข้อมูลแยก ไม่แตะ dev.db)
+npm test
+npm run test:e2e
 
 # 3. เริ่มรันเซิร์ฟเวอร์
 npm run dev

@@ -1,111 +1,104 @@
+import { AccessError, staffContext } from "@/lib/staff-context";
+import { safeError, withStaff, reqId, reqInt, reqEnum, requireRole, addMonthsClamped } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// PATCH /api/trade-in/[id]
-export async function PATCH(
+const ACTIONS = ["REDEEM", "FORFEIT", "EXTEND"] as const;
+
+// PATCH /api/trade-in/[id] — pawn lifecycle actions (REDEEM / FORFEIT / EXTEND)
+async function handlePATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const { id } = params;
+    const id = reqId(params.id, "id");
     const body = await request.json();
-    const { action, months = 1 } = body; // action: "REDEEM" | "FORFEIT" | "EXTEND"
+    const action = reqEnum(body.action, "action", ACTIONS);
+    const actor = staffContext();
+    if (action === "FORFEIT") requireRole(actor.role, ["ADMIN", "MANAGER"]);
+    const months = action === "EXTEND" ? reqInt(body.months ?? 1, "จำนวนเดือน", 1, 12) : 0;
 
-    const contract = await prisma.tradeInContract.findUnique({
-      where: { id },
-      include: { deviceImeis: true, branch: true },
-    });
-
-    if (!contract) {
-      return NextResponse.json({ success: false, error: "ไม่พบข้อมูลสัญญา" }, { status: 404 });
-    }
-
-    if (action === "REDEEM") {
-      // Customer pays back loan & redeems device
-      const updated = await prisma.tradeInContract.update({
+    const result = await prisma.$transaction(async (tx) => {
+      const contract = await tx.tradeInContract.findFirst({
         where: { id },
-        data: { status: "REDEEMED" },
+        include: { deviceImeis: true },
       });
-
-      // Update IMEI status to RETURNED
-      await prisma.deviceIMEI.updateMany({
-        where: { tradeInContractId: id },
-        data: { status: "RETURNED" },
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "บันทึกการไถ่ถอนเครื่องสำเร็จ ลูกค้ารับเครื่องคืนเรียบร้อย",
-        contract: updated,
-      });
-    }
-
-    if (action === "FORFEIT") {
-      // Pawn forfeited: shop seizes device into inventory for sale
-      const updated = await prisma.tradeInContract.update({
-        where: { id },
-        data: { status: "FORFEITED" },
-      });
-
-      // Update IMEIs to IN_STOCK so they appear in POS / Inventory for sale!
-      const imeis = await prisma.deviceIMEI.findMany({
-        where: { tradeInContractId: id },
-      });
-
-      for (const im of imeis) {
-        await prisma.deviceIMEI.update({
-          where: { id: im.id },
-          data: { status: "IN_STOCK" },
-        });
-
-        // Increment stockItem
-        await prisma.stockItem.upsert({
-          where: {
-            productId_branchId: {
-              productId: im.productId,
-              branchId: contract.branchId,
-            },
-          },
-          update: { quantity: { increment: 1 } },
-          create: {
-            productId: im.productId,
-            branchId: contract.branchId,
-            quantity: 1,
-          },
-        });
+      if (!contract) throw new AccessError(404, "ไม่พบข้อมูลสัญญา");
+      if (contract.type !== "PAWN" || contract.status !== "ACTIVE") {
+        throw new AccessError(409, "ทำรายการได้เฉพาะสัญญาจำนำที่ยังมีผลอยู่เท่านั้น");
       }
 
-      return NextResponse.json({
-        success: true,
-        message: "ยึดเครื่องหลุดจำนำเข้าสต็อกร้านเพื่อวางจำหน่ายเรียบร้อย",
-        contract: updated,
-      });
-    }
+      // Conditional status change guards against concurrent double actions.
+      const guard = { id, type: "PAWN", status: "ACTIVE" };
+      let message = "";
+      let details: Record<string, unknown> = { contractNo: contract.contractNo };
 
-    if (action === "EXTEND") {
-      // Pay interest and extend due date
-      const currentDue = contract.dueDate ? new Date(contract.dueDate) : new Date();
-      const newDue = new Date(currentDue);
-      newDue.setMonth(newDue.getMonth() + Number(months || 1));
+      if (action === "REDEEM") {
+        const changed = await tx.tradeInContract.updateMany({ where: guard, data: { status: "REDEEMED" } });
+        if (changed.count !== 1) throw new AccessError(409, "สัญญานี้ถูกดำเนินการไปแล้ว");
+        const returned = await tx.deviceIMEI.updateMany({
+          where: { tradeInContractId: id, status: "PAWNED" },
+          data: { status: "RETURNED" },
+        });
+        details = { ...details, imeisReturned: returned.count };
+        message = "บันทึกการไถ่ถอนเครื่องสำเร็จ ลูกค้ารับเครื่องคืนเรียบร้อย";
+      } else if (action === "FORFEIT") {
+        const changed = await tx.tradeInContract.updateMany({ where: guard, data: { status: "FORFEITED" } });
+        if (changed.count !== 1) throw new AccessError(409, "สัญญานี้ถูกดำเนินการไปแล้ว");
+        let moved = 0;
+        for (const im of contract.deviceImeis) {
+          // Only a device still held as collateral moves into sellable stock.
+          const r = await tx.deviceIMEI.updateMany({
+            where: { id: im.id, status: "PAWNED" },
+            data: { status: "IN_STOCK" },
+          });
+          if (r.count !== 1) continue;
+          moved++;
+          await tx.stockItem.upsert({
+            where: { productId_branchId: { productId: im.productId, branchId: im.branchId } },
+            update: { quantity: { increment: 1 } },
+            create: { productId: im.productId, branchId: im.branchId, quantity: 1 },
+          });
+        }
+        if (moved === 0) {
+          throw new AccessError(409, "สัญญานี้ไม่มีข้อมูลเครื่องในสต็อก กรุณารับเข้าสต็อกผ่านหน้าเทิร์น/รับซื้อ");
+        }
+        details = { ...details, imeisToStock: moved };
+        message = "ยึดเครื่องหลุดจำนำเข้าสต็อกร้านเพื่อวางจำหน่ายเรียบร้อย";
+      } else {
+        const base = contract.dueDate ? new Date(contract.dueDate) : new Date();
+        const newDue = addMonthsClamped(base, months);
+        const changed = await tx.tradeInContract.updateMany({
+          where: guard,
+          data: { dueDate: newDue, durationMonths: { increment: months } },
+        });
+        if (changed.count !== 1) throw new AccessError(409, "สัญญานี้ถูกดำเนินการไปแล้ว");
+        details = { ...details, months, previousDueDate: contract.dueDate, newDueDate: newDue };
+        message = `ต่อสัญญาจำนำเพิ่ม ${months} เดือนเรียบร้อย วันครบกำหนดใหม่: ${newDue.toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok" })}`;
+      }
 
-      const updated = await prisma.tradeInContract.update({
-        where: { id },
+      await tx.auditLog.create({
         data: {
-          dueDate: newDue,
-          durationMonths: contract.durationMonths + Number(months || 1),
+          tenantId: actor.tenantId,
+          userId: actor.id,
+          module: "PAWN",
+          action,
+          targetId: id,
+          details: JSON.stringify(details),
+          severity: action === "FORFEIT" ? "WARNING" : "INFO",
         },
       });
 
-      return NextResponse.json({
-        success: true,
-        message: `ต่อสัญญาจำนำเพิ่ม ${months} เดือนเรียบร้อย วันครบกำหนดใหม่: ${newDue.toLocaleDateString("th-TH")}`,
-        contract: updated,
-      });
-    }
+      const updated = await tx.tradeInContract.findFirst({ where: { id } });
+      return { message, updated };
+    });
 
-    return NextResponse.json({ success: false, error: "Invalid action" }, { status: 400 });
+    return NextResponse.json({ success: true, message: result.message, contract: result.updated });
   } catch (error: any) {
-    console.error("PATCH /api/trade-in/[id] error:", error);
+    if (error instanceof AccessError) return safeError(error);
+    console.error("PATCH /api/trade-in/[id] error:");
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+export const PATCH = withStaff(handlePATCH, ["ADMIN","MANAGER","CASHIER"]);

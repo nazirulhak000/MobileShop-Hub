@@ -9,9 +9,9 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-plus-jakarta)", "var(--font-anuphan)", "system-ui", "-apple-system", "sans-serif"],
-        display: ["var(--font-plus-jakarta)", "var(--font-anuphan)", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["var(--font-plus-jakarta)", "var(--font-anuphan)", "system-ui", "-apple-system", "sans-serif"],
+        sans: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "sans-serif"],
+        display: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "monospace"],
       },
       colors: {
         background: "var(--background)",

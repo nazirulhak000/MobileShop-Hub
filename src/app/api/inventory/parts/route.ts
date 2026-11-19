@@ -1,9 +1,11 @@
+import { AccessError } from "@/lib/staff-context";
+import { safeError, takeParam, withStaff } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get("branchId");
@@ -34,6 +36,7 @@ export async function GET(request: NextRequest) {
           : true,
       },
       orderBy: { name: "asc" },
+      take: takeParam(searchParams.get("take"), 200, 500),
     });
 
     const mapped = parts.map((p) => {
@@ -56,9 +59,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: mapped });
   } catch (error: any) {
+    if (error instanceof AccessError) return safeError(error);
     return NextResponse.json(
       { success: false, error: error.message || "Failed to fetch spare parts" },
       { status: 500 }
     );
   }
 }
+
+export const GET = withStaff(handleGET, ["ADMIN","MANAGER","CASHIER","TECHNICIAN"]);
