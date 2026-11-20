@@ -18,7 +18,7 @@ export const POST = withStaff(async (_request: NextRequest, { params }: { params
     db.publicTrackingToken.create({ data: { tenantId, repairJobId: job.id, tokenHash: hashToken(token), expiresAt } }),
   ]);
   return NextResponse.json({ token, expiresAt });
-}, ["ADMIN", "MANAGER", "CASHIER"]);
+}, ["ADMIN", "MANAGER", "CASHIER", "TECHNICIAN"]);
 export const DELETE = withStaff(async (_request: NextRequest, { params }: { params: { id: string } }) => {
   const tenantId = staffContext().tenantId;
   const job = await prisma.repairJob.findFirst({ where: { id: params.id, tenantId }, select: { id: true } });

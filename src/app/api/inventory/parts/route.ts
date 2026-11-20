@@ -14,6 +14,7 @@ async function handleGET(request: NextRequest) {
     const search = searchParams.get("search") || "";
 
     const where: any = {
+      tenantId: actor.tenantId,
       category: "SPARE_PART",
     };
 
@@ -33,9 +34,11 @@ async function handleGET(request: NextRequest) {
       include: {
         stockItems: branchId
           ? {
-              where: { branchId },
+              where: { branchId, tenantId: actor.tenantId },
             }
-          : true,
+          : {
+              where: { tenantId: actor.tenantId },
+            },
       },
       orderBy: { name: "asc" },
       take: takeParam(searchParams.get("take"), 200, 500),

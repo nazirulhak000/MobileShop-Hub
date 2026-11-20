@@ -132,6 +132,7 @@ export default function SparePartsPage() {
         body: JSON.stringify({
           productId: selectedPart.id,
           branchCode: currentBranch.code,
+          branchId: currentBranch.id,
           type: "DEDUCT",
           quantity: qty,
           reason,
@@ -324,7 +325,7 @@ export default function SparePartsPage() {
                         </td>
                         <td className="px-4 py-3.5 font-medium text-slate-700">{p.brand}</td>
                         <td className="px-4 py-3.5 text-right font-mono text-slate-600 tabular-nums">
-                          {formatTHB(p.costPrice)}
+                          {p.costPrice !== undefined ? formatTHB(p.costPrice) : "-"}
                         </td>
                         <td className="px-4 py-3.5 text-right font-mono font-semibold text-slate-900 tabular-nums">
                           {formatTHB(p.sellPrice)}
