@@ -21,7 +21,9 @@ function optDay(value: string | null, field: string): string | null {
 async function handleGET(req: NextRequest) {
   const actor = staffContext();
   const params = new URL(req.url).searchParams;
-  const where: Prisma.AuditLogWhereInput = {};
+  const where: Prisma.AuditLogWhereInput = {
+    tenantId: actor.tenantId,
+  };
 
   const mod = params.get("module");
   if (mod && mod !== "ALL") {
@@ -31,7 +33,7 @@ async function handleGET(req: NextRequest) {
   const severity = params.get("severity");
   if (severity && severity !== "ALL") where.severity = reqEnum(severity, "severity", SEVERITIES);
   const action = params.get("action");
-  if (action) {
+  if (action && action !== "ALL") {
     if (!/^[A-Z_]{1,60}$/.test(action)) throw new AccessError(400, "ค่าไม่ถูกต้อง: action");
     where.action = action;
   }
@@ -76,7 +78,14 @@ async function handleGET(req: NextRequest) {
   });
 
   const hasMore = rows.length > take;
-  const data = hasMore ? rows.slice(0, take) : rows;
+  const rawData = hasMore ? rows.slice(0, take) : rows;
+  const data = rawData.map((r) => {
+    const uaMatch = r.details.match(/\[UA:\s*([^\]]+)\]/);
+    return {
+      ...r,
+      userAgent: uaMatch ? uaMatch[1] : null,
+    };
+  });
   return NextResponse.json({ success: true, data, nextCursor: hasMore ? data[data.length - 1].id : null });
 }
 

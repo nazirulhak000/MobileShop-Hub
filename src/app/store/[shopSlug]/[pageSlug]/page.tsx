@@ -327,6 +327,7 @@ export default async function TenantCustomSubpage({ params, searchParams }: Subp
         navigationMenu={parsedNavMenu}
         isSubpage={true}
         themeColor={themeColor}
+        logoUrl={tenant.logoUrl}
       />
 
       {/* 3. Subpage Hero Banner */}

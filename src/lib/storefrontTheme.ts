@@ -477,6 +477,9 @@ export type CustomBlockType =
   | "cta"
   | "html_embed"
   | "business_hours"
+  | "contact_form"
+  | "query_loop"
+  | "service_grid"
   | string;
 
 export interface CustomBlock {
@@ -616,6 +619,11 @@ export interface StorefrontConfigData {
   customBeforeAfterCases?: string | null;
   customPricingRates?: string | null;
   customFaqs?: string | null;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  seoKeywords?: string | null;
+  bannerUrl?: string | null;
+  logoUrl?: string | null;
 }
 
 export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfigData = {
@@ -632,6 +640,11 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfigData = {
   lineId: "",
   lineQrUrl: "",
   googleMapsUrl: "",
+  seoTitle: "",
+  seoDescription: "",
+  seoKeywords: "",
+  bannerUrl: "",
+  logoUrl: "",
   showLiveTracking: true,
   showHardwareScanner: true,
   showServicesBento: true,

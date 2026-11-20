@@ -8,4 +8,5 @@ export * from "./HtmlEmbedBlock";
 export * from "./BusinessHoursBlock";
 export * from "./ContactFormBlock";
 export * from "./QueryLoopBlock";
+export * from "./ServiceGridBlock";
 export * from "./DynamicBlockRenderer";
