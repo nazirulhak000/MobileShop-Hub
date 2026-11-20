@@ -49,6 +49,10 @@ export interface ThemePalette {
   radarShadow: string;
   activePill: string;
   activeTile: string;
+  navCta: string;
+  focusRing: string;
+  focusVisibleRing: string;
+  lightAccentText: string;
 }
 
 export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
@@ -101,6 +105,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#10b981",
     activePill: "bg-emerald-600 text-white border-emerald-400 shadow-sm",
     activeTile: "bg-emerald-500 border-emerald-300 text-slate-950 font-bold shadow-[0_0_8px_#10b981]",
+    navCta: "bg-emerald-600 hover:bg-emerald-700 text-white",
+    focusRing: "focus:ring-emerald-600 focus:border-emerald-600",
+    focusVisibleRing: "focus-visible:ring-emerald-600",
+    lightAccentText: "text-emerald-700",
   },
   cyan: {
     id: "cyan",
@@ -151,6 +159,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#06b6d4",
     activePill: "bg-cyan-600 text-white border-cyan-400 shadow-sm",
     activeTile: "bg-cyan-500 border-cyan-300 text-slate-950 font-bold shadow-[0_0_8px_#06b6d4]",
+    navCta: "bg-cyan-600 hover:bg-cyan-700 text-white",
+    focusRing: "focus:ring-cyan-600 focus:border-cyan-600",
+    focusVisibleRing: "focus-visible:ring-cyan-600",
+    lightAccentText: "text-cyan-700",
   },
   blue: {
     id: "blue",
@@ -201,6 +213,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#3b82f6",
     activePill: "bg-blue-600 text-white border-blue-400 shadow-sm",
     activeTile: "bg-blue-500 border-blue-300 text-slate-950 font-bold shadow-[0_0_8px_#3b82f6]",
+    navCta: "bg-blue-600 hover:bg-blue-700 text-white",
+    focusRing: "focus:ring-blue-600 focus:border-blue-600",
+    focusVisibleRing: "focus-visible:ring-blue-600",
+    lightAccentText: "text-blue-700",
   },
   purple: {
     id: "purple",
@@ -251,6 +267,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#a855f7",
     activePill: "bg-purple-600 text-white border-purple-400 shadow-sm",
     activeTile: "bg-purple-500 border-purple-300 text-slate-950 font-bold shadow-[0_0_8px_#a855f7]",
+    navCta: "bg-purple-600 hover:bg-purple-700 text-white",
+    focusRing: "focus:ring-purple-600 focus:border-purple-600",
+    focusVisibleRing: "focus-visible:ring-purple-600",
+    lightAccentText: "text-purple-700",
   },
   amber: {
     id: "amber",
@@ -301,6 +321,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#f59e0b",
     activePill: "bg-amber-600 text-white border-amber-400 shadow-sm",
     activeTile: "bg-amber-500 border-amber-300 text-slate-950 font-bold shadow-[0_0_8px_#f59e0b]",
+    navCta: "bg-amber-600 hover:bg-amber-700 text-white",
+    focusRing: "focus:ring-amber-600 focus:border-amber-600",
+    focusVisibleRing: "focus-visible:ring-amber-600",
+    lightAccentText: "text-amber-700",
   },
   rose: {
     id: "rose",
@@ -351,6 +375,10 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     radarShadow: "#f43f5e",
     activePill: "bg-rose-600 text-white border-rose-400 shadow-sm",
     activeTile: "bg-rose-500 border-rose-300 text-slate-950 font-bold shadow-[0_0_8px_#f43f5e]",
+    navCta: "bg-rose-600 hover:bg-rose-700 text-white",
+    focusRing: "focus:ring-rose-600 focus:border-rose-600",
+    focusVisibleRing: "focus-visible:ring-rose-600",
+    lightAccentText: "text-rose-700",
   },
 };
 
@@ -469,6 +497,7 @@ export interface CustomBlock {
   enabled?: boolean;
   order?: number;
   metadata?: Record<string, any>;
+  customCssClass?: string;
   [key: string]: any;
 }
 
@@ -481,6 +510,7 @@ export interface CustomPage {
   sections?: CustomBlock[];
   metaDescription?: string;
   published?: boolean;
+  template?: "default" | "blank-canvas" | string;
   updatedAt?: string;
 }
 
@@ -800,6 +830,7 @@ export function safeParseCustomPages(raw: unknown): CustomPage[] {
         sections: safeParseCustomSections(item.sections),
         metaDescription: item.metaDescription ? String(item.metaDescription).slice(0, 300) : undefined,
         published: item.published !== undefined ? Boolean(item.published) : true,
+        template: item.template === "blank-canvas" ? "blank-canvas" : "default",
         updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
       };
     });

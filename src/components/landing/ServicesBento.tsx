@@ -21,6 +21,7 @@ import {
   HelpCircle,
   Microscope,
 } from "lucide-react";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface ServiceDetail {
   id: string;
@@ -150,6 +151,8 @@ interface ServicesBentoProps {
   showLiveTracking?: boolean;
   /** Show links to the #location section. */
   showLocation?: boolean;
+  /** Theme color palette */
+  themeColor?: StorefrontThemeColor;
 }
 
 export function ServicesBento({
@@ -157,7 +160,9 @@ export function ServicesBento({
   showEstimate = true,
   showLiveTracking = true,
   showLocation = true,
+  themeColor = "emerald",
 }: ServicesBentoProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
   // Spotlight glow coordinates
@@ -201,7 +206,7 @@ export function ServicesBento({
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium border border-slate-200">
-            <Wrench className="h-3.5 w-3.5 text-emerald-600" />
+            <Wrench className={`h-3.5 w-3.5 ${theme.lightAccentText}`} />
             <span>บริการมาตรฐานวิศวกรรมอิเล็กทรอนิกส์</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
@@ -218,10 +223,10 @@ export function ServicesBento({
           <div className="lg:col-span-2 rounded-3xl bg-slate-900 p-6 sm:p-8 text-white relative border border-slate-800 shadow-md flex flex-col justify-between group hover:border-slate-700 transition-all duration-200">
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <div className="h-11 w-11 rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center border border-slate-700 transition-transform group-hover:scale-105">
+                <div className={`h-11 w-11 rounded-2xl bg-slate-800 ${theme.accentText} flex items-center justify-center border border-slate-700 transition-transform group-hover:scale-105`}>
                   <Wrench className="h-5 w-5" />
                 </div>
-                <span className="px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 text-xs font-medium border border-emerald-800 font-mono tabular-nums">
+                <span className={`px-3 py-1 rounded-full ${theme.badge.bg} ${theme.badge.text} text-xs font-medium border ${theme.badge.border} font-mono tabular-nums`}>
                   Express Lab 30-60 นาที
                 </span>
               </div>
@@ -238,19 +243,19 @@ export function ServicesBento({
               {/* Sub features pills */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                 <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs">
-                  <div className="text-emerald-400 font-medium flex items-center gap-1.5">
+                  <div className={`${theme.accentText} font-medium flex items-center gap-1.5`}>
                     <Smartphone className="h-4 w-4" /> ลอกกระจกจอแท้ OCA
                   </div>
                   <div className="text-slate-300 mt-1">คงจอแท้เดิม ย้าย True Tone 100%</div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs">
-                  <div className="text-emerald-400 font-medium flex items-center gap-1.5">
+                  <div className={`${theme.accentText} font-medium flex items-center gap-1.5`}>
                     <Battery className="h-4 w-4" /> แบตเตอรี่ มอก.
                   </div>
                   <div className="text-slate-300 mt-1">รอบชาร์จแท้ รับประกันสูงสุด 1 ปี</div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 text-xs">
-                  <div className="text-emerald-400 font-medium flex items-center gap-1.5">
+                  <div className={`${theme.accentText} font-medium flex items-center gap-1.5`}>
                     <Cpu className="h-4 w-4" /> ซ่อมบอร์ดชิป IC
                   </div>
                   <div className="text-slate-300 mt-1">ตรวจวัดไฟ VDD และ IC Power</div>
@@ -262,13 +267,13 @@ export function ServicesBento({
                 <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4 animate-fade-in text-xs font-mono">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <div className="text-emerald-400 font-semibold flex items-center gap-1.5 mb-2">
+                      <div className={`${theme.accentText} font-semibold flex items-center gap-1.5 mb-2`}>
                         <Microscope className="h-3.5 w-3.5" /> เครื่องมือแล็บเฉพาะทาง:
                       </div>
                       <ul className="space-y-1.5 text-slate-300">
                         {SERVICE_DETAILS.lab.equipment.map((eq, i) => (
                           <li key={i} className="flex items-start gap-1.5">
-                            <span className="text-emerald-400">✓</span> {eq}
+                            <span className={theme.accentText}>✓</span> {eq}
                           </li>
                         ))}
                       </ul>
@@ -289,7 +294,7 @@ export function ServicesBento({
                   </div>
 
                   <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-start gap-2">
-                    <HelpCircle className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                    <HelpCircle className={`h-3.5 w-3.5 ${theme.accentText} shrink-0 mt-0.5`} />
                     <div>
                       <strong className="text-white">{SERVICE_DETAILS.lab.faq.q}</strong>{" "}
                       {SERVICE_DETAILS.lab.faq.a}
@@ -317,7 +322,7 @@ export function ServicesBento({
               {showEstimate && (
               <a
                 href="#estimate"
-                className="min-h-[44px] inline-flex items-center gap-1 font-medium text-emerald-400 hover:text-emerald-300 transition-colors duration-150"
+                className={`min-h-[44px] inline-flex items-center gap-1 font-medium ${theme.accentText} hover:opacity-80 transition-colors duration-150`}
               >
                 <span>คำนวณราคาซ่อมออนไลน์</span>
                 <ArrowRight className="h-4 w-4" />
@@ -330,10 +335,10 @@ export function ServicesBento({
           <div className="rounded-3xl bg-slate-50 border border-slate-200 p-6 sm:p-7 relative flex flex-col justify-between shadow-2xs hover:border-slate-300 transition-all duration-200 group">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="h-11 w-11 rounded-2xl bg-white text-emerald-700 flex items-center justify-center border border-slate-200 transition-transform group-hover:scale-105 shadow-2xs">
+                <div className={`h-11 w-11 rounded-2xl bg-white ${theme.lightAccentText} flex items-center justify-center border border-slate-200 transition-transform group-hover:scale-105 shadow-2xs`}>
                   <Eye className="h-5 w-5" />
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-xs font-medium border border-emerald-200 font-mono tabular-nums">
+                <span className={`px-2.5 py-0.5 rounded-full ${theme.lightBg} ${theme.lightText} text-xs font-medium border ${theme.lightBorder} font-mono tabular-nums`}>
                   Real-time 24 ชม.
                 </span>
               </div>
@@ -349,15 +354,15 @@ export function ServicesBento({
 
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ดูภาพถ่ายก่อน ระหว่าง และหลังซ่อมจริง</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ระบบอนุมัติราคาดิจิทัล ไม่ต้องรอติดต่อกลับ</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ตรวจรายงานผล QC 10 จุดอย่างละเอียด</span>
                 </div>
               </div>
@@ -365,7 +370,7 @@ export function ServicesBento({
               {/* Expandable Drawer */}
               {expandedCard === "tracking" && (
                 <div className="p-4 rounded-2xl bg-white border border-slate-200 space-y-2.5 animate-fade-in text-xs font-mono shadow-2xs">
-                  <div className="text-emerald-800 font-semibold">เทคโนโลยีระบบติดตาม:</div>
+                  <div className={`${theme.lightText} font-semibold`}>เทคโนโลยีระบบติดตาม:</div>
                   <ul className="space-y-1 text-slate-600">
                     {SERVICE_DETAILS.tracking.equipment.map((eq, i) => (
                       <li key={i}>• {eq}</li>
@@ -392,7 +397,7 @@ export function ServicesBento({
               {showLiveTracking && (
                 <a
                   href="#track-search"
-                  className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                  className={`min-h-[44px] inline-flex items-center gap-1 font-semibold ${theme.lightAccentText} hover:opacity-80 transition-colors`}
                 >
                   <span>ทดลองตรวจสอบสถานะ</span>
                   <ArrowRight className="h-4 w-4" />
@@ -424,15 +429,15 @@ export function ServicesBento({
 
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ตรวจสอบเลข IMEI กับฐานข้อมูลทางการ</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ย้ายข้อมูลเครื่องเก่าไปเครื่องใหม่ครบถ้วน</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ตรวจเช็คและรับเงินโอนภายใน 15 นาที</span>
                 </div>
               </div>
@@ -499,15 +504,15 @@ export function ServicesBento({
 
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>สัญญาถูกต้องตามกฎหมาย อนุมัติรวดเร็ว</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>จัดเก็บในตู้เซฟมาตรฐาน ไม่มีการแกะใช้งาน</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ชำระค่างวดผ่านระบบ QR Code ได้สะดวก</span>
                 </div>
               </div>
@@ -555,10 +560,10 @@ export function ServicesBento({
           <div className="rounded-3xl bg-slate-50 border border-slate-200 p-6 sm:p-7 relative flex flex-col justify-between shadow-2xs hover:border-slate-300 transition-all duration-200 group">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="h-11 w-11 rounded-2xl bg-white text-emerald-700 flex items-center justify-center border border-slate-200 transition-transform group-hover:scale-105 shadow-2xs">
+                <div className={`h-11 w-11 rounded-2xl bg-white ${theme.lightAccentText} flex items-center justify-center border border-slate-200 transition-transform group-hover:scale-105 shadow-2xs`}>
                   <ShieldCheck className="h-5 w-5" />
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-xs font-medium border border-emerald-200 font-mono tabular-nums">
+                <span className={`px-2.5 py-0.5 rounded-full ${theme.lightBg} ${theme.lightText} text-xs font-medium border ${theme.lightBorder} font-mono tabular-nums`}>
                   รับประกัน 90-180 วัน
                 </span>
               </div>
@@ -574,15 +579,15 @@ export function ServicesBento({
 
               <div className="space-y-2 pt-2 text-xs">
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ฟิล์มกระจกติดด้วยเครื่องสุญญากาศ ไม่มีฟองอากาศ</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>หัวชาร์จมาตรฐาน PD ไม่ทำให้รอบแบตเตอรี่เสื่อมไว</span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.lightAccentText} shrink-0`} />
                   <span>ใบรับประกันและสติ๊กเกอร์ QR Code ประจำเครื่อง</span>
                 </div>
               </div>
@@ -590,7 +595,7 @@ export function ServicesBento({
               {/* Expandable Drawer */}
               {expandedCard === "parts" && (
                 <div className="p-4 rounded-2xl bg-white border border-slate-200 space-y-2.5 animate-fade-in text-xs font-mono shadow-2xs">
-                  <div className="text-emerald-800 font-semibold">การทดสอบอุปกรณ์เสริม:</div>
+                  <div className={`${theme.lightText} font-semibold`}>การทดสอบอุปกรณ์เสริม:</div>
                   <ul className="space-y-1 text-slate-600">
                     {SERVICE_DETAILS.parts.equipment.map((eq, i) => (
                       <li key={i}>• {eq}</li>
@@ -616,7 +621,7 @@ export function ServicesBento({
 
               <a
                 href="#services"
-                className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                className={`min-h-[44px] inline-flex items-center gap-1 font-semibold ${theme.lightAccentText} hover:opacity-80 transition-colors`}
               >
                 <span>ดูอะไหล่มาตรฐาน</span>
                 <ArrowRight className="h-4 w-4" />
@@ -628,10 +633,10 @@ export function ServicesBento({
           <div className="rounded-3xl bg-slate-900 border border-slate-800 p-6 sm:p-7 text-white relative flex flex-col justify-between shadow-2xs hover:border-slate-700 transition-all duration-200 group">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="h-11 w-11 rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center border border-slate-700 transition-transform group-hover:scale-105 shadow-2xs">
+                <div className={`h-11 w-11 rounded-2xl bg-slate-800 ${theme.accentText} flex items-center justify-center border border-slate-700 transition-transform group-hover:scale-105 shadow-2xs`}>
                   <BellRing className="h-5 w-5" />
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 text-xs font-medium border border-emerald-800 font-mono">
+                <span className={`px-2.5 py-0.5 rounded-full ${theme.badge.bg} ${theme.badge.text} text-xs font-medium border ${theme.badge.border} font-mono`}>
                   LINE Official Bot
                 </span>
               </div>
@@ -647,15 +652,15 @@ export function ServicesBento({
 
               <div className="space-y-2 pt-2 text-xs text-slate-300">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.accentText} shrink-0`} />
                   <span>แจ้งเตือนอัตโนมัติเมื่อช่างเริ่มดำเนินการซ่อม</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.accentText} shrink-0`} />
                   <span>ส่งภาพถ่ายและผลทดสอบ 10 จุดผ่านแชท</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <CheckCircle2 className={`h-4 w-4 ${theme.accentText} shrink-0`} />
                   <span>แจ้งเตือนทันทีเมื่อเครื่องพร้อมส่งมอบ</span>
                 </div>
               </div>
@@ -663,7 +668,7 @@ export function ServicesBento({
               {/* Expandable Drawer */}
               {expandedCard === "line" && (
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 animate-fade-in text-xs font-mono">
-                  <div className="text-emerald-400 font-semibold">ขั้นตอนการรับแจ้งเตือน:</div>
+                  <div className={`${theme.accentText} font-semibold`}>ขั้นตอนการรับแจ้งเตือน:</div>
                   <ul className="space-y-1 text-slate-300">
                     {SERVICE_DETAILS.line.steps.map((st, i) => (
                       <li key={i}>• {st}</li>
@@ -692,7 +697,7 @@ export function ServicesBento({
                 href={lineAddFriendUrl(lineId)}
                 target="_blank"
                 rel="noreferrer"
-                className="min-h-[44px] inline-flex items-center gap-1 font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
+                className={`min-h-[44px] inline-flex items-center gap-1 font-medium ${theme.accentText} hover:opacity-80 transition-colors`}
               >
                 <span>เพิ่มเพื่อน {lineId}</span>
                 <ArrowRight className="h-4 w-4" />

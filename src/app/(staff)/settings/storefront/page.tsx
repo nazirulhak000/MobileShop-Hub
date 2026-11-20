@@ -322,6 +322,7 @@ export default function StorefrontCustomizerPage() {
   const [newPageSlug, setNewPageSlug] = useState<string>("");
   const [newPageSubtitle, setNewPageSubtitle] = useState<string>("");
   const [newPageContent, setNewPageContent] = useState<string>("");
+  const [newPageTemplate, setNewPageTemplate] = useState<string>("default");
 
   const [isAddBlockModalOpen, setIsAddBlockModalOpen] = useState<boolean>(false);
   const [editingBlock, setEditingBlock] = useState<CustomBlock | null>(null);
@@ -841,6 +842,43 @@ export default function StorefrontCustomizerPage() {
     setToast({ message: "ลบบล็อกเรียบร้อยแล้ว", type: "success" });
   };
 
+  // Duplicate Custom Block
+  const handleDuplicateBlock = (blockId: string) => {
+    const newId = `block_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    if (selectedPageSlug && activeSubPage) {
+      const subBlocks = [...(activeSubPage.sections || [])];
+      const sourceIdx = subBlocks.findIndex((b) => b.id === blockId);
+      if (sourceIdx === -1) return;
+      const sourceBlock = subBlocks[sourceIdx];
+      const clonedBlock: CustomBlock = JSON.parse(JSON.stringify(sourceBlock));
+      clonedBlock.id = newId;
+      clonedBlock.title = sourceBlock.title ? `${sourceBlock.title} (คัดลอก)` : "บล็อกคัดลอก";
+      subBlocks.splice(sourceIdx + 1, 0, clonedBlock);
+
+      setCustomPagesList((prev) =>
+        prev.map((p) => (p.slug === selectedPageSlug ? { ...p, sections: subBlocks } : p))
+      );
+    } else {
+      const customBlock = customSectionsList.find((b) => b.id === blockId);
+      if (!customBlock) return;
+      const clonedBlock: CustomBlock = JSON.parse(JSON.stringify(customBlock));
+      clonedBlock.id = newId;
+      clonedBlock.title = customBlock.title ? `${customBlock.title} (คัดลอก)` : "บล็อกคัดลอก";
+
+      setCustomSectionsList((prev) => [...prev, clonedBlock]);
+      setSectionsOrder((prev) => {
+        const orderIdx = prev.indexOf(blockId);
+        if (orderIdx === -1) return [...prev, newId];
+        const nextOrder = [...prev];
+        nextOrder.splice(orderIdx + 1, 0, newId);
+        return nextOrder;
+      });
+    }
+
+    setToast({ message: "ทำสำเนาบล็อกเรียบร้อยแล้ว", type: "success" });
+  };
+
   // Save Editing Block
   const handleSaveBlockEdit = () => {
     if (!editingBlock) return;
@@ -897,6 +935,7 @@ export default function StorefrontCustomizerPage() {
       title: trimmedTitle,
       subtitle: newPageSubtitle.trim() || undefined,
       content: newPageContent.trim() || undefined,
+      template: newPageTemplate || "default",
       sections: [],
       published: true,
     };
@@ -908,6 +947,7 @@ export default function StorefrontCustomizerPage() {
     setNewPageSlug("");
     setNewPageSubtitle("");
     setNewPageContent("");
+    setNewPageTemplate("default");
 
     setToast({ message: `สร้างหน้าใหม่ "/${rawSlug}" สำเร็จและสลับมายังหน้านี้แล้ว`, type: "success" });
   };
@@ -1610,6 +1650,18 @@ export default function StorefrontCustomizerPage() {
                           </button>
                         )}
 
+                        {/* Duplicate Custom Block */}
+                        {item.isCustom && item.block && (
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateBlock(item.id)}
+                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+                            title="ทำสำเนาบล็อกนี้ (Duplicate)"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+
                         {/* Visibility Switch */}
                         <button
                           type="button"
@@ -1729,11 +1781,25 @@ export default function StorefrontCustomizerPage() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-slate-900 truncate">{p.title}</span>
                               <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-100 text-emerald-800 shrink-0">
                                 /{p.slug}
                               </span>
+                              {p.published === false ? (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                                  ฉบับร่าง (Draft)
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                                  เผยแพร่แล้ว
+                                </span>
+                              )}
+                              {p.template === "blank-canvas" && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                                  Blank Canvas
+                                </span>
+                              )}
                             </div>
                             {p.subtitle && (
                               <p className="text-[11px] text-slate-500 mt-0.5 truncate">{p.subtitle}</p>
@@ -1830,6 +1896,47 @@ export default function StorefrontCustomizerPage() {
                                 className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 placeholder="รายละเอียดเนื้อหาในหน้านี้..."
                               />
+                            </div>
+
+                            {/* Draft / Published & Template Controls */}
+                            <div className="grid grid-cols-2 gap-3 pt-1">
+                              <div>
+                                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                                  สถานะการเผยแพร่ (Status)
+                                </label>
+                                <select
+                                  value={p.published !== false ? "published" : "draft"}
+                                  onChange={(e) => {
+                                    const isPub = e.target.value === "published";
+                                    setCustomPagesList((prev) =>
+                                      prev.map((item) => (item.slug === p.slug ? { ...item, published: isPub } : item))
+                                    );
+                                  }}
+                                  className="w-full text-xs h-8 px-2 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                                >
+                                  <option value="published">🟢 เผยแพร่แล้ว (Published)</option>
+                                  <option value="draft">🟡 ฉบับร่าง (Draft / Unpublished)</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                                  รูปแบบหน้า (Template)
+                                </label>
+                                <select
+                                  value={p.template || "default"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setCustomPagesList((prev) =>
+                                      prev.map((item) => (item.slug === p.slug ? { ...item, template: val } : item))
+                                    );
+                                  }}
+                                  className="w-full text-xs h-8 px-2 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                                >
+                                  <option value="default">ค่ามาตรฐาน (Default with Banner)</option>
+                                  <option value="blank-canvas">หน้าว่าง / แคมเปญ (Blank Canvas)</option>
+                                </select>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -2274,6 +2381,7 @@ export default function StorefrontCustomizerPage() {
                     hiddenSections={hiddenSections}
                     navigationMenu={navMenuList}
                     isSubpage={Boolean(selectedPageSlug)}
+                    themeColor={config.themeColor}
                   />
 
                   {/* If Subpage is selected -> Render Subpage View */}
@@ -2320,7 +2428,14 @@ export default function StorefrontCustomizerPage() {
                       </div>
 
                       {/* Footer */}
-                      <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                      <LandingFooter
+                        shopName={shopName}
+                        shopSlug={shopSlug}
+                        phone={config.phone}
+                        hiddenSections={hiddenSections}
+                        isSubpage={true}
+                        themeColor={config.themeColor}
+                      />
                     </div>
                   ) : (
                     /* Home Page Sections Rendered According to Dynamic sectionsOrder */
@@ -2349,6 +2464,7 @@ export default function StorefrontCustomizerPage() {
                               key="services"
                               lineId={config.lineId}
                               showEstimate={config.showPriceEstimator}
+                              themeColor={config.themeColor}
                             />
                           );
                         }
@@ -2398,6 +2514,7 @@ export default function StorefrontCustomizerPage() {
                               lineId={config.lineId}
                               googleMapsUrl={config.googleMapsUrl}
                               demo={false}
+                              themeColor={config.themeColor}
                             />
                           );
                         }
@@ -2428,7 +2545,14 @@ export default function StorefrontCustomizerPage() {
                       })}
 
                       {/* Footer */}
-                      <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                      <LandingFooter
+                        shopName={shopName}
+                        shopSlug={shopSlug}
+                        phone={config.phone}
+                        hiddenSections={hiddenSections}
+                        isSubpage={false}
+                        themeColor={config.themeColor}
+                      />
                     </div>
                   )}
                 </div>
@@ -2476,6 +2600,7 @@ export default function StorefrontCustomizerPage() {
                       hiddenSections={hiddenSections}
                       navigationMenu={navMenuList}
                       isSubpage={Boolean(selectedPageSlug)}
+                      themeColor={config.themeColor}
                     />
 
                     {selectedPageSlug && activeSubPage ? (
@@ -2501,7 +2626,14 @@ export default function StorefrontCustomizerPage() {
                             />
                           ))}
                         </div>
-                        <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                        <LandingFooter
+                          shopName={shopName}
+                          shopSlug={shopSlug}
+                          phone={config.phone}
+                          hiddenSections={hiddenSections}
+                          isSubpage={true}
+                          themeColor={config.themeColor}
+                        />
                       </div>
                     ) : (
                       <div className="flex-1 flex flex-col">
@@ -2528,6 +2660,7 @@ export default function StorefrontCustomizerPage() {
                                 key="services"
                                 lineId={config.lineId}
                                 showEstimate={config.showPriceEstimator}
+                                themeColor={config.themeColor}
                               />
                             );
                           }
@@ -2575,6 +2708,7 @@ export default function StorefrontCustomizerPage() {
                                 lineId={config.lineId}
                                 googleMapsUrl={config.googleMapsUrl}
                                 demo={false}
+                                themeColor={config.themeColor}
                               />
                             );
                           }
@@ -2600,7 +2734,14 @@ export default function StorefrontCustomizerPage() {
                           }
                           return null;
                         })}
-                        <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                        <LandingFooter
+                          shopName={shopName}
+                          shopSlug={shopSlug}
+                          phone={config.phone}
+                          hiddenSections={hiddenSections}
+                          isSubpage={false}
+                          themeColor={config.themeColor}
+                        />
                       </div>
                     )}
                   </div>
@@ -2656,6 +2797,7 @@ export default function StorefrontCustomizerPage() {
                       hiddenSections={hiddenSections}
                       navigationMenu={navMenuList}
                       isSubpage={Boolean(selectedPageSlug)}
+                      themeColor={config.themeColor}
                     />
 
                     {selectedPageSlug && activeSubPage ? (
@@ -2681,7 +2823,14 @@ export default function StorefrontCustomizerPage() {
                             />
                           ))}
                         </div>
-                        <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                        <LandingFooter
+                          shopName={shopName}
+                          shopSlug={shopSlug}
+                          phone={config.phone}
+                          hiddenSections={hiddenSections}
+                          isSubpage={true}
+                          themeColor={config.themeColor}
+                        />
                       </div>
                     ) : (
                       <div className="flex-1 flex flex-col">
@@ -2708,6 +2857,7 @@ export default function StorefrontCustomizerPage() {
                                 key="services"
                                 lineId={config.lineId}
                                 showEstimate={config.showPriceEstimator}
+                                themeColor={config.themeColor}
                               />
                             );
                           }
@@ -2755,6 +2905,7 @@ export default function StorefrontCustomizerPage() {
                                 lineId={config.lineId}
                                 googleMapsUrl={config.googleMapsUrl}
                                 demo={false}
+                                themeColor={config.themeColor}
                               />
                             );
                           }
@@ -2781,7 +2932,14 @@ export default function StorefrontCustomizerPage() {
                           return null;
                         })}
 
-                        <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
+                        <LandingFooter
+                          shopName={shopName}
+                          shopSlug={shopSlug}
+                          phone={config.phone}
+                          hiddenSections={hiddenSections}
+                          isSubpage={false}
+                          themeColor={config.themeColor}
+                        />
 
                         {config.showMobileQuickBar && (
                           <div className="z-30 sticky bottom-0">
@@ -2790,6 +2948,7 @@ export default function StorefrontCustomizerPage() {
                               lineId={config.lineId}
                               shopSlug={shopSlug}
                               showEstimate={config.showPriceEstimator}
+                              themeColor={config.themeColor}
                             />
                           </div>
                         )}
@@ -2884,6 +3043,18 @@ export default function StorefrontCustomizerPage() {
                   placeholder="เช่น มาตรฐานการทำงานและประวัติทีมช่างผู้ชำนาญการ"
                   className="w-full text-xs h-10 px-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block">รูปแบบเทมเพลต (Page Template)</label>
+                <select
+                  value={newPageTemplate}
+                  onChange={(e) => setNewPageTemplate(e.target.value)}
+                  className="w-full text-xs h-10 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                >
+                  <option value="default">ค่ามาตรฐาน (Default with Banner)</option>
+                  <option value="blank-canvas">หน้าว่าง / แคมเปญ (Blank Canvas / Landing Page)</option>
+                </select>
               </div>
 
               <div>
@@ -3049,82 +3220,400 @@ export default function StorefrontCustomizerPage() {
                 />
               </div>
 
-              {/* Contextual: Button Links for Promo and CTA */}
-              {(editingBlock.type.includes("promo") || editingBlock.type.includes("cta")) && (
-                <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-700 block">ข้อความบนปุ่ม (Button Text)</label>
-                    <input
-                      type="text"
-                      value={editingBlock.buttonText || editingBlock.customButtonText || ""}
-                      onChange={(e) =>
-                        setEditingBlock({
-                          ...editingBlock,
-                          buttonText: e.target.value,
-                          customButtonText: e.target.value,
-                        })
-                      }
-                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
-                    />
+              {/* Contextual: Promo Banner Extra Fields */}
+              {editingBlock.type.includes("promo") && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        ข้อความบนปุ่ม (Button Text)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.buttonText || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            buttonText: e.target.value,
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        ลิงก์ปลายทาง (Button URL)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.buttonUrl || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            buttonUrl: e.target.value,
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        โค้ดส่วนลด (Coupon / Discount Tag)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.discountTag || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            discountTag: e.target.value,
+                          })
+                        }
+                        placeholder="เช่น SAVE200 หรือ BATTERY10"
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        เงื่อนไข/เวลาหมดเขต (Expiry Notice)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.expiryNotice || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            expiryNotice: e.target.value,
+                          })
+                        }
+                        placeholder="เช่น จำกัด 50 สิทธิ์แรกของเดือน"
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual: CTA Block Extra Fields */}
+              {editingBlock.type.includes("cta") && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        ข้อความปุ่มพิเศษ (Custom Button Text)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.customButtonText || editingBlock.buttonText || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            customButtonText: e.target.value,
+                            buttonText: e.target.value,
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        ลิงก์ปุ่มพิเศษ (Custom Button URL)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.customButtonUrl || editingBlock.buttonUrl || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            customButtonUrl: e.target.value,
+                            buttonUrl: e.target.value,
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <label className="text-[11px] font-semibold text-slate-700 block">ลิงก์ปลายทาง (Button URL)</label>
+                    <label className="text-[11px] font-semibold text-slate-700 block">
+                      จุดเด่นบริการ / สิทธิประโยชน์ (Benefits คั่นด้วยจุลภาค ,)
+                    </label>
                     <input
                       type="text"
-                      value={editingBlock.buttonUrl || editingBlock.customButtonUrl || ""}
-                      onChange={(e) =>
-                        setEditingBlock({
-                          ...editingBlock,
-                          buttonUrl: e.target.value,
-                          customButtonUrl: e.target.value,
-                        })
+                      value={
+                        Array.isArray(editingBlock.benefits)
+                          ? editingBlock.benefits.join(", ")
+                          : editingBlock.benefits || ""
                       }
-                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      onChange={(e) => {
+                        const list = e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        setEditingBlock({ ...editingBlock, benefits: list });
+                      }}
+                      placeholder="ตรวจเช็ค 10 จุดฟรี, อะไหล่แท้ตรงรุ่น, รอรับเครื่องใน 30 นาที"
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
                     />
                   </div>
                 </div>
               )}
 
-              {/* Contextual: Video URL */}
+              {/* Contextual: Photo Gallery */}
+              {(editingBlock.type.includes("gallery") || editingBlock.type.includes("photo")) && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      จำนวนคอลัมน์ (Columns)
+                    </label>
+                    <select
+                      value={editingBlock.columns || 3}
+                      onChange={(e) =>
+                        setEditingBlock({ ...editingBlock, columns: Number(e.target.value) })
+                      }
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                    >
+                      <option value={2}>2 คอลัมน์ (ภาพใหญ่ชัดเจน)</option>
+                      <option value={3}>3 คอลัมน์ (ค่ามาตรฐาน)</option>
+                      <option value={4}>4 คอลัมน์ (ภาพขนาดกะทัดรัด)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      รายการรูปภาพและคำบรรยาย (1 บรรทัดต่อ 1 รูป: URL | คำบรรยาย)
+                    </label>
+                    <p className="text-[11px] text-slate-500 mb-1">
+                      ตัวอย่าง: https://images.unsplash.com/... | งานซ่อมบอร์ดไอซี
+                    </p>
+                    <textarea
+                      rows={4}
+                      value={
+                        Array.isArray(editingBlock.images)
+                          ? editingBlock.images
+                              .map((img: any) =>
+                                typeof img === "string"
+                                  ? img
+                                  : `${img.url || ""}${img.caption ? ` | ${img.caption}` : ""}`
+                              )
+                              .join("\n")
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const lines = e.target.value.split("\n").filter((l) => l.trim().length > 0);
+                        const parsed = lines.map((l) => {
+                          const parts = l.split("|");
+                          return {
+                            url: parts[0]?.trim() || "",
+                            caption: parts[1]?.trim() || "",
+                          };
+                        });
+                        setEditingBlock({ ...editingBlock, images: parsed });
+                      }}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      placeholder="https://images.unsplash.com/... | ภาพผลงาน 1&#10;https://images.unsplash.com/... | ภาพผลงาน 2"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual: Video Embed */}
               {editingBlock.type.includes("video") && (
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block">URL วิดีโอ (YouTube / TikTok / MP4)</label>
-                  <input
-                    type="text"
-                    value={editingBlock.videoUrl || ""}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, videoUrl: e.target.value })}
-                    className="w-full text-xs h-9 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono"
-                    placeholder="https://www.youtube.com/watch?v=..."
-                  />
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      URL วิดีโอ (YouTube / TikTok / MP4)
+                    </label>
+                    <input
+                      type="text"
+                      value={editingBlock.videoUrl || ""}
+                      onChange={(e) => setEditingBlock({ ...editingBlock, videoUrl: e.target.value })}
+                      className="w-full text-xs h-9 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      อัตราส่วนวิดีโอ (Aspect Ratio)
+                    </label>
+                    <select
+                      value={editingBlock.aspectRatio || "16:9"}
+                      onChange={(e) =>
+                        setEditingBlock({ ...editingBlock, aspectRatio: e.target.value as any })
+                      }
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                    >
+                      <option value="16:9">16:9 แนวนอน (YouTube มาตรฐาน)</option>
+                      <option value="4:3">4:3 คลาสสิก</option>
+                      <option value="1:1">1:1 จัตุรัส (TikTok / Reels)</option>
+                    </select>
+                  </div>
                 </div>
               )}
 
               {/* Contextual: Rich Text Content */}
               {editingBlock.type.includes("rich") && (
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block">เนื้อหาบทความ (Article Content)</label>
-                  <textarea
-                    rows={6}
-                    value={editingBlock.content || ""}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, content: e.target.value })}
-                    className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed"
-                  />
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      การจัดวางข้อความ (Text Alignment)
+                    </label>
+                    <select
+                      value={editingBlock.align || "left"}
+                      onChange={(e) =>
+                        setEditingBlock({ ...editingBlock, align: e.target.value as any })
+                      }
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                    >
+                      <option value="left">ชิดซ้าย (Left Align)</option>
+                      <option value="center">กึ่งกลาง (Center Align)</option>
+                      <option value="right">ชิดขวา (Right Align)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      เนื้อหาบทความ (Article Content Markdown)
+                    </label>
+                    <textarea
+                      rows={6}
+                      value={editingBlock.content || ""}
+                      onChange={(e) => setEditingBlock({ ...editingBlock, content: e.target.value })}
+                      className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed font-mono"
+                    />
+                  </div>
                 </div>
               )}
 
-              {/* Contextual: HTML Snippet */}
+              {/* Contextual: HTML Snippet & Height */}
               {editingBlock.type.includes("html") && (
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block">โค้ด HTML Snippet</label>
-                  <textarea
-                    rows={5}
-                    value={editingBlock.html || ""}
-                    onChange={(e) => setEditingBlock({ ...editingBlock, html: e.target.value })}
-                    className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono"
-                    placeholder="<div ...>...</div>"
-                  />
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      ความสูงของบล็อก (Height in px: 150 - 800px)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={150}
+                        max={800}
+                        step={10}
+                        value={Number(editingBlock.height || 450)}
+                        onChange={(e) =>
+                          setEditingBlock({ ...editingBlock, height: Number(e.target.value) })
+                        }
+                        className="flex-1 accent-emerald-600"
+                      />
+                      <span className="text-xs font-mono font-bold text-slate-800 w-14 text-right">
+                        {editingBlock.height || 450}px
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      โค้ด HTML Snippet
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={editingBlock.html || ""}
+                      onChange={(e) => setEditingBlock({ ...editingBlock, html: e.target.value })}
+                      className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono"
+                      placeholder="<div ...>...</div>"
+                    />
+                  </div>
                 </div>
               )}
+
+              {/* Contextual: Business Hours Block */}
+              {(editingBlock.type.includes("hour") ||
+                editingBlock.type.includes("business") ||
+                editingBlock.type.includes("schedule")) && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      ข้อความแจ้งกรณีฉุกเฉิน (Emergency Note)
+                    </label>
+                    <input
+                      type="text"
+                      value={editingBlock.emergencyNote || ""}
+                      onChange={(e) =>
+                        setEditingBlock({ ...editingBlock, emergencyNote: e.target.value })
+                      }
+                      placeholder="เช่น กรณีฉุกเฉินนอกเวลาทำการ ติดต่อ LINE OA ตลอด 24 ชม."
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      ตารางเวลาทำการ (1 บรรทัดต่อช่วงวัน: วัน | เวลา | เปิด/ปิด)
+                    </label>
+                    <p className="text-[11px] text-slate-500 mb-1">
+                      ตัวอย่าง: วันจันทร์ - วันศุกร์ | 09:00 - 19:30 | เปิด
+                    </p>
+                    <textarea
+                      rows={4}
+                      value={
+                        Array.isArray(editingBlock.schedule || editingBlock.hours)
+                          ? (editingBlock.schedule || editingBlock.hours)
+                              .map((item: any) => {
+                                const day = item.day || "";
+                                const time =
+                                  item.hours ||
+                                  item.hoursText ||
+                                  (item.open && item.close ? `${item.open} - ${item.close}` : "09:00 - 19:30");
+                                const status = item.isClosed || item.isOpen === false ? "ปิด" : "เปิด";
+                                return `${day} | ${time} | ${status}`;
+                              })
+                              .join("\n")
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const lines = e.target.value.split("\n").filter((l) => l.trim().length > 0);
+                        const parsedSchedule = lines.map((line) => {
+                          const parts = line.split("|").map((p) => p.trim());
+                          const day = parts[0] || "";
+                          const hours = parts[1] || "09:00 - 19:30";
+                          const isClosed = parts[2] === "ปิด";
+                          const times = hours.split("-").map((t) => t.replace("น.", "").trim());
+                          const open = times[0] || "09:00";
+                          const close = times[1] || "19:30";
+                          return {
+                            day,
+                            open,
+                            close,
+                            hours,
+                            hoursText: `${hours} น.`,
+                            isClosed,
+                            isOpen: !isClosed,
+                          };
+                        });
+                        setEditingBlock({
+                          ...editingBlock,
+                          schedule: parsedSchedule,
+                          hours: parsedSchedule,
+                        });
+                      }}
+                      className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      placeholder="วันจันทร์ - วันศุกร์ | 09:00 - 19:30 | เปิด&#10;วันเสาร์ - วันอาทิตย์ | 10:00 - 18:30 | เปิด"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Universal: Custom CSS Class */}
+              <div className="pt-2 border-t border-slate-100">
+                <label className="text-xs font-semibold text-slate-700 block">
+                  คลาส CSS กำหนดเอง (Custom CSS Class)
+                </label>
+                <input
+                  type="text"
+                  value={editingBlock.customCssClass || ""}
+                  onChange={(e) =>
+                    setEditingBlock({ ...editingBlock, customCssClass: e.target.value })
+                  }
+                  placeholder="เช่น custom-promo-shadow border-t-2"
+                  className="w-full text-xs h-9 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 shrink-0">

@@ -1,0 +1,4 @@
+tab select 1981020438
+click "button:has-text('Redeploy') >> nth=-1"
+wait 4000
+snapshot -i

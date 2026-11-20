@@ -11,6 +11,7 @@ import {
   Train,
   MessageCircle,
 } from "lucide-react";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface ShopLocationProps {
   shopName?: string;
@@ -28,6 +29,8 @@ interface ShopLocationProps {
    * false (tenant storefront, default): renders only the tenant's real data.
    */
   demo?: boolean;
+  /** Theme color palette */
+  themeColor?: StorefrontThemeColor;
 }
 
 const DEMO = {
@@ -52,7 +55,9 @@ export function ShopLocation({
   lineId,
   googleMapsUrl,
   demo = false,
+  themeColor = "emerald",
 }: ShopLocationProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const shownBranch = branchName || (demo ? DEMO.branchName : shopName);
   const shownAddress = address || (demo ? DEMO.address : "");
   const mapsQuery = address ? encodeURIComponent(`${shopName} ${address}`) : "";
@@ -66,7 +71,7 @@ export function ShopLocation({
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white text-slate-800 text-xs font-medium border border-slate-200">
-            <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+            <MapPin className={`h-3.5 w-3.5 ${theme.lightAccentText}`} />
             <span>{demo ? "ตัวอย่างส่วนแสดงที่ตั้งร้าน" : "ที่ตั้งและช่องทางติดต่อ"}</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
@@ -103,7 +108,7 @@ export function ShopLocation({
                       href={mapsHref}
                       target="_blank"
                       rel="noreferrer"
-                      className="min-h-[44px] min-w-[44px] p-3 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white transition-colors duration-150 motion-reduce:transition-none shrink-0 inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      className={`min-h-[44px] min-w-[44px] p-3 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-900 hover:text-white transition-colors duration-150 motion-reduce:transition-none shrink-0 inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                       title="เปิดแผนที่นำทาง"
                       aria-label="เปิดแผนที่นำทาง Google Maps"
                     >
@@ -117,7 +122,7 @@ export function ShopLocation({
                     {/* Operating Hours Box (sample content, demo landing only) */}
                     <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs flex-wrap sm:flex-nowrap gap-3">
                       <div className="flex items-center gap-3">
-                        <Clock className="h-5 w-5 text-emerald-700 shrink-0" />
+                        <Clock className={`h-5 w-5 ${theme.lightAccentText} shrink-0`} />
                         <div>
                           <div className="font-semibold text-slate-900">เวลาทำการ (ตัวอย่าง)</div>
                           <div className="text-slate-500 mt-0.5 tabular-nums font-mono">จันทร์ - อาทิตย์: 09:00 - 20:00 น.</div>
@@ -129,7 +134,7 @@ export function ShopLocation({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-3 text-xs">
                         <div className="h-9 w-9 rounded-lg bg-white text-slate-800 border border-slate-200 flex items-center justify-center shrink-0">
-                          <Train className="h-5 w-5 text-emerald-700" />
+                          <Train className={`h-5 w-5 ${theme.lightAccentText}`} />
                         </div>
                         <div>
                           <div className="font-semibold text-slate-900">การเดินทาง (ตัวอย่าง)</div>
@@ -139,7 +144,7 @@ export function ShopLocation({
 
                       <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-3 text-xs">
                         <div className="h-9 w-9 rounded-lg bg-white text-slate-800 border border-slate-200 flex items-center justify-center shrink-0">
-                          <Car className="h-5 w-5 text-emerald-700" />
+                          <Car className={`h-5 w-5 ${theme.lightAccentText}`} />
                         </div>
                         <div>
                           <div className="font-semibold text-slate-900">ที่จอดรถ (ตัวอย่าง)</div>
@@ -155,7 +160,7 @@ export function ShopLocation({
               {phone && (
                 <a
                   href={telHref(phone)}
-                  className="min-h-[44px] flex items-center justify-between p-4 rounded-xl bg-white border border-slate-200 hover:border-slate-400 transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  className={`min-h-[44px] flex items-center justify-between p-4 rounded-xl bg-white border border-slate-200 hover:border-slate-400 transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-slate-100 text-slate-800 group-hover:bg-slate-900 group-hover:text-white flex items-center justify-center transition-colors">
@@ -177,9 +182,9 @@ export function ShopLocation({
                 href={mapsHref}
                 target="_blank"
                 rel="noreferrer"
-                className="min-h-[44px] w-full py-3.5 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                className={`min-h-[44px] w-full py-3.5 px-6 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
               >
-                <Navigation className="h-4 w-4 text-emerald-400" />
+                <Navigation className={`h-4 w-4 ${theme.accentText}`} />
                 <span>เปิดระบบนำทางด้วย Google Maps</span>
               </a>
             )}
@@ -197,7 +202,7 @@ export function ShopLocation({
                     loading="lazy"
                   />
                   <div className="absolute top-3 left-3 bg-white/95 px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs flex items-center gap-1.5 text-xs font-semibold text-slate-900 pointer-events-none">
-                    <MapPin className="h-4 w-4 text-emerald-700" />
+                    <MapPin className={`h-4 w-4 ${theme.lightAccentText}`} />
                     <span>{shownBranch}</span>
                   </div>
                 </div>
@@ -207,19 +212,19 @@ export function ShopLocation({
                 <div className="p-6 rounded-2xl bg-slate-900 text-white border border-slate-800 space-y-4 shadow-2xs">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-mono uppercase text-emerald-400 font-medium block">
+                      <span className={`text-xs font-mono uppercase ${theme.accentText} font-medium block`}>
                         LINE Official Account
                       </span>
                       <h4 className="text-sm font-semibold text-white mt-1">แอด LINE เพื่อสอบถามร้าน</h4>
                     </div>
-                    <div className="h-9 w-9 rounded-lg bg-slate-800 text-emerald-400 flex items-center justify-center border border-slate-700">
+                    <div className={`h-9 w-9 rounded-lg bg-slate-800 ${theme.accentText} flex items-center justify-center border border-slate-700`}>
                       <MessageCircle className="h-5 w-5" />
                     </div>
                   </div>
 
                   <div className="text-xs space-y-2">
                     <div className="text-slate-300">เพิ่มเพื่อนด้วย LINE ID:</div>
-                    <div className="font-mono text-xs font-semibold text-emerald-400 bg-slate-800 px-3 py-1 rounded-md inline-block border border-slate-700 tabular-nums">
+                    <div className={`font-mono text-xs font-semibold ${theme.accentText} bg-slate-800 px-3 py-1 rounded-md inline-block border border-slate-700 tabular-nums`}>
                       {lineId}
                     </div>
                   </div>
@@ -228,7 +233,7 @@ export function ShopLocation({
                     href={lineHref(lineId)}
                     target="_blank"
                     rel="noreferrer"
-                    className="min-h-[44px] w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                    className={`min-h-[44px] w-full py-2.5 px-4 ${theme.navCta} font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                   >
                     <span>เปิดแอปพลิเคชัน LINE</span>
                     <ExternalLink className="h-3.5 w-3.5" />

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
-import { NavigationMenuItem } from "@/lib/storefrontTheme";
+import { NavigationMenuItem, StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import {
   Smartphone,
   Search,
@@ -31,6 +31,8 @@ interface LandingNavbarProps {
   navigationMenu?: NavigationMenuItem[];
   /** Whether the current page is a subpage (e.g. /store/[shopSlug]/[pageSlug]) */
   isSubpage?: boolean;
+  /** Storefront color palette */
+  themeColor?: StorefrontThemeColor;
 }
 
 export function LandingNavbar({
@@ -41,7 +43,9 @@ export function LandingNavbar({
   hiddenSections = [],
   navigationMenu,
   isSubpage = false,
+  themeColor = "emerald",
 }: LandingNavbarProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const lineUrl = lineId
     ? `https://line.me/R/ti/p/${encodeURIComponent(lineId.trim().startsWith("@") ? lineId.trim() : `@${lineId.trim()}`)}`
     : "";
@@ -97,7 +101,7 @@ export function LandingNavbar({
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <span className="inline-flex items-center gap-2 text-slate-200 font-medium">
-              <Clock className="h-3.5 w-3.5 text-emerald-400" />
+              <Clock className={`h-3.5 w-3.5 ${theme.accentText}`} />
               <span>ติดตามสถานะงานซ่อมได้ด้วย QR บนใบรับเครื่อง</span>
             </span>
           </div>
@@ -106,24 +110,24 @@ export function LandingNavbar({
             {telUrl && (<>
             <a
               href={telUrl}
-              className="flex items-center gap-1.5 text-slate-300 hover:text-white transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
+              className={`flex items-center gap-1.5 text-slate-300 hover:text-white transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing} rounded-sm`}
             >
-              <Phone className="h-3.5 w-3.5 text-emerald-400" />
+              <Phone className={`h-3.5 w-3.5 ${theme.accentText}`} />
               <span className="tabular-nums font-mono">{phone}</span>
             </a>
             <span className="text-slate-700" aria-hidden="true">|</span>
             </>)}
             <Link
               href={customerPortalHref}
-              className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
+              className={`inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing} rounded-sm`}
             >
-              <UserRound className="h-3.5 w-3.5 text-emerald-400" />
+              <UserRound className={`h-3.5 w-3.5 ${theme.accentText}`} />
               <span>บริการลูกค้า / จองคิว</span>
             </Link>
             <span className="text-slate-700" aria-hidden="true">|</span>
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
+              className={`inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing} rounded-sm`}
             >
               <LogIn className="h-3.5 w-3.5 text-slate-400" />
               <span>เข้าสู่ระบบพนักงาน (Staff Portal)</span>
@@ -145,17 +149,17 @@ export function LandingNavbar({
             {/* Brand Logo */}
             <Link
               href={shopSlug ? `/store/${shopSlug}` : "/landing"}
-              className="flex items-center gap-3 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 rounded-lg p-1"
+              className={`flex items-center gap-3 shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} rounded-lg p-1`}
             >
               <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-xs">
-                <Smartphone className="h-5 w-5 text-emerald-400" />
+                <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-lg text-slate-900 tracking-tight">
                     {shopName}
                   </span>
-                  <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${theme.lightBg} ${theme.lightText} border ${theme.lightBorder}`}>
                     Store
                   </span>
                 </div>
@@ -181,7 +185,7 @@ export function LandingNavbar({
                         href={resolvedHref}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                        className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                       >
                         {link.label}
                       </a>
@@ -194,7 +198,7 @@ export function LandingNavbar({
                       <Link
                         key={link.href}
                         href={resolvedHref}
-                        className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                        className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                       >
                         {link.label}
                       </Link>
@@ -205,7 +209,7 @@ export function LandingNavbar({
                     <a
                       key={link.href}
                       href={resolvedHref}
-                      className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                     >
                       {link.label}
                     </a>
@@ -224,7 +228,7 @@ export function LandingNavbar({
                     placeholder="วางลิงก์ติดตามงานซ่อม"
                     value={trackingCode}
                     onChange={(e) => setTrackingCode(e.target.value)}
-                    className="w-48 pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:w-56 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-all duration-150 motion-reduce:transition-none font-mono tabular-nums"
+                    className={`w-48 pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:w-56 focus:outline-none focus:ring-2 ${theme.focusRing} transition-all duration-150 motion-reduce:transition-none font-mono tabular-nums`}
                     aria-label="ลิงก์ติดตามงานซ่อมจากใบรับเครื่อง"
                   />
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500 pointer-events-none" />
@@ -247,7 +251,7 @@ export function LandingNavbar({
                 href={lineUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="min-h-[44px] min-w-[44px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 shadow-xs whitespace-nowrap shrink-0"
+                className={`min-h-[44px] min-w-[44px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold ${theme.navCta} transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} focus-visible:ring-offset-2 shadow-xs whitespace-nowrap shrink-0`}
               >
                 <MessageCircle className="h-4 w-4" />
                 <span>ปรึกษาช่างเทคนิค</span>
@@ -257,16 +261,16 @@ export function LandingNavbar({
               {/* Customer Portal Link */}
               <Link
                 href={customerPortalHref}
-                className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 border border-slate-200 whitespace-nowrap shrink-0 shadow-2xs"
+                className={`min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} border border-slate-200 whitespace-nowrap shrink-0 shadow-2xs`}
               >
-                <UserRound className="h-4 w-4 text-emerald-600" />
+                <UserRound className={`h-4 w-4 ${theme.lightAccentText}`} />
                 <span>บัญชีลูกค้า</span>
               </Link>
 
               {/* Staff Portal Link */}
               <Link
                 href="/dashboard"
-                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                 title="เข้าสู่ระบบพนักงาน (Staff Portal)"
                 aria-label="เข้าสู่ระบบพนักงาน"
               >
@@ -279,7 +283,7 @@ export function LandingNavbar({
               {!hiddenSections.includes("#track-search") && (
                 <a
                   href="#track-search"
-                  className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl ${theme.lightAccentText} ${theme.lightBg} hover:opacity-90 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                   aria-label="ไปยังช่องค้นหาสถานะซ่อม"
                 >
                   <Search className="h-5 w-5" />
@@ -289,7 +293,7 @@ export function LandingNavbar({
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                 aria-label={mobileMenuOpen ? "ปิดเมนูการนำทาง" : "เปิดเมนูการนำทาง"}
                 aria-expanded={mobileMenuOpen}
               >
@@ -315,11 +319,11 @@ export function LandingNavbar({
                     placeholder="วางลิงก์ติดตามจากใบรับเครื่อง"
                     value={trackingCode}
                     onChange={(e) => setTrackingCode(e.target.value)}
-                    className="flex-1 min-h-[44px] px-3 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 font-mono tabular-nums"
+                    className={`flex-1 min-h-[44px] px-3 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 ${theme.focusRing} font-mono tabular-nums`}
                   />
                   <button
                     type="submit"
-                    className="min-h-[44px] min-w-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-medium shrink-0 hover:bg-slate-800 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                    className={`min-h-[44px] min-w-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-medium shrink-0 hover:bg-slate-800 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                   >
                     ค้นหา
                   </button>
@@ -343,7 +347,7 @@ export function LandingNavbar({
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setMobileMenuOpen(false)}
-                        className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                        className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                       >
                         <span>{link.label}</span>
                         <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -357,7 +361,7 @@ export function LandingNavbar({
                         key={link.href}
                         href={resolvedHref}
                         onClick={() => setMobileMenuOpen(false)}
-                        className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                        className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                       >
                         <span>{link.label}</span>
                         <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -370,7 +374,7 @@ export function LandingNavbar({
                       key={link.href}
                       href={resolvedHref}
                       onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                      className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                     >
                       <span>{link.label}</span>
                       <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -387,7 +391,7 @@ export function LandingNavbar({
                 href={telUrl}
                 className="min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 hover:bg-slate-100 transition-colors duration-150"
               >
-                <Phone className="h-4 w-4 text-emerald-700" />
+                <Phone className={`h-4 w-4 ${theme.lightAccentText}`} />
                 <span className="tabular-nums font-mono">{phone}</span>
               </a>
               )}
@@ -397,7 +401,7 @@ export function LandingNavbar({
                 href={lineUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors duration-150"
+                className={`min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl ${theme.navCta} text-xs font-medium transition-colors duration-150`}
               >
                 <MessageCircle className="h-4 w-4" />
                 <span>ปรึกษาช่าง LINE</span>
@@ -410,9 +414,9 @@ export function LandingNavbar({
               <Link
                 href={customerPortalHref}
                 onClick={() => setMobileMenuOpen(false)}
-                className="min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl bg-teal-50 text-xs font-semibold text-teal-900 hover:bg-teal-100 transition-colors"
+                className={`min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl ${theme.lightBg} text-xs font-semibold ${theme.lightText} hover:opacity-90 transition-colors`}
               >
-                <UserRound className="h-4 w-4 text-teal-700" />
+                <UserRound className={`h-4 w-4 ${theme.lightAccentText}`} />
                 <span>เข้าสู่บัญชีลูกค้า / จองคิวเข้ารับบริการ</span>
               </Link>
 

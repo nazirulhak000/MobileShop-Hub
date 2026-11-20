@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import {
   Search,
   Phone,
@@ -24,9 +25,12 @@ interface MobileQuickBarProps {
   shopSlug?: string;
   /** Show the "ประเมินราคา" shortcut (only when the page renders #estimate). */
   showEstimate?: boolean;
+  /** Theme color palette */
+  themeColor?: StorefrontThemeColor;
 }
 
-export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }: MobileQuickBarProps = {}) {
+export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, themeColor = "emerald" }: MobileQuickBarProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [quickCode, setQuickCode] = useState("");
   const [modalError, setModalError] = useState("");
@@ -62,10 +66,10 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
               setShowTrackModal(true);
               setModalError("");
             }}
-            className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-800 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className={`min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-800 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
             aria-label="ตรวจสอบสถานะงานซ่อม"
           >
-            <div className="h-7 w-7 rounded-lg bg-emerald-50 text-emerald-800 flex items-center justify-center border border-emerald-200">
+            <div className={`h-7 w-7 rounded-lg ${theme.lightBg} ${theme.lightText} flex items-center justify-center border ${theme.lightBorder}`}>
               <Search className="h-4 w-4" />
             </div>
             <span className="text-[11px] font-medium mt-1 tracking-tight">เช็คสถานะ</span>
@@ -75,7 +79,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
           {shopSlug && (
             <Link
               href={`/s/${shopSlug}`}
-              className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-teal-800 hover:bg-teal-50 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+              className={`min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-teal-800 hover:bg-teal-50 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
               aria-label="พอร์ทัลลูกค้าและจองคิว"
             >
               <div className="h-7 w-7 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200">
@@ -89,7 +93,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
           {showEstimate && (
           <a
             href="#estimate"
-            className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className={`min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
             aria-label="ประเมินราคาซ่อม"
           >
             <div className="h-7 w-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 border border-slate-200">
@@ -103,7 +107,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
           {phone && (
           <a
             href={`tel:${phone.replace(/[^\d+]/g, "")}`}
-            className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className={`min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
             aria-label={`โทรสอบถาม ${phone}`}
           >
             <div className="h-7 w-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 border border-slate-200">
@@ -119,10 +123,10 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
             href={lineUrl}
             target="_blank"
             rel="noreferrer"
-            className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-emerald-800 hover:bg-emerald-50 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className={`min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-slate-800 hover:bg-slate-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
             aria-label="ทักแชท LINE ปรึกษาช่าง"
           >
-            <div className="h-7 w-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-2xs">
+            <div className={`h-7 w-7 rounded-lg ${theme.navCta} flex items-center justify-center shadow-2xs`}>
               <MessageCircle className="h-4 w-4" />
             </div>
             <span className="text-[11px] font-medium mt-1 tracking-tight">
@@ -145,7 +149,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="h-8 w-8 rounded-lg bg-slate-100 text-slate-800 flex items-center justify-center">
-                  <Smartphone className="h-4 w-4 text-emerald-700" />
+                  <Smartphone className={`h-4 w-4 ${theme.lightAccentText}`} />
                 </div>
                 <h3 id="track-modal-title" className="text-sm font-semibold text-slate-900">
                   ตรวจสอบสถานะงานซ่อม (Live Tracking)
@@ -175,7 +179,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
                     setQuickCode(e.target.value);
                     if (modalError) setModalError("");
                   }}
-                  className={`w-full min-h-[44px] px-3.5 rounded-xl border bg-slate-50 focus:bg-white text-xs sm:text-sm font-mono tracking-wide tabular-nums focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 ${
+                  className={`w-full min-h-[44px] px-3.5 rounded-xl border bg-slate-50 focus:bg-white text-xs sm:text-sm font-mono tracking-wide tabular-nums focus:outline-none focus:ring-2 ${theme.focusRing} ${
                     modalError ? "border-rose-400" : "border-slate-300"
                   }`}
                   autoFocus
@@ -194,7 +198,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }:
                 className="w-full min-h-[44px] bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-xl flex items-center justify-center gap-2 transition-colors duration-150"
               >
                 <span>ค้นหางานซ่อม</span>
-                <ArrowRight className="h-4 w-4 text-emerald-400" />
+                <ArrowRight className={`h-4 w-4 ${theme.accentText}`} />
               </button>
             </form>
 

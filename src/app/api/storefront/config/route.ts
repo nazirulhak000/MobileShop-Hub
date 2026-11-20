@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { checkOrigin, hashToken, requireStaffSession, staffTokens } from "@/lib/staff-auth";
 import { safeError } from "@/lib/staff-http";
@@ -381,6 +382,15 @@ export async function PUT(req: NextRequest) {
       where: { id: tenantId },
       select: { id: true, name: true, slug: true, logoUrl: true },
     });
+
+    if (updatedTenant?.slug) {
+      try {
+        revalidatePath(`/store/${updatedTenant.slug}`);
+        revalidatePath(`/store/${updatedTenant.slug}/[pageSlug]`, "page");
+      } catch (err) {
+        console.warn("revalidatePath error in storefront config PUT:", err);
+      }
+    }
 
     return NextResponse.json({
       success: true,

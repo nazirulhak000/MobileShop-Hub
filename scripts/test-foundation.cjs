@@ -17,7 +17,9 @@ function run(args) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 const schema = path.join(directory, `schema-${Date.now()}.prisma`);
-fs.writeFileSync(schema, fs.readFileSync('prisma/schema.prisma', 'utf8').replace(/url\s*=\s*"file:\.\/dev.db"/, `url = "file:./${filename}"`));
+const schemaContent = fs.readFileSync('prisma/schema.prisma', 'utf8')
+  .replace(/datasource db \{[\s\S]*?\}/, `datasource db {\n  provider = "sqlite"\n  url      = "file:./${filename}"\n}`);
+fs.writeFileSync(schema, schemaContent);
 run(['node_modules/prisma/build/index.js', 'db', 'push', '--schema', schema, '--skip-generate']);
 if (process.argv.includes('--e2e')) {
   run(['node_modules/tsx/dist/cli.mjs', 'tests/seed-e2e.ts']);

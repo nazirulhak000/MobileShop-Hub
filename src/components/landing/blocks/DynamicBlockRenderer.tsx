@@ -48,6 +48,10 @@ export function DynamicBlockRenderer({
     ...block,
   };
 
+  const blockClassName = [className, mergedData.customCssClass, mergedData.className]
+    .filter(Boolean)
+    .join(" ");
+
   const normalizedType = normalizeBlockType(block.type);
 
   try {
@@ -67,7 +71,7 @@ export function DynamicBlockRenderer({
             discountTag={mergedData.discountTag}
             expiryNotice={mergedData.expiryNotice}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -81,7 +85,7 @@ export function DynamicBlockRenderer({
             columns={mergedData.columns}
             images={mergedData.images}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -97,7 +101,7 @@ export function DynamicBlockRenderer({
             videoType={mergedData.videoType}
             aspectRatio={mergedData.aspectRatio}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -115,7 +119,7 @@ export function DynamicBlockRenderer({
             badge={mergedData.badge}
             align={mergedData.align}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -137,7 +141,7 @@ export function DynamicBlockRenderer({
             secondaryButtonUrl={mergedData.secondaryButtonUrl}
             benefits={mergedData.benefits}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -152,7 +156,7 @@ export function DynamicBlockRenderer({
             embedType={mergedData.embedType}
             height={mergedData.height}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
@@ -184,7 +188,7 @@ export function DynamicBlockRenderer({
             phone={mergedData.phone || tenantInfo?.phone || undefined}
             lineId={mergedData.lineId || tenantInfo?.lineId || undefined}
             themeColor={themeColor}
-            className={className}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );

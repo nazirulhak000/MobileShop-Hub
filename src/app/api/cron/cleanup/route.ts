@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
       deleted: { authThrottle: authThrottle.count, otpChallenge: otpChallenge.count, staffSession: staffSession.count, customerSession: customerSession.count, publicTrackingToken: publicTrackingToken.count },
       ranAt: now.toISOString(),
     }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
+  } catch (error) {
+    console.error("[CRON cleanup error]", error instanceof Error ? error.message : error);
     return NextResponse.json({ error: "Cleanup failed" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

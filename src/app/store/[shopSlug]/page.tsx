@@ -231,6 +231,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             showEstimate={config.showPriceEstimator}
             showLiveTracking={config.showLiveTracking}
             showLocation={config.showLocationSection}
+            themeColor={themeColor}
           />
         );
 
@@ -286,6 +287,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             phone={config.phone}
             lineId={config.lineId}
             googleMapsUrl={config.googleMapsUrl}
+            themeColor={themeColor}
           />
         );
 
@@ -357,6 +359,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         hiddenSections={hiddenSections}
         navigationMenu={parsedNavMenu}
         isSubpage={false}
+        themeColor={themeColor}
       />
 
       <main id="main-content">
@@ -402,7 +405,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
                     href={`tel:${config.phone.replace(/[^0-9+]/g, "")}`}
                     className="min-h-[44px] px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs"
                   >
-                    <Phone className="h-4 w-4 text-emerald-400" />
+                    <Phone className={`h-4 w-4 ${theme.accentText}`} />
                     <span>โทร {config.phone}</span>
                   </a>
                 )}
@@ -411,7 +414,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
                     href={`https://line.me/R/ti/p/${encodeURIComponent(config.lineId.trim().startsWith("@") ? config.lineId.trim() : `@${config.lineId.trim()}`)}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="min-h-[44px] px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs"
+                    className={`min-h-[44px] px-6 py-2.5 rounded-xl ${theme.navCta} text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs`}
                   >
                     <MessageCircle className="h-4 w-4" />
                     <span>ติดต่อทาง LINE ({config.lineId})</span>
@@ -431,7 +434,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
                     rel="noreferrer"
                     className="min-h-[44px] px-6 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors"
                   >
-                    <Navigation className="h-4 w-4 text-emerald-600" />
+                    <Navigation className={`h-4 w-4 ${theme.lightAccentText}`} />
                     <span>แผนที่ Google Maps</span>
                   </a>
                 )}
@@ -448,6 +451,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         address={address}
         phone={config.phone}
         hiddenSections={hiddenSections}
+        themeColor={themeColor}
       />
 
       {/* 6. Mobile Sticky Action Bar */}
@@ -457,6 +461,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
           phone={config.phone}
           lineId={config.lineId}
           showEstimate={config.showPriceEstimator}
+          themeColor={themeColor}
         />
       )}
     </div>

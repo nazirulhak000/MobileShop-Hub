@@ -262,8 +262,8 @@ SQLite ใช้พัฒนา/ทดสอบได้; หากเปิด 
 - [x] Q08 ตรวจ loading/empty/401/403/404/409/429/500/เน็ตหลุด/กดซ้ำ และไม่ให้หน้า cache ของคนก่อนค้าง
 - [x] Q09 รัน build, TypeScript และ linter ที่รองรับโครงการจริง; เพิ่ม test runner เฉพาะที่จำเป็นต่อ auth/isolation/concurrency/E2E
 - [x] Q10 ทำ migration dry run บน DB copy ตรวจจำนวนแถว ยอดเงิน orphan/tenant consistency และ restore ซ้อมก่อน production
-- [ ] Q11 Feature flag ต่อ tenant เปิดร้านทดสอบก่อน พร้อมบันทึกข้อผิดพลาดแบบไม่ log secret และแผน rollback
-- [ ] Q12 ตั้ง backup/monitoring สำหรับ session errors, forbidden access, booking conflicts, outbox failures; เขียน runbook
+- [x] Q11 Feature flag ต่อ tenant เปิดร้านทดสอบก่อน พร้อมบันทึกข้อผิดพลาดแบบไม่ log secret และแผน rollback
+- [x] Q12 ตั้ง backup/monitoring สำหรับ session errors, forbidden access, booking conflicts, outbox failures; เขียน runbook
 
 **ตรวจรับ MVP:** Phase 0–4 และ Phase 6 ผ่านครบ; ไม่มี P0 ค้าง; provider จริงพร้อม; migration ผ่านการซ้อม; ผู้ใช้จริงจองและดูเฉพาะข้อมูลตนได้
 

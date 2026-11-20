@@ -10,6 +10,7 @@ import {
   CalendarDays,
   UserRound,
 } from "lucide-react";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface LandingFooterProps {
   /** Shop display name. Defaults to the platform name on the demo landing. */
@@ -22,6 +23,10 @@ interface LandingFooterProps {
   shopSlug?: string;
   /** Section anchors not rendered on this page (e.g. "#estimate"). */
   hiddenSections?: string[];
+  /** Whether the current page is a subpage */
+  isSubpage?: boolean;
+  /** Theme color palette */
+  themeColor?: StorefrontThemeColor;
 }
 
 export function LandingFooter({
@@ -30,8 +35,13 @@ export function LandingFooter({
   phone,
   shopSlug,
   hiddenSections = [],
+  isSubpage = false,
+  themeColor = "emerald",
 }: LandingFooterProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const shows = (href: string) => !hiddenSections.includes(href);
+  const resolveAnchor = (anchor: string) => (isSubpage && shopSlug ? `/store/${shopSlug}${anchor}` : anchor);
+
   return (
     <footer className="bg-slate-950 text-slate-400 text-xs border-t border-slate-800">
       {/* Top Banner Callout in Footer */}
@@ -50,32 +60,32 @@ export function LandingFooter({
             <div className="flex flex-wrap items-center justify-center gap-3">
               {shows("#track-search") && (
                 <a
-                  href="#track-search"
-                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  href={resolveAnchor("#track-search")}
+                  className={`min-h-[44px] px-5 py-2.5 rounded-xl ${theme.navCta} font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                 >
                   ตรวจสอบสถานะงานซ่อมสด
                 </a>
               )}
               {shows("#estimate") && (
               <a
-                href="#estimate"
-                className="min-h-[44px] px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs border border-slate-700 transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                href={resolveAnchor("#estimate")}
+                className={`min-h-[44px] px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs border border-slate-700 transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
               >
                 ประเมินราคาก่อนซ่อม
               </a>
               )}
               <Link
                 href={shopSlug ? `/s/${shopSlug}` : "/customer"}
-                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                className={`min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
               >
                 <CalendarDays className="h-4 w-4 text-teal-200" />
                 <span>จองคิว / พอร์ทัลลูกค้า</span>
               </Link>
               <Link
                 href="/dashboard"
-                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs inline-flex items-center gap-1.5 transition-colors duration-150 motion-reduce:transition-none border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                className={`min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs inline-flex items-center gap-1.5 transition-colors duration-150 motion-reduce:transition-none border border-slate-700 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
               >
-                <LogIn className="h-4 w-4 text-emerald-400" />
+                <LogIn className={`h-4 w-4 ${theme.accentText}`} />
                 <span>สำหรับพนักงาน (Staff Portal)</span>
               </Link>
             </div>
@@ -88,9 +98,9 @@ export function LandingFooter({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           {/* Col 1: Brand & Bio (2 cols on lg) */}
           <div className="lg:col-span-2 space-y-4">
-            <Link href={shopSlug ? `/store/${shopSlug}` : "/landing"} className="flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg p-1">
+            <Link href={shopSlug ? `/store/${shopSlug}` : "/landing"} className={`flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} rounded-lg p-1`}>
               <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-2xs">
-                <Smartphone className="h-5 w-5 text-emerald-400" />
+                <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
               </div>
               <div className="flex items-center gap-2">
                 {shopName ? (
@@ -115,7 +125,7 @@ export function LandingFooter({
             <div className="pt-2 space-y-2 text-slate-300 text-xs">
               {address && (
                 <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <MapPin className={`h-4 w-4 ${theme.accentText} shrink-0`} />
                   <span className="tabular-nums">{address}</span>
                 </div>
               )}
@@ -124,7 +134,7 @@ export function LandingFooter({
                   href={`tel:${phone.replace(/[^0-9+]/g, "")}`}
                   className="flex items-center gap-2 min-h-[44px] hover:text-white"
                 >
-                  <Phone className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <Phone className={`h-4 w-4 ${theme.accentText} shrink-0`} />
                   <span className="font-mono tabular-nums">{phone}</span>
                 </a>
               )}
@@ -147,7 +157,7 @@ export function LandingFooter({
               ].map((service, sIdx) => (
                 <li key={sIdx}>
                   {shows("#services") ? (
-                    <a href="#services" className="hover:text-white transition-colors duration-150">
+                    <a href={resolveAnchor("#services")} className="hover:text-white transition-colors duration-150">
                       {service}
                     </a>
                   ) : (
@@ -176,42 +186,42 @@ export function LandingFooter({
               </li>
               {shows("#track-search") && (
                 <li>
-                  <a href="#track-search" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#track-search")} className="hover:text-white transition-colors duration-150">
                     ติดตามงานซ่อมออนไลน์ (Live Tracking)
                   </a>
                 </li>
               )}
               {shows("#estimate") && (
                 <li>
-                  <a href="#estimate" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#estimate")} className="hover:text-white transition-colors duration-150">
                     คำนวณราคาซ่อมล่วงหน้า
                   </a>
                 </li>
               )}
               {shows("#inspection") && (
                 <li>
-                  <a href="#inspection" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#inspection")} className="hover:text-white transition-colors duration-150">
                     มาตรฐานการตรวจเช็ค 10 จุด
                   </a>
                 </li>
               )}
               {shows("#reviews") && (
                 <li>
-                  <a href="#reviews" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#reviews")} className="hover:text-white transition-colors duration-150">
                     ผลงานเปรียบเทียบก่อน-หลังซ่อม
                   </a>
                 </li>
               )}
               {shows("#location") && (
                 <li>
-                  <a href="#location" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#location")} className="hover:text-white transition-colors duration-150">
                     แผนที่และการเดินทาง
                   </a>
                 </li>
               )}
               {shows("#faq") && (
                 <li>
-                  <a href="#faq" className="hover:text-white transition-colors duration-150">
+                  <a href={resolveAnchor("#faq")} className="hover:text-white transition-colors duration-150">
                     คำถามที่พบบ่อย (FAQ)
                   </a>
                 </li>
@@ -225,7 +235,7 @@ export function LandingFooter({
               ระบบภายในร้าน
             </h4>
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
-              <span className="text-xs font-mono text-emerald-400 font-medium block">
+              <span className={`text-xs font-mono ${theme.accentText} font-medium block`}>
                 Staff Operations
               </span>
               <p className="text-xs text-slate-400 leading-relaxed">
@@ -235,7 +245,7 @@ export function LandingFooter({
                 href="/dashboard"
                 className="min-h-[44px] w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs rounded-lg inline-flex items-center justify-center gap-1.5 transition-colors duration-150 border border-slate-700"
               >
-                <LogIn className="h-4 w-4 text-emerald-400" />
+                <LogIn className={`h-4 w-4 ${theme.accentText}`} />
                 <span>เข้าสู่แดชบอร์ดร้าน</span>
               </Link>
             </div>

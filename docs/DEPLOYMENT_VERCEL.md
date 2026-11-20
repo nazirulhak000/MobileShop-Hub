@@ -21,9 +21,9 @@ In local development, FixMe uses SQLite (`prisma/dev.db`). However, **SQLite is 
 1. Sign up at [neon.tech](https://neon.tech) and create a project (e.g., `fixme-production`).
 2. Go to **Dashboard** -> **Connection Details**:
    - Check **Pooled connection** (uses PgBouncer / Neon connection pooler on port 5432).
-   - Copy the pooled connection string for `DATABASE_URL`:
+   - Copy the pooled connection string for `DATABASE_URL` (append `&connection_limit=1&pool_timeout=10` to avoid connection exhaustion in serverless lambdas):
      ```text
-     postgres://username:password@ep-sample-pooler.us-east-2.aws.neon.tech/fixmedb?sslmode=require
+     postgres://username:password@ep-sample-pooler.us-east-2.aws.neon.tech/fixmedb?sslmode=require&connection_limit=1&pool_timeout=10
      ```
    - Uncheck pooled connection to get the direct connection string for `DIRECT_URL`:
      ```text
@@ -34,9 +34,9 @@ In local development, FixMe uses SQLite (`prisma/dev.db`). However, **SQLite is 
 1. Sign up at [supabase.com](https://supabase.com) and create a new project.
 2. Go to **Project Settings** -> **Database**:
    - Under **Connection string**, select **URI**:
-   - Mode **Transaction** (port 6543, uses Supavisor):
+   - Mode **Transaction** (port 6543, uses Supavisor; append `&connection_limit=1&pool_timeout=10`):
      ```text
-     postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true
+     postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1&pool_timeout=10
      ```
      Use this for `DATABASE_URL`.
    - Mode **Session** or direct port 5432:
@@ -176,3 +176,11 @@ In the **Vercel Project Dashboard** -> **Settings** -> **Environment Variables**
      -H "Authorization: Bearer YOUR_CRON_SECRET"
    ```
    Should return `{"success": true, "deleted": { ... }, "ranAt": "..."}`.
+
+---
+
+## 8. Serverless Traps & Operational Runbook
+
+For production incident response, disaster recovery, monitoring alerts, and tenant feature flag rollbacks:
+- Read [docs/OPERATIONAL_RUNBOOK.md](file:///D:/Winona/Programmer/FixMe/docs/OPERATIONAL_RUNBOOK.md) (Covers Q11 Feature Flags & Q12 Backup/Monitoring Runbook).
+- **Important**: Local filesystem uploads (`src/app/api/storefront/upload`) fail on Vercel's read-only lambdas. For storefront logos/images in production, configure cloud object storage (Vercel Blob / S3 / R2) or pass image assets as data URLs.
