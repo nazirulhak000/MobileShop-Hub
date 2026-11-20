@@ -8,21 +8,12 @@ import {
   Printer,
   RotateCcw,
   Building2,
-  Calendar,
   CheckCircle2,
-  CreditCard,
-  QrCode,
-  Banknote,
-  Split,
-  Eye,
   Filter,
-  ArrowRight,
-  User,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { formatTHB } from "@/lib/utils";
@@ -38,9 +29,10 @@ interface SaleLedgerItem {
   paymentMethod: string;
   totalAmount: number;
   discount: number;
+  vatAmount: number;
   netAmount: number;
   status: string;
-  items: Array<{ name: string; qty: number; unitPrice: number; subtotal: number; imei?: string }>;
+  items: Array<{ id: string; name: string; qty: number; unitPrice: number; subtotal: number; imei?: string }>;
 }
 
 const VOID_REASONS = [
@@ -63,9 +55,11 @@ function toLedger(s: any): SaleLedgerItem {
     paymentMethod: s.paymentMethod,
     totalAmount: s.totalAmount,
     discount: s.discount,
+    vatAmount: s.vatAmount,
     netAmount: s.netAmount,
     status: s.status,
     items: (s.items ?? []).map((it: any) => ({
+      id: it.id,
       name: it.product?.name ?? "-",
       qty: it.quantity,
       unitPrice: it.unitPrice,
@@ -97,6 +91,7 @@ export default function SalesHistoryPage() {
   // Refund Modal
   const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [saleToRefund, setSaleToRefund] = useState<SaleLedgerItem | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<Record<string, boolean>>({});
   const [refundReason, setRefundReason] = useState(VOID_REASONS[0]);
   const [refundNote, setRefundNote] = useState("");
   const [refundBusy, setRefundBusy] = useState(false);
@@ -130,7 +125,6 @@ export default function SalesHistoryPage() {
     loadSales();
   }, [loadSales]);
 
-  // Payment method / status are filtered client-side so the stat cards always reflect all loaded bills.
   const filteredSales = useMemo(() => {
     return sales.filter((s) => {
       if (methodFilter !== "ALL" && s.paymentMethod !== methodFilter) return false;
@@ -141,30 +135,68 @@ export default function SalesHistoryPage() {
 
   const finalReason = refundNote.trim() ? `${refundReason} - ${refundNote.trim()}` : refundReason;
 
+  // Selected items refund total calculation
+  const calculatedRefundTotal = useMemo(() => {
+    if (!saleToRefund) return 0;
+    const items = saleToRefund.items.filter((it) => selectedItemIds[it.id]);
+    if (items.length === 0) return 0;
+    if (items.length === saleToRefund.items.length) return saleToRefund.netAmount;
+    const gross = items.reduce((acc, it) => acc + it.subtotal, 0);
+    const disc = saleToRefund.totalAmount > 0 ? (gross / saleToRefund.totalAmount) * saleToRefund.discount : 0;
+    return Math.max(0, Math.round((gross - disc) * 100) / 100);
+  }, [saleToRefund, selectedItemIds]);
+
+  const handleOpenRefundModal = (sale: SaleLedgerItem) => {
+    setSaleToRefund(sale);
+    // Default: select all items
+    const initialSelected: Record<string, boolean> = {};
+    sale.items.forEach((it) => {
+      initialSelected[it.id] = true;
+    });
+    setSelectedItemIds(initialSelected);
+    setRefundReason(VOID_REASONS[0]);
+    setRefundNote("");
+    setRefundError(null);
+    setRefundModalOpen(true);
+  };
+
   const handleProcessRefund = async () => {
     if (!saleToRefund || refundBusy) return;
     if (finalReason.trim().length < 3) {
       setRefundError("กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร");
       return;
     }
+
+    const itemsToRefund = saleToRefund.items
+      .filter((it) => selectedItemIds[it.id])
+      .map((it) => ({ saleItemId: it.id, quantity: it.qty }));
+
+    if (itemsToRefund.length === 0) {
+      setRefundError("กรุณาเลือกรายการสินค้าที่ต้องการคืนเงินอย่างน้อย 1 รายการ");
+      return;
+    }
+
     setRefundBusy(true);
     setRefundError(null);
     try {
-      const res = await fetch(`/api/sales/${encodeURIComponent(saleToRefund.id)}/void`, {
+      const res = await fetch(`/api/sales/${encodeURIComponent(saleToRefund.id)}/refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: finalReason }),
+        body: JSON.stringify({
+          reason: finalReason,
+          items: itemsToRefund.length === saleToRefund.items.length ? undefined : itemsToRefund,
+        }),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) throw new Error(json?.error || "ยกเลิกบิลไม่สำเร็จ");
+      if (!res.ok || !json?.success) throw new Error(json?.error || "ทำรายการคืนเงินไม่สำเร็จ");
       setNotice(
-        `ยกเลิก/คืนเงินบิล ${saleToRefund.invoiceNo} เรียบร้อย (ยอดเงินคืน: ${formatTHB(saleToRefund.netAmount)}) และคืนสินค้าเข้าสต็อกแล้ว`
+        `ทำรายการคืนเงินบิล ${saleToRefund.invoiceNo} เรียบร้อย (ยอดเงินคืน: ${formatTHB(calculatedRefundTotal)}) และคืนสินค้าเข้าสต็อกแล้ว`
       );
       setRefundModalOpen(false);
       setRefundNote("");
       await loadSales();
     } catch (err: any) {
-      setRefundError(err?.message || "ยกเลิกบิลไม่สำเร็จ");
+      setRefundError(err?.message || "ทำรายการคืนเงินไม่สำเร็จ");
     } finally {
       setRefundBusy(false);
     }
@@ -185,19 +217,19 @@ export default function SalesHistoryPage() {
             </Badge>
           </div>
           <p className="text-sm text-slate-500">
-            สมุดบันทึกรายการขายหน้าร้าน พิมพ์สลิปความร้อน 80mm ซ้ำ และทำรายการคืนเงิน/ยกเลิกบิลขาย
+            สมุดบันทึกรายการขายหน้าร้าน พิมพ์สลิปความร้อน 80mm/58mm ซ้ำ และทำรายการคืนเงิน/ยกเลิกบิลขาย
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <Link href="/refunds">
-            <Button variant="outline" size="sm" className="text-xs gap-1.5 border-rose-300 text-rose-700 hover:bg-rose-50">
+            <Button variant="outline" size="sm" className="text-xs gap-1.5 border-rose-300 text-rose-700 hover:bg-rose-50 font-semibold">
               <RotateCcw className="h-4 w-4" />
               <span>ดูประวัติการคืนเงิน & ยกเลิกบิล</span>
             </Button>
           </Link>
           <Link href="/pos">
-            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5 shadow-sm">
+            <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5 shadow-sm font-bold">
               <Receipt className="h-4 w-4" />
               <span>เปิดหน้าจอขาย POS</span>
             </Button>
@@ -222,15 +254,15 @@ export default function SalesHistoryPage() {
         <Card className="p-4 space-y-1">
           <span className="text-xs font-semibold text-slate-500">ยอดขายรวมสุทธิ</span>
           <div className="text-2xl font-bold font-mono text-slate-900">
-            {formatTHB(sales.filter((s) => s.status === "COMPLETED").reduce((a, b) => a + b.netAmount, 0))}
+            {formatTHB(sales.filter((s) => s.status === "COMPLETED" || s.status === "PARTIAL_REFUND").reduce((a, b) => a + b.netAmount, 0))}
           </div>
-          <div className="text-[11px] text-slate-400">จาก {sales.filter((s) => s.status === "COMPLETED").length} บิลที่สมบูรณ์</div>
+          <div className="text-[11px] text-slate-400">จาก {sales.filter((s) => s.status === "COMPLETED" || s.status === "PARTIAL_REFUND").length} บิล</div>
         </Card>
 
         <Card className="p-4 space-y-1">
           <span className="text-xs font-semibold text-emerald-700">ชำระด้วยพร้อมเพย์</span>
           <div className="text-2xl font-bold font-mono text-emerald-700">
-            {formatTHB(sales.filter((s) => s.paymentMethod === "PROMPTPAY" && s.status === "COMPLETED").reduce((a, b) => a + b.netAmount, 0))}
+            {formatTHB(sales.filter((s) => s.paymentMethod === "PROMPTPAY" && (s.status === "COMPLETED" || s.status === "PARTIAL_REFUND")).reduce((a, b) => a + b.netAmount, 0))}
           </div>
           <div className="text-[11px] text-slate-400">QR Code เงินเข้าบัญชีทันที</div>
         </Card>
@@ -238,7 +270,7 @@ export default function SalesHistoryPage() {
         <Card className="p-4 space-y-1">
           <span className="text-xs font-semibold text-blue-700">ชำระด้วยบัตรเครดิต</span>
           <div className="text-2xl font-bold font-mono text-blue-700">
-            {formatTHB(sales.filter((s) => s.paymentMethod === "CARD" && s.status === "COMPLETED").reduce((a, b) => a + b.netAmount, 0))}
+            {formatTHB(sales.filter((s) => s.paymentMethod === "CARD" && (s.status === "COMPLETED" || s.status === "PARTIAL_REFUND")).reduce((a, b) => a + b.netAmount, 0))}
           </div>
           <div className="text-[11px] text-slate-400">ผ่านเครื่องรูด EDC</div>
         </Card>
@@ -286,6 +318,7 @@ export default function SalesHistoryPage() {
             >
               <option value="ALL">ทุกสถานะ</option>
               <option value="COMPLETED">สมบูรณ์ (Completed)</option>
+              <option value="PARTIAL_REFUND">คืนเงินบางส่วน (Partial)</option>
               <option value="VOID">ยกเลิก/คืนเงิน (Void)</option>
             </select>
           </div>
@@ -329,13 +362,16 @@ export default function SalesHistoryPage() {
                 <tr key={s.id} className="hover:bg-slate-50">
                   <td className="p-3">
                     <div className="font-bold text-slate-900">{s.invoiceNo}</div>
-                    <div className="text-[10px] text-slate-400 font-normal">
+                    <div className="text-[10px] text-slate-400 font-normal font-sans">
                       {formatBkk(s.createdAt)}
                     </div>
                   </td>
                   <td className="p-3 font-sans">
                     <div className="font-semibold text-slate-800">{s.customerName}</div>
-                    <div className="text-[10px] text-slate-400">แคชเชียร์: {s.cashierName}</div>
+                    <div className="text-[10px] text-slate-400">
+                      {s.customerPhone && <span className="font-mono text-slate-500 mr-1.5">{s.customerPhone}</span>}
+                      แคชเชียร์: {s.cashierName}
+                    </div>
                   </td>
                   <td className="p-3 font-sans">
                     <div className="space-y-0.5">
@@ -360,6 +396,10 @@ export default function SalesHistoryPage() {
                       <Badge variant="success" className="text-[10px]">
                         สำเร็จ
                       </Badge>
+                    ) : s.status === "PARTIAL_REFUND" ? (
+                      <Badge variant="warning" className="text-[10px] bg-amber-100 text-amber-800 border-amber-300">
+                        คืนบางส่วน
+                      </Badge>
                     ) : (
                       <Badge variant="danger" className="text-[10px]">
                         ยกเลิก (Void)
@@ -375,27 +415,21 @@ export default function SalesHistoryPage() {
                           setSelectedSale(s);
                           setReprintModalOpen(true);
                         }}
-                        className="text-xs h-7 px-2 gap-1"
+                        className="text-xs h-7 px-2 gap-1 font-semibold"
                         title="พิมพ์ใบเสร็จซ้ำ"
                       >
                         <Printer className="h-3 w-3" />
                         <span>พิมพ์ซ้ำ</span>
                       </Button>
 
-                      {s.status === "COMPLETED" && canVoid && (
+                      {s.status !== "VOID" && canVoid && (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            setSaleToRefund(s);
-                            setRefundReason(VOID_REASONS[0]);
-                            setRefundNote("");
-                            setRefundError(null);
-                            setRefundModalOpen(true);
-                          }}
-                          className="text-xs h-7 px-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                          onClick={() => handleOpenRefundModal(s)}
+                          className="text-xs h-7 px-2 text-rose-600 border-rose-200 hover:bg-rose-50 font-semibold"
                         >
-                          ยกเลิกบิล
+                          คืนเงิน/ยกเลิก
                         </Button>
                       )}
                     </div>
@@ -481,6 +515,7 @@ export default function SalesHistoryPage() {
                     <span>{formatTHB(selectedSale.netAmount)}</span>
                   </div>
                   <div className="flex justify-between text-slate-500 text-[9px]">
+                    <span>ภาษี VAT 7%: {formatTHB(selectedSale.vatAmount)}</span>
                     <span>วิธีชำระ: {selectedSale.paymentMethod}</span>
                   </div>
                 </div>
@@ -501,7 +536,7 @@ export default function SalesHistoryPage() {
                 window.print();
                 setTimeout(() => document.body.classList.remove("printing-slip"), 1000);
               }}
-              className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 font-bold"
             >
               <Printer className="h-4 w-4" />
               <span>พิมพ์สลิป ({reprintSlipWidth})</span>
@@ -510,11 +545,11 @@ export default function SalesHistoryPage() {
         </div>
       </Dialog>
 
-      {/* VOID / REFUND CONFIRMATION MODAL */}
+      {/* VOID / REFUND CONFIRMATION MODAL WITH ITEM SELECTION */}
       <Dialog open={refundModalOpen} onOpenChange={(o) => !refundBusy && setRefundModalOpen(o)} preventClose={refundBusy}>
         <DialogHeader>
           <DialogTitle onClose={() => !refundBusy && setRefundModalOpen(false)}>
-            ยกเลิกบิลขาย & คืนเงิน (Void / Refund Sale)
+            คืนเงิน / ยกเลิกบิลขาย (Refund / Void Sale)
           </DialogTitle>
         </DialogHeader>
         {saleToRefund && (
@@ -522,9 +557,42 @@ export default function SalesHistoryPage() {
             <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 space-y-1 font-mono">
               <div className="flex justify-between font-bold text-slate-900">
                 <span>เลขที่บิล: {saleToRefund.invoiceNo}</span>
-                <span className="text-rose-700">{formatTHB(saleToRefund.netAmount)}</span>
+                <span className="text-rose-700">ยอดเงินคืน: {formatTHB(calculatedRefundTotal)}</span>
               </div>
               <div className="text-slate-500 font-sans">ลูกค้า: {saleToRefund.customerName}</div>
+            </div>
+
+            <div>
+              <label className="font-semibold text-slate-700 mb-1.5 block">
+                เลือกสินค้าที่ต้องการรับคืน (ติ๊กเพื่อคืนเงิน):
+              </label>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50">
+                {saleToRefund.items.map((it) => (
+                  <label
+                    key={it.id}
+                    className="flex items-center justify-between p-1.5 rounded hover:bg-white cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={!!selectedItemIds[it.id]}
+                        onChange={(e) => {
+                          setSelectedItemIds((prev) => ({
+                            ...prev,
+                            [it.id]: e.target.checked,
+                          }));
+                        }}
+                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                      />
+                      <span className="font-medium text-slate-800">
+                        {it.qty}x {it.name}
+                        {it.imei && <span className="font-mono text-blue-600 text-[10px]"> (IMEI: {it.imei})</span>}
+                      </span>
+                    </div>
+                    <span className="font-mono font-bold text-slate-700">{formatTHB(it.subtotal)}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -549,16 +617,16 @@ export default function SalesHistoryPage() {
                 value={refundNote}
                 maxLength={300}
                 onChange={(e) => setRefundNote(e.target.value)}
-                placeholder="เช่น เครื่องมีรอยตั้งแต่แกะกล่อง"
+                placeholder="เช่น สินค้ามีรอยแตก ลูกค้าขอยกเลิก"
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
               />
             </div>
 
             <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 space-y-1">
               <div className="font-semibold text-slate-800">
-                ยกเลิกทั้งบิล: สินค้าทุกรายการและเครื่อง IMEI จะถูกคืนเข้าสต็อกสาขาอัตโนมัติ
+                การคืนสต็อก: สินค้าและเครื่อง IMEI ที่เลือกจะถูกคืนเข้าสต็อกสาขาอัตโนมัติ
               </div>
-              <div className="text-[11px] text-slate-500">ยังไม่รองรับคืนบางรายการ</div>
+              <div className="text-[11px] text-slate-500">บันทึกทั้ง POS Audit Log และ Inventory Restock Log</div>
             </div>
 
             {refundError && (
@@ -575,10 +643,10 @@ export default function SalesHistoryPage() {
           <Button
             size="sm"
             onClick={handleProcessRefund}
-            disabled={refundBusy}
+            disabled={refundBusy || calculatedRefundTotal <= 0}
             className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
           >
-            {refundBusy ? "กำลังดำเนินการ..." : "ยืนยันคืนเงิน & ยกเลิกบิล"}
+            {refundBusy ? "กำลังดำเนินการ..." : `ยืนยันคืนเงิน (${formatTHB(calculatedRefundTotal)})`}
           </Button>
         </DialogFooter>
       </Dialog>

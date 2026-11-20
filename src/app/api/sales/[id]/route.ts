@@ -14,7 +14,7 @@ async function handleGET(_request: NextRequest, { params }: { params: { id: stri
     where: {
       id,
       tenantId: actor.tenantId,
-      branchId: { in: actor.branchIds },
+      ...(actor.role === "CASHIER" ? { branchId: { in: actor.branchIds } } : {}),
     },
     select: {
       id: true,

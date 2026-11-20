@@ -10,11 +10,13 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * GET /api/sales/summary?day=YYYY-MM-DD&branch=HQ
- * Aggregates for one Bangkok day (daily takings / shift cash count). Uses groupBy/aggregate only.
+ * Aggregates for one Bangkok day (daily takings / shift cash count / branch breakdown).
+ * Fully isolated by tenantId.
  */
 async function handleGET(request: NextRequest) {
   const actor = staffContext();
   const { searchParams } = new URL(request.url);
+  const tenantId = actor.tenantId;
   const dayRaw = searchParams.get("day")?.trim() || "";
   if (dayRaw && !/^\d{4}-\d{2}-\d{2}$/.test(dayRaw)) throw new AccessError(400, "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)");
   const day = dayRaw || bangkokDateString();
@@ -22,27 +24,26 @@ async function handleGET(request: NextRequest) {
 
   const branchKey = searchParams.get("branch")?.trim() || "";
   let branchId: string | undefined;
-  if (branchKey) {
+  if (branchKey && branchKey !== "ALL") {
     const branch = await prisma.branch.findFirst({
-      where: {
-        tenantId: actor.tenantId,
-        OR: [{ code: branchKey }, { id: branchKey }],
-      },
+      where: { tenantId, OR: [{ code: branchKey }, { id: branchKey }] },
       select: { id: true },
     });
-    if (!branch || !actor.branchIds.includes(branch.id)) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
+    if (!branch || (actor.role === "CASHIER" && !actor.branchIds.includes(branch.id))) {
+      throw new AccessError(404, "ไม่พบข้อมูลสาขา");
+    }
     branchId = branch.id;
   }
   const branchWhere: Prisma.SaleWhereInput = {
-    tenantId: actor.tenantId,
-    ...(branchId ? { branchId } : { branchId: { in: actor.branchIds } }),
+    tenantId,
+    ...(branchId ? { branchId } : (actor.role === "CASHIER" ? { branchId: { in: actor.branchIds } } : {})),
   };
   const dayWhere: Prisma.SaleWhereInput = { ...branchWhere, createdAt: { gte: start, lt: end } };
 
-  const [byMethod, voided, lateVoids, topRaw] = await Promise.all([
+  const [byMethod, voided, lateVoids, topRaw, byBranchRaw, tenantBranches] = await Promise.all([
     prisma.sale.groupBy({
       by: ["paymentMethod"],
-      where: { ...dayWhere, status: "COMPLETED" },
+      where: { ...dayWhere, status: { in: ["COMPLETED", "PARTIAL_REFUND"] } },
       _count: { _all: true },
       _sum: { totalAmount: true, netAmount: true, vatAmount: true, discount: true },
     }),
@@ -52,8 +53,7 @@ async function handleGET(request: NextRequest) {
       _count: { _all: true },
       _sum: { netAmount: true },
     }),
-    // Sales from earlier days that were voided (refunded) during this day. Only a void updates a Sale row,
-    // so updatedAt is used as the void time.
+    // Sales from earlier days that were voided (refunded) during this day.
     prisma.sale.groupBy({
       by: ["paymentMethod"],
       where: { ...branchWhere, status: "VOID", createdAt: { lt: start }, updatedAt: { gte: start, lt: end } },
@@ -62,16 +62,29 @@ async function handleGET(request: NextRequest) {
     }),
     prisma.saleItem.groupBy({
       by: ["productId"],
-      where: { sale: { ...dayWhere, status: "COMPLETED" } },
+      where: { tenantId, sale: { ...dayWhere, status: { in: ["COMPLETED", "PARTIAL_REFUND"] } } },
       _sum: { quantity: true, subtotal: true },
       orderBy: { _sum: { subtotal: "desc" } },
       take: 5,
     }),
+    // Branch breakdown for the selected day across the tenant
+    prisma.sale.groupBy({
+      by: ["branchId"],
+      where: { tenantId, createdAt: { gte: start, lt: end }, status: { in: ["COMPLETED", "PARTIAL_REFUND"] } },
+      _count: { _all: true },
+      _sum: { netAmount: true, vatAmount: true, discount: true },
+    }),
+    prisma.branch.findMany({
+      where: { tenantId },
+      select: { id: true, code: true, name: true },
+    }),
   ]);
+
+  const branchMap = new Map(tenantBranches.map((b) => [b.id, b]));
 
   const products = topRaw.length
     ? await prisma.product.findMany({
-        where: { id: { in: topRaw.map((t) => t.productId) } },
+        where: { tenantId, id: { in: topRaw.map((t) => t.productId) } },
         select: { id: true, code: true, name: true },
       })
     : [];
@@ -92,6 +105,19 @@ async function handleGET(request: NextRequest) {
     count: g._count._all,
     amount: round2(g._sum.netAmount ?? 0),
   }));
+
+  const byBranch = byBranchRaw.map((b) => {
+    const meta = branchMap.get(b.branchId);
+    return {
+      branchId: b.branchId,
+      branchCode: meta?.code ?? "-",
+      branchName: meta?.name ?? "ไม่ทราบสาขา",
+      count: b._count._all,
+      netAmount: round2(b._sum.netAmount ?? 0),
+      vatAmount: round2(b._sum.vatAmount ?? 0),
+      discount: round2(b._sum.discount ?? 0),
+    };
+  });
 
   return NextResponse.json({
     success: true,
@@ -117,6 +143,8 @@ async function handleGET(request: NextRequest) {
         quantity: t._sum.quantity ?? 0,
         amount: round2(t._sum.subtotal ?? 0),
       })),
+      byBranch,
+      branches: tenantBranches,
     },
   });
 }

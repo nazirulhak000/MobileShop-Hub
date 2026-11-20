@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Building2, Printer, RefreshCw, AlertCircle, CheckCircle2, Lock, FileCheck2, User, HelpCircle } from "lucide-react";
+import { Building2, Printer, RefreshCw, CheckCircle2, Lock, FileCheck2 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +19,16 @@ interface MethodRow {
   discount: number;
 }
 
+interface BranchBreakdownRow {
+  branchId: string;
+  branchCode: string;
+  branchName: string;
+  count: number;
+  netAmount: number;
+  vatAmount: number;
+  discount: number;
+}
+
 interface DailySummary {
   day: string;
   byPaymentMethod: MethodRow[];
@@ -28,6 +38,8 @@ interface DailySummary {
   refundsOfEarlierSales: Array<{ paymentMethod: string; count: number; amount: number }>;
   cashRefundsOfEarlierSales: number;
   topProducts: Array<{ productId: string; code: string; name: string; quantity: number; amount: number }>;
+  byBranch?: BranchBreakdownRow[];
+  branches?: Array<{ id: string; code: string; name: string }>;
 }
 
 interface CloseRecord {
@@ -47,7 +59,6 @@ const METHOD_LABELS: Record<string, string> = {
   SPLIT: "แยกชำระหลายช่องทาง (Split)",
 };
 
-// Client-safe "YYYY-MM-DD" in Bangkok time.
 const bangkokToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
 
 const parseSafeNum = (val: string) => {
@@ -60,6 +71,7 @@ const parseSafeNum = (val: string) => {
 export default function DailyTakingsPage() {
   const { currentBranch, currentUser } = useApp();
   const [selectedDate, setSelectedDate] = useState(() => bangkokToday());
+  const [selectedBranch, setSelectedBranch] = useState(() => currentBranch.code || "HQ");
   const [summary, setSummary] = useState<DailySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -75,7 +87,8 @@ export default function DailyTakingsPage() {
   const [zReportModalOpen, setZReportModalOpen] = useState(false);
   const [zReportPaper, setZReportPaper] = useState<"80mm" | "58mm" | "a4">("80mm");
 
-  const storageKey = `mobileshop_daily_close_${currentBranch.code}_${selectedDate}`;
+  const isAllBranches = selectedBranch === "ALL";
+  const storageKey = `mobileshop_daily_close_${selectedBranch}_${selectedDate}`;
 
   useEffect(() => {
     try {
@@ -91,11 +104,11 @@ export default function DailyTakingsPage() {
   }, [storageKey]);
 
   const loadSummary = useCallback(async () => {
-    if (!currentBranch.code || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const params = new URLSearchParams({ day: selectedDate, branch: currentBranch.code });
+      const params = new URLSearchParams({ day: selectedDate, branch: selectedBranch });
       const res = await fetch(`/api/sales/summary?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) throw new Error(json?.error || "โหลดยอดรับเงินประจำวันไม่สำเร็จ");
@@ -106,7 +119,7 @@ export default function DailyTakingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentBranch.code, selectedDate]);
+  }, [selectedBranch, selectedDate]);
 
   useEffect(() => {
     void loadSummary();
@@ -150,43 +163,62 @@ export default function DailyTakingsPage() {
     }, 1000);
   };
 
+  const branchDisplayLabel = isAllBranches
+    ? "ทุกสาขาในระบบ (All Branches)"
+    : (summary?.branches?.find((b) => b.code === selectedBranch)?.name || currentBranch.name);
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
               ยอดรับเงินประจำวัน (Daily Takings & Z-Report)
             </h1>
             <Badge variant="outline" className="border-blue-300 bg-blue-50/50 text-blue-700 font-medium">
               <Building2 className="mr-1 h-3 w-3 inline" />
-              {currentBranch.name}
+              {branchDisplayLabel}
             </Badge>
-            {closeRecord ? (
+            {!isAllBranches && closeRecord ? (
               <Badge className="bg-emerald-600 text-white font-semibold gap-1">
                 <CheckCircle2 className="h-3 w-3" />
                 ปิดรอบสิ้นวันแล้ว
               </Badge>
-            ) : (
+            ) : !isAllBranches ? (
               <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700 font-semibold gap-1">
                 <Lock className="h-3 w-3" />
                 กำลังเปิดกะขาย
               </Badge>
-            )}
+            ) : null}
           </div>
           <p className="text-sm text-slate-500">
             แยกยอดรับเงินตามช่องทางชำระจากบิลขาย POS จริง ตรวจสอบเงินสดในลิ้นชัก และปิดรอบสิ้นวัน (Z-Report)
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {summary?.branches && summary.branches.length > 1 && (
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800 font-semibold shadow-xs"
+            >
+              <option value="ALL">🏢 ทุกสาขาในระบบ</option>
+              {summary.branches.map((b) => (
+                <option key={b.id} value={b.code}>
+                  📍 สาขา {b.name} ({b.code})
+                </option>
+              ))}
+            </select>
+          )}
+
           <Input
             type="date"
             value={selectedDate}
             max={bangkokToday()}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="w-40 text-xs font-mono"
+            className="w-36 text-xs font-mono"
           />
           <Button variant="outline" size="sm" onClick={loadSummary} disabled={loading} className="text-xs gap-1.5">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -196,7 +228,7 @@ export default function DailyTakingsPage() {
             size="sm"
             onClick={() => setZReportModalOpen(true)}
             disabled={loading || !summary}
-            className="bg-slate-900 hover:bg-slate-800 text-white text-xs gap-1.5"
+            className="bg-slate-900 hover:bg-slate-800 text-white text-xs gap-1.5 font-bold"
           >
             <Printer className="h-4 w-4" />
             <span>พิมพ์รายงาน Z-Report</span>
@@ -204,7 +236,7 @@ export default function DailyTakingsPage() {
         </div>
       </div>
 
-      {closeRecord && (
+      {!isAllBranches && closeRecord && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="space-y-1">
             <div className="flex items-center gap-2 font-bold text-emerald-800 text-sm">
@@ -278,6 +310,47 @@ export default function DailyTakingsPage() {
         </Card>
       </div>
 
+      {/* Multi-Branch Comparison Breakdown (when viewing all branches) */}
+      {isAllBranches && summary?.byBranch && summary.byBranch.length > 0 && (
+        <Card className="rounded-2xl border-blue-200 bg-blue-50/20 shadow-2xs overflow-hidden">
+          <CardHeader className="p-4 border-b border-blue-100 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-bold text-slate-900">เปรียบเทียบยอดขายรายสาขา (Branch Breakdown)</CardTitle>
+              <CardDescription className="text-xs text-slate-500">ยอดขายสุทธิและจำนวนบิลแยกตามสาขาประจำวันที่ {selectedDate}</CardDescription>
+            </div>
+            <Badge variant="outline" className="text-xs bg-white text-blue-700 border-blue-300">
+              {summary.byBranch.length} สาขา
+            </Badge>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-blue-50/60 border-b border-blue-100 text-slate-600 font-semibold">
+                <tr>
+                  <th className="p-3 text-left">สาขา</th>
+                  <th className="p-3 text-center">รหัสสาขา</th>
+                  <th className="p-3 text-center">จำนวนบิล</th>
+                  <th className="p-3 text-right">ส่วนลด</th>
+                  <th className="p-3 text-right">VAT 7%</th>
+                  <th className="p-3 text-right">ยอดรับเงินสุทธิ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-blue-100/50 tabular-nums bg-white">
+                {summary.byBranch.map((br) => (
+                  <tr key={br.branchId} className="hover:bg-blue-50/40 transition-colors">
+                    <td className="p-3 font-bold text-slate-900">{br.branchName}</td>
+                    <td className="p-3 text-center font-mono text-slate-500">{br.branchCode}</td>
+                    <td className="p-3 text-center font-semibold text-slate-700">{br.count}</td>
+                    <td className="p-3 text-right text-rose-600">{br.discount > 0 ? `-${formatTHB(br.discount)}` : "-"}</td>
+                    <td className="p-3 text-right text-slate-600">{formatTHB(br.vatAmount)}</td>
+                    <td className="p-3 text-right font-bold text-teal-700">{formatTHB(br.netAmount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {/* Breakdown by payment method */}
       <Card className="rounded-2xl border-slate-200/90 shadow-2xs overflow-hidden">
         <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
@@ -337,11 +410,6 @@ export default function DailyTakingsPage() {
             </tfoot>
           </table>
         </div>
-        {summary && summary.byPaymentMethod.some((m) => m.paymentMethod === "SPLIT") && (
-          <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
-            หมายเหตุ: บิลแบบแยกชำระ (Split) แสดงเป็นยอดรวม ระบบยังไม่แยกส่วนเงินสด/โอนของบิลประเภทนี้
-          </div>
-        )}
       </Card>
 
       {/* Top products of the day */}
@@ -383,81 +451,83 @@ export default function DailyTakingsPage() {
         </div>
       </Card>
 
-      {/* Cash Drawer Reconciliation & End of Day Close */}
-      <Card className="rounded-2xl border-slate-200/90 shadow-2xs overflow-hidden print:hidden">
-        <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-sm font-bold text-slate-900">ตรวจนับเงินสดลิ้นชัก & ปิดรอบสิ้นวัน (Cash Reconciliation)</CardTitle>
-            <CardDescription className="text-xs text-slate-500">
-              เปรียบเทียบยอดเงินสดในลิ้นชักที่นับได้จริงกับยอดที่ระบบคำนวณ พร้อมบันทึกปิดรอบสิ้นวัน
-            </CardDescription>
-          </div>
-          {!closeRecord && (
-            <Button
-              size="sm"
-              onClick={() => setCloseModalOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs gap-1.5 shadow-sm"
-            >
-              <Lock className="h-3.5 w-3.5" />
-              <span>ปิดกะ / ปิดยอดสิ้นวัน</span>
-            </Button>
-          )}
-        </CardHeader>
-        <div className="p-4 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
-              <span className="text-slate-500 font-medium">เงินทอนตั้งต้น (Opening Float)</span>
-              <Input
-                type="text"
-                value={openingFloat}
-                onChange={(e) => setOpeningFloat(e.target.value)}
-                placeholder="0.00"
-                className="h-8 text-xs font-mono mt-1"
-              />
+      {/* Cash Drawer Reconciliation (Shown when specific branch is selected) */}
+      {!isAllBranches && (
+        <Card className="rounded-2xl border-slate-200/90 shadow-2xs overflow-hidden print:hidden">
+          <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-bold text-slate-900">ตรวจนับเงินสดลิ้นชัก & ปิดรอบสิ้นวัน (Cash Reconciliation)</CardTitle>
+              <CardDescription className="text-xs text-slate-500">
+                เปรียบเทียบยอดเงินสดในลิ้นชักที่นับได้จริงกับยอดที่ระบบคำนวณ พร้อมบันทึกปิดรอบสิ้นวัน
+              </CardDescription>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
-              <span className="text-slate-500 font-medium">ยอดขายเงินสดวันนี้ (+)</span>
-              <div className="text-lg font-bold tabular-nums text-slate-900 mt-1">{formatTHB(summary?.cashSales ?? 0)}</div>
-            </div>
-            <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3 space-y-1">
-              <span className="text-rose-700 font-medium">คืนเงินสดบิลวันก่อน (-)</span>
-              <div className="text-lg font-bold tabular-nums text-rose-700 mt-1">-{formatTHB(summary?.cashRefundsOfEarlierSales ?? 0)}</div>
-            </div>
-            <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-1">
-              <span className="text-blue-700 font-medium">ยอดเงินสดที่ควรมีในลิ้นชัก (=)</span>
-              <div className="text-lg font-bold tabular-nums text-blue-900 mt-1">{formatTHB(expectedCash)}</div>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-end gap-3 pt-2 border-t border-slate-100">
-            <div className="flex-1 max-w-xs">
-              <label className="text-xs font-semibold text-slate-700 mb-1 block">จำนวนเงินสดที่นับได้จริง (Actual Cash)</label>
-              <Input
-                type="text"
-                placeholder="0.00"
-                value={drawerCash}
-                onChange={(e) => setDrawerCash(e.target.value)}
-                className="text-sm h-10 font-mono"
-              />
-            </div>
-            {drawerDiscrepancy !== null && (
-              <div className={`rounded-xl border px-4 py-2.5 text-sm font-bold tabular-nums ${
-                drawerDiscrepancy === 0
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : drawerDiscrepancy > 0
-                  ? "border-blue-200 bg-blue-50 text-blue-700"
-                  : "border-rose-200 bg-rose-50 text-rose-700"
-              }`}>
-                {drawerDiscrepancy === 0
-                  ? "✓ ยอดเงินสดตรงเป๊ะ (ไม่มีผลต่าง)"
-                  : drawerDiscrepancy > 0
-                  ? `เงินเกิน +${formatTHB(drawerDiscrepancy)}`
-                  : `เงินขาด ${formatTHB(drawerDiscrepancy)}`}
-              </div>
+            {!closeRecord && (
+              <Button
+                size="sm"
+                onClick={() => setCloseModalOpen(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs gap-1.5 shadow-sm"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                <span>ปิดกะ / ปิดยอดสิ้นวัน</span>
+              </Button>
             )}
+          </CardHeader>
+          <div className="p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
+                <span className="text-slate-500 font-medium">เงินทอนตั้งต้น (Opening Float)</span>
+                <Input
+                  type="text"
+                  value={openingFloat}
+                  onChange={(e) => setOpeningFloat(e.target.value)}
+                  placeholder="0.00"
+                  className="h-8 text-xs font-mono mt-1"
+                />
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
+                <span className="text-slate-500 font-medium">ยอดขายเงินสดวันนี้ (+)</span>
+                <div className="text-lg font-bold tabular-nums text-slate-900 mt-1">{formatTHB(summary?.cashSales ?? 0)}</div>
+              </div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3 space-y-1">
+                <span className="text-rose-700 font-medium">คืนเงินสดบิลวันก่อน (-)</span>
+                <div className="text-lg font-bold tabular-nums text-rose-700 mt-1">-{formatTHB(summary?.cashRefundsOfEarlierSales ?? 0)}</div>
+              </div>
+              <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-1">
+                <span className="text-blue-700 font-medium">ยอดเงินสดที่ควรมีในลิ้นชัก (=)</span>
+                <div className="text-lg font-bold tabular-nums text-blue-900 mt-1">{formatTHB(expectedCash)}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3 pt-2 border-t border-slate-100">
+              <div className="flex-1 max-w-xs">
+                <label className="text-xs font-semibold text-slate-700 mb-1 block">จำนวนเงินสดที่นับได้จริง (Actual Cash)</label>
+                <Input
+                  type="text"
+                  placeholder="0.00"
+                  value={drawerCash}
+                  onChange={(e) => setDrawerCash(e.target.value)}
+                  className="text-sm h-10 font-mono"
+                />
+              </div>
+              {drawerDiscrepancy !== null && (
+                <div className={`rounded-xl border px-4 py-2.5 text-sm font-bold tabular-nums ${
+                  drawerDiscrepancy === 0
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : drawerDiscrepancy > 0
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-rose-200 bg-rose-50 text-rose-700"
+                }`}>
+                  {drawerDiscrepancy === 0
+                    ? "✓ ยอดเงินสดตรงเป๊ะ (ไม่มีผลต่าง)"
+                    : drawerDiscrepancy > 0
+                    ? `เงินเกิน +${formatTHB(drawerDiscrepancy)}`
+                    : `เงินขาด ${formatTHB(drawerDiscrepancy)}`}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       {/* CLOSE REGISTER MODAL */}
       <Dialog open={closeModalOpen} onOpenChange={setCloseModalOpen}>
@@ -478,7 +548,7 @@ export default function DailyTakingsPage() {
             <div className="space-y-2 border border-slate-200 rounded-xl p-3 bg-slate-50 font-mono">
               <div className="flex justify-between">
                 <span className="text-slate-600 font-sans">สาขา:</span>
-                <span className="font-bold text-slate-900">{currentBranch.name}</span>
+                <span className="font-bold text-slate-900">{branchDisplayLabel}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600 font-sans">วันที่:</span>
@@ -489,7 +559,7 @@ export default function DailyTakingsPage() {
                 <span className="font-bold text-slate-900">{currentUser.name || "แคชเชียร์"}</span>
               </div>
               <div className="flex justify-between border-t border-slate-200 pt-1">
-                <span className="text-slate-600 font-sans">ยอดขายรวมสุทธิ (ทุกช่องทาง):</span>
+                <span className="text-slate-600 font-sans">ยอดขายรวมสุทธิ:</span>
                 <span className="font-bold text-teal-700">{formatTHB(totals.netAmount)}</span>
               </div>
               <div className="flex justify-between">
@@ -501,7 +571,7 @@ export default function DailyTakingsPage() {
                 <span className="font-bold text-blue-700">{formatTHB(hasCounted ? actualCashNum : expectedCash)}</span>
               </div>
               <div className="flex justify-between font-bold border-t border-slate-200 pt-1">
-                <span className="text-slate-800 font-sans">ผลต่างเงินสด (Discrepancy):</span>
+                <span className="text-slate-800 font-sans">ผลต่างเงินสด:</span>
                 <span className={drawerDiscrepancy && drawerDiscrepancy < 0 ? "text-rose-700" : "text-emerald-700"}>
                   {drawerDiscrepancy !== null
                     ? drawerDiscrepancy === 0
@@ -534,7 +604,7 @@ export default function DailyTakingsPage() {
         </div>
       </Dialog>
 
-      {/* Z-REPORT PRINT MODAL (Supports 80mm and 58mm thermal, and A4) */}
+      {/* Z-REPORT PRINT MODAL */}
       <Dialog open={zReportModalOpen} onOpenChange={setZReportModalOpen}>
         <div className="max-w-2xl w-full">
           <DialogHeader>
@@ -580,7 +650,7 @@ export default function DailyTakingsPage() {
               <div className="printable-a4-sheet bg-white p-8 w-full max-w-[210mm] border border-slate-300 rounded shadow-md text-xs font-sans space-y-4 text-slate-900">
                 <div className="text-center border-b pb-4">
                   <h2 className="text-xl font-bold tracking-tight">รายงานสรุปยอดขายและปิดรอบประจำวัน (Z-REPORT)</h2>
-                  <p className="text-sm text-slate-600">MOBILESHOP HUB • สาขา {currentBranch.name}</p>
+                  <p className="text-sm text-slate-600">MOBILESHOP HUB • {branchDisplayLabel}</p>
                   <p className="text-xs text-slate-500 font-mono mt-1">ประจำวันที่ {selectedDate} | พิมพ์เมื่อ {new Date().toLocaleString("th-TH")}</p>
                 </div>
 
@@ -663,7 +733,7 @@ export default function DailyTakingsPage() {
               >
                 <div className="text-center border-b border-dashed border-slate-400 pb-2">
                   <div className="font-extrabold text-sm">MOBILESHOP HUB</div>
-                  <div className="text-[10px]">{currentBranch.name}</div>
+                  <div className="text-[10px]">{branchDisplayLabel}</div>
                   <div className="text-[11px] font-bold mt-1 text-slate-800">*** DAILY Z-REPORT ***</div>
                   <div className="text-[9px] text-slate-500">รายงานปิดรอบสิ้นวัน</div>
                 </div>
