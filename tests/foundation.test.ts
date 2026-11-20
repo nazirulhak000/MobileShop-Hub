@@ -2552,3 +2552,212 @@ test("Round 16: Product Inventory, Serialized IMEI Lifecycle, Accessories & Warr
     });
   });
 });
+
+test("Round 17: Supplier Management & CRM Audit - Profile, Tax ID, Credit Terms, Bank Details, PO Linkage, Spend Calculation & Multi-Tenant Isolation", async () => {
+  const staffB: StaffPrincipal = {
+    id: "user-b-admin",
+    tenantId: "test-b",
+    name: "Admin B",
+    username: "admin-b",
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  // 1. Supplier Profile with complete fields (Email, Bank details, 13-digit Tax ID, Credit terms)
+  let supplierA: any;
+  let supplierB: any;
+
+  await staffStorage.run(admin, async () => {
+    // Validation: Invalid taxId throws
+    const { validateTaxId, validateEmail } = await import("../src/app/api/suppliers/route");
+    assert.throws(() => validateTaxId("123"), /13 หลัก/);
+    assert.equal(validateTaxId("010-5-56001-234-5"), "0105560012345");
+    assert.throws(() => validateEmail("invalid-email"), /รูปแบบอีเมลไม่ถูกต้อง/);
+    assert.equal(validateEmail("supplier@fixme.co.th"), "supplier@fixme.co.th");
+
+    supplierA = await prisma.supplier.create({
+      data: {
+        tenantId: "test-a",
+        name: "บริษัท ซีคอน สแปร์พาร์ท จำกัด",
+        contactPerson: "คุณกิตติศักดิ์ เจริญพร",
+        phone: "081-555-7788",
+        email: "kittisak@seaconpart.com",
+        lineId: "@seaconpart",
+        address: "55 อาคารซีคอนสแควร์ ชั้น 3 แขวงหนองบอน เขตประเวศ กทม. 10250",
+        taxId: "0105560012345",
+        creditTerms: "เครดิต 30 วัน",
+        bankName: "ธนาคารกสิกรไทย (KBANK)",
+        bankAccountNumber: "123-4-56789-0",
+        bankAccountName: "บจก. ซีคอน สแปร์พาร์ท",
+        categories: "หน้าจอแท้, แบตเตอรี่ มอก., สายแพรชาร์จ",
+        active: true,
+      },
+    });
+
+    assert.equal(supplierA.name, "บริษัท ซีคอน สแปร์พาร์ท จำกัด");
+    assert.equal(supplierA.email, "kittisak@seaconpart.com");
+    assert.equal(supplierA.bankName, "ธนาคารกสิกรไทย (KBANK)");
+    assert.equal(supplierA.bankAccountNumber, "123-4-56789-0");
+    assert.equal(supplierA.taxId, "0105560012345");
+  });
+
+  // 2. Uniqueness check & Cross-tenant duplicate allowance
+  await staffStorage.run(staffB, async () => {
+    // Tenant B can create supplier with the EXACT SAME NAME (multi-tenant uniqueness)
+    supplierB = await prisma.supplier.create({
+      data: {
+        tenantId: "test-b",
+        name: "บริษัท ซีคอน สแปร์พาร์ท จำกัด",
+        contactPerson: "ผู้จัดการสาขา B",
+        phone: "089-999-0000",
+        email: "tenant-b@supplier.com",
+        creditTerms: "เงินสด / โอนก่อนส่ง",
+        bankName: "ธนาคารไทยพาณิชย์ (SCB)",
+        bankAccountNumber: "987-6-54321-0",
+        bankAccountName: "สาขา บี เทรดดิ้ง",
+      },
+    });
+    assert.equal(supplierB.name, supplierA.name);
+    assert.notEqual(supplierB.id, supplierA.id);
+
+    // Tenant B cannot see Tenant A's supplier
+    const bFindA = await prisma.supplier.findFirst({
+      where: { id: supplierA.id },
+    });
+    assert.equal(bFindA, null, "Tenant A supplier must be invisible to Tenant B");
+  });
+
+  // 3. Purchase Linkage & Real-time Lifetime Spend Calculation
+  await staffStorage.run(admin, async () => {
+    // Create PO 1: RECEIVED with 5,000 THB + 7% VAT = 5,350 THB
+    const poReceived = await prisma.purchaseOrder.create({
+      data: {
+        tenantId: "test-a",
+        poNumber: "PO-202611-SUP01",
+        branchId: ownBranch,
+        supplierId: supplierA.id,
+        supplierName: supplierA.name,
+        supplierPhone: supplierA.phone,
+        status: "RECEIVED",
+        paymentStatus: "PAID",
+        subtotal: 5000,
+        taxRate: 7,
+        vatAmount: 350,
+        totalAmount: 5350,
+        items: {
+          create: [
+            {
+              tenantId: "test-a",
+              productCode: "SCR-IP15P",
+              productName: "หน้าจอแท้ iPhone 15 Pro",
+              category: "SPARE_PART",
+              quantity: 2,
+              unitCost: 2000,
+              totalCost: 4000,
+            },
+            {
+              tenantId: "test-a",
+              productCode: "BAT-IP13",
+              productName: "แบตเตอรี่ มอก. iPhone 13",
+              category: "SPARE_PART",
+              quantity: 2,
+              unitCost: 500,
+              totalCost: 1000,
+            },
+          ],
+        },
+      },
+    });
+    assert.ok(poReceived.id);
+
+    // Create PO 2: CANCELLED with 3,000 THB (should NOT be added to totalSpend)
+    const poCancelled = await prisma.purchaseOrder.create({
+      data: {
+        tenantId: "test-a",
+        poNumber: "PO-202611-SUP02",
+        branchId: ownBranch,
+        supplierId: supplierA.id,
+        supplierName: supplierA.name,
+        supplierPhone: supplierA.phone,
+        status: "CANCELLED",
+        paymentStatus: "PENDING",
+        subtotal: 3000,
+        taxRate: 0,
+        vatAmount: 0,
+        totalAmount: 3000,
+      },
+    });
+    assert.ok(poCancelled.id);
+
+    // Query supplier detail via prisma with purchaseOrders linkage
+    const queriedSupplier = await prisma.supplier.findFirstOrThrow({
+      where: { id: supplierA.id },
+      include: {
+        purchaseOrders: {
+          include: { items: true },
+        },
+        _count: {
+          select: { purchaseOrders: true },
+        },
+      },
+    });
+
+    assert.equal(queriedSupplier._count.purchaseOrders, 2, "Total PO count should be 2");
+
+    // Spend calculation: non-cancelled only
+    const nonCancelled = queriedSupplier.purchaseOrders.filter((po: any) => po.status !== "CANCELLED");
+    const totalSpend = nonCancelled.reduce((sum: number, po: any) => sum + po.totalAmount, 0);
+    assert.equal(totalSpend, 5350, "Total spend should exclude cancelled orders");
+
+    // Product aggregation
+    const suppliedProductNames = new Set(
+      queriedSupplier.purchaseOrders.flatMap((po: any) => po.items.map((i: any) => i.productName))
+    );
+    assert.ok(suppliedProductNames.has("หน้าจอแท้ iPhone 15 Pro"));
+    assert.ok(suppliedProductNames.has("แบตเตอรี่ มอก. iPhone 13"));
+  });
+
+  // 4. Soft Delete and Reactivation behavior
+  await staffStorage.run(admin, async () => {
+    // Soft delete
+    const deleted = await prisma.supplier.update({
+      where: { id: supplierA.id },
+      data: { active: false },
+    });
+    assert.equal(deleted.active, false);
+
+    // Active query ignores soft-deleted supplier
+    const activeList = await prisma.supplier.findMany({
+      where: { id: supplierA.id, active: true },
+    });
+    assert.equal(activeList.length, 0);
+
+    // Reactivation restores supplier
+    const restored = await prisma.supplier.update({
+      where: { id: supplierA.id },
+      data: { active: true },
+    });
+    assert.equal(restored.active, true);
+  });
+
+  // 5. Cross-Tenant Protection: Tenant B cannot update Tenant A's supplier
+  await staffStorage.run(staffB, async () => {
+    let updateFailed = false;
+    try {
+      await prisma.supplier.update({
+        where: { id: supplierA.id },
+        data: { name: "แฮกเกอร์เปลี่ยนชื่อ" },
+      });
+    } catch {
+      updateFailed = true;
+    }
+    assert.ok(updateFailed, "Cross-tenant supplier update must fail closed");
+
+    // Verify Tenant A data was not mutated
+    const originalInA = await db.supplier.findUnique({
+      where: { id: supplierA.id },
+    });
+    assert.equal(originalInA?.name, "บริษัท ซีคอน สแปร์พาร์ท จำกัด");
+  });
+});

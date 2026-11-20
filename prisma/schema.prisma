@@ -808,10 +808,14 @@ model Supplier {
   name           String
   contactPerson  String?
   phone          String
+  email          String?
   lineId         String?
   address        String?
   taxId          String?
   creditTerms    String?         @default("เครดิต 30 วัน")
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountName   String?
   categories     String?         // comma-separated or JSON string
   active         Boolean         @default(true)
   purchaseOrders PurchaseOrder[]
