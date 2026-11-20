@@ -56,7 +56,7 @@ interface ProductItem {
   id: string;
   code: string;
   name: string;
-  category: "ACCESSORY" | "SPARE_PART" | "DEVICE";
+  category: "ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE";
   brand: string;
   model: string;
   costPrice: number;
@@ -76,7 +76,7 @@ export default function PosPage() {
   const { currentBranch, currentUser } = useApp();
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [categoryFilter, setCategoryFilter] = useState<"ALL" | "ACCESSORY" | "SPARE_PART" | "DEVICE">("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<"ALL" | "ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [barcodeInput, setBarcodeInput] = useState("");
 
@@ -224,6 +224,60 @@ export default function PosPage() {
         .catch((err) => console.error("PromptPay QR generation error:", err));
     }
   }, [paymentMethod, grandTotal, splitSecondaryAmount, currentBranch.code]);
+
+  // Keyboard Shortcuts for Cashier Speed
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape to close active modal
+      if (e.key === "Escape") {
+        if (deviceImeiModalOpen) setDeviceImeiModalOpen(false);
+        else if (isCustomerModalOpen) setIsCustomerModalOpen(false);
+        else if (paymentModalOpen && !processingPayment) setPaymentModalOpen(false);
+        else if (receiptModalOpen) setReceiptModalOpen(false);
+        return;
+      }
+
+      // F2: Focus scanner
+      if (e.key === "F2") {
+        e.preventDefault();
+        barcodeInputRef.current?.focus();
+        barcodeInputRef.current?.select();
+        return;
+      }
+
+      // F4: Open payment checkout
+      if (e.key === "F4") {
+        e.preventDefault();
+        if (cart.length > 0 && !paymentModalOpen && !receiptModalOpen) {
+          setCashReceived(grandTotal.toString());
+          setSplitCash((grandTotal / 2).toFixed(0));
+          setSplitSecondaryAmount((grandTotal - Number((grandTotal / 2).toFixed(0))).toFixed(0));
+          setPaymentModalOpen(true);
+        }
+        return;
+      }
+
+      // F8: Quick Print receipt
+      if (e.key === "F8") {
+        e.preventDefault();
+        if (receiptModalOpen) {
+          handlePrint();
+        }
+        return;
+      }
+
+      // '/' shortcut to focus scanner if not in an input
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (e.key === "/" && tag !== "input" && tag !== "textarea" && tag !== "select") {
+        e.preventDefault();
+        barcodeInputRef.current?.focus();
+        barcodeInputRef.current?.select();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cart.length, grandTotal, paymentModalOpen, receiptModalOpen, deviceImeiModalOpen, isCustomerModalOpen, processingPayment]);
 
   // Line item discount handlers
   const handleSetLineDiscount = (index: number, disc: number) => {
@@ -423,15 +477,17 @@ export default function PosPage() {
               address: customerAddress || null,
             }
           : null,
+        vatMode,
         items: cart.map((it) => ({
           productId: it.productId,
           deviceImeiId: it.deviceImeiId || null,
           quantity: it.quantity,
           unitPrice: it.unitPrice,
           costPrice: it.costPrice,
+          discount: it.discount || 0,
         })),
-        // Server recomputes prices/totals; clamp and round discount to satang (includes line item discounts)
-        discount: Math.round(Math.min(totalDiscount, subtotal) * 100) / 100,
+        // Server recomputes totals with satang precision; send bill discount amount
+        discount: Math.round(Math.min(effectiveBillDiscount, subtotalAfterLineDiscounts) * 100) / 100,
         paymentMethod,
         paymentDetails,
       };
@@ -513,6 +569,32 @@ export default function PosPage() {
         </div>
       </div>
 
+      {/* Cashier Quick Bar & Keyboard Shortcuts Hint */}
+      <div className="flex items-center justify-between bg-slate-900 text-slate-300 px-3 py-2 rounded-xl text-xs font-mono shadow-xs border border-slate-800 flex-wrap gap-2">
+        <div className="flex items-center gap-3 flex-wrap text-[11px]">
+          <span className="flex items-center gap-1.5">
+            <kbd className="bg-slate-800 text-emerald-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold text-[10px]">F2</kbd>
+            <span>ยิงบาร์โค้ด / IMEI</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <kbd className="bg-slate-800 text-blue-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold text-[10px]">F4</kbd>
+            <span>คิดเงิน / ชำระเงิน</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <kbd className="bg-slate-800 text-amber-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold text-[10px]">F8</kbd>
+            <span>พิมพ์สลิป</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <kbd className="bg-slate-800 text-rose-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold text-[10px]">Esc</kbd>
+            <span>ปิดหน้าต่าง</span>
+          </span>
+        </div>
+        <div className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          <span>VAT 7% Satang-Precision</span>
+        </div>
+      </div>
+
       {/* Main Grid: Left Catalog (60%) & Right Cart (40%) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* ================= LEFT SIDE: CATALOG & SEARCH ================= */}
@@ -590,6 +672,17 @@ export default function PosPage() {
               <Smartphone className="h-3.5 w-3.5" />
               <span>โทรศัพท์ & IMEI</span>
             </button>
+            <button
+              onClick={() => setCategoryFilter("SERVICE")}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                categoryFilter === "SERVICE"
+                  ? "bg-amber-600 text-white shadow-xs"
+                  : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>บริการ & ค่าแรง</span>
+            </button>
           </div>
 
           {/* Products Grid */}
@@ -644,7 +737,11 @@ export default function PosPage() {
                       </div>
 
                       {/* Stock indicator */}
-                      {product.category === "DEVICE" ? (
+                      {product.category === "SERVICE" ? (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium font-mono bg-amber-50 text-amber-700 border border-amber-200">
+                          งานบริการ
+                        </span>
+                      ) : product.category === "DEVICE" ? (
                         <span
                           className={`rounded px-1.5 py-0.5 text-[10px] font-medium font-mono ${
                             inStockImeisCount > 0
@@ -1195,16 +1292,51 @@ export default function PosPage() {
 
                 {/* Quick denomination pills */}
                 <div className="flex flex-wrap gap-1.5">
-                  {[grandTotal, 100, 500, 1000, 2000, 5000].map((amount) => (
+                  <button
+                    type="button"
+                    onClick={() => setCashReceived(grandTotal.toString())}
+                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-mono font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                  >
+                    พอดีเป๊ะ ({formatTHB(grandTotal)})
+                  </button>
+                  {/* Next round banknote options */}
+                  {grandTotal > 0 && [
+                    Math.ceil(grandTotal / 100) * 100,
+                    Math.ceil(grandTotal / 500) * 500,
+                    Math.ceil(grandTotal / 1000) * 1000,
+                  ]
+                    .filter((val, idx, arr) => val > grandTotal && arr.indexOf(val) === idx)
+                    .map((val) => (
+                      <button
+                        key={`ceil-${val}`}
+                        type="button"
+                        onClick={() => setCashReceived(val.toString())}
+                        className="rounded-lg border border-blue-200 bg-blue-50/80 px-2.5 py-1 text-xs font-mono font-bold text-blue-800 hover:bg-blue-100 transition-colors"
+                      >
+                        รับแบงก์ {formatTHB(val)}
+                      </button>
+                    ))}
+                  {/* Standard banknotes & increment additions */}
+                  {[100, 500, 1000].map((amount) => (
                     <button
                       key={amount}
                       type="button"
-                      onClick={() => setCashReceived(amount.toString())}
-                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-mono font-medium hover:bg-slate-100"
+                      onClick={() => {
+                        const current = parseSafeMoney(cashReceived);
+                        setCashReceived((current > 0 ? current + amount : amount).toString());
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono font-medium text-slate-700 hover:bg-slate-100 transition-colors"
                     >
-                      {amount === grandTotal ? "พอดีเป๊ะ" : formatTHB(amount)}
+                      +{amount}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setCashReceived("")}
+                    className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100 transition-colors"
+                  >
+                    ล้าง
+                  </button>
                 </div>
 
                 {/* Live Change Calculator */}

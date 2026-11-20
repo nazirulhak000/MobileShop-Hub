@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { withStaff, reqId } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -7,10 +7,15 @@ export const dynamic = "force-dynamic";
 
 // GET /api/sales/[id] - one sale with its items (scoped to the actor's tenant/branches)
 async function handleGET(_request: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
+  const actor = staffContext();
   const resolved = await Promise.resolve(params);
   const id = reqId(resolved?.id, "id");
   const sale = await prisma.sale.findFirst({
-    where: { id },
+    where: {
+      id,
+      tenantId: actor.tenantId,
+      branchId: { in: actor.branchIds },
+    },
     select: {
       id: true,
       invoiceNo: true,

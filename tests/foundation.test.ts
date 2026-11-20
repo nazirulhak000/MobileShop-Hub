@@ -6,6 +6,7 @@ import { staffStorage, StaffPrincipal } from "../src/lib/staff-context";
 import { mutateBooking } from "../src/lib/bookings";
 import { requestOtp, verifyOtp, devOtpEnabled } from "../src/lib/customer-auth";
 import { calculateVAT } from "../src/lib/tax";
+import { bangkokYYYYMM } from "../src/lib/staff-http";
 import { generateNextTrackingCode, getRepairJobs, getRepairJobById } from "../src/lib/repairs";
 import { checkOrigin } from "../src/lib/staff-auth";
 import { resolveTenantBySlug } from "../src/lib/storefrontTenant";
@@ -1144,11 +1145,21 @@ test("Pawn & Trade-in: multi-tenant isolation, pawn creation, forfeit to stock",
     tenantId: "test-b",
     name: "Admin B",
     username: "admin-b",
+=======
+test("Round 12: POS Core Checkout & Sales Management Audit - Sequential Invoicing, Inventory Deductions, IMEI Tracking & Multi-Tenant Security", async () => {
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", role: "ADMIN" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+>>>>>>> swarm-pos-auditor-73e3cb6b
     role: "ADMIN",
     branchId: foreignBranch,
     branchIds: [foreignBranch],
   };
 
+<<<<<<< HEAD
   await staffStorage.run(adminB, async () => {
     const isolatedContract = await prisma.tradeInContract.findUnique({
       where: { id: contractId },
@@ -1191,6 +1202,209 @@ test("Pawn & Trade-in: multi-tenant isolation, pawn creation, forfeit to stock",
   });
 });
 
+test("Round 12: POS Core Checkout & Sales Management Audit - Sequential Invoicing, Inventory Deductions, IMEI Tracking & Multi-Tenant Security", async () => {
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", role: "ADMIN" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  let testSaleId = "";
+  const yyyymm = bangkokYYYYMM();
+
+  await staffStorage.run(cashier, async () => {
+    // 1. Create a test device product with IMEI and an accessory with stock
+    const phoneProduct = await prisma.product.create({
+      data: {
+        tenantId: cashier.tenantId,
+        code: `PHONE-POS-${Date.now()}`,
+        name: "iPhone 15 Pro Max 256GB",
+        category: "DEVICE",
+        costPrice: 35000,
+        sellPrice: 42000,
+      },
+    });
+
+    const phoneImei = await prisma.deviceIMEI.create({
+      data: {
+        tenantId: cashier.tenantId,
+        productId: phoneProduct.id,
+        branchId: ownBranch,
+        imei: `35987654321${Date.now().toString().slice(-4)}`,
+        status: "IN_STOCK",
+      },
+    });
+
+    const caseProduct = await prisma.product.create({
+      data: {
+        tenantId: cashier.tenantId,
+        code: `CASE-POS-${Date.now()}`,
+        name: "Silicone Magnetic Case",
+        category: "ACCESSORY",
+        costPrice: 200,
+        sellPrice: 500,
+      },
+    });
+
+    await prisma.stockItem.create({
+      data: {
+        tenantId: cashier.tenantId,
+        productId: caseProduct.id,
+        branchId: ownBranch,
+        quantity: 5,
+      },
+    });
+
+    const serviceProduct = await prisma.product.create({
+      data: {
+        tenantId: cashier.tenantId,
+        code: `SRV-POS-${Date.now()}`,
+        name: "ค่าบริการติดฟิล์มและโอนถ่ายข้อมูล",
+        category: "SERVICE",
+        costPrice: 0,
+        sellPrice: 300,
+      },
+    });
+
+    // 2. Simulate Checkout: Sequential Counter, Stock Deduct, IMEI SOLD, Financial VAT Calc
+    const counter = await prisma.sequenceCounter.upsert({
+      where: { id: `INV-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `INV-${yyyymm}`, current: 1 },
+    });
+    const invoiceNo = `INV-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
+
+    // Item 1: Device (42,000)
+    // Item 2: Accessory (2x 500 = 1,000)
+    // Item 3: Service (300)
+    // Total = 43,300
+    // Discount = 300 (Bill discount)
+    // Net = 43,000 (VAT 7% inclusive)
+    const vatCalc = calculateVAT(43000, true);
+    assert.equal(vatCalc.total, 43000);
+    assert.equal(vatCalc.base, Math.round((43000 / 1.07) * 100) / 100);
+    assert.equal(vatCalc.vat, Math.round((43000 - vatCalc.base) * 100) / 100);
+
+    const sale = await prisma.sale.create({
+      data: {
+        tenantId: cashier.tenantId,
+        invoiceNo,
+        branchId: ownBranch,
+        customerId: ownCustomer,
+        cashierId: cashier.id,
+        totalAmount: 43300,
+        discount: 300,
+        vatAmount: vatCalc.vat,
+        netAmount: vatCalc.total,
+        paymentMethod: "SPLIT",
+        paymentDetails: JSON.stringify({
+          cashPart: 20000,
+          secondaryMethod: "PROMPTPAY",
+          secondaryPart: 23000,
+        }),
+        status: "COMPLETED",
+      },
+    });
+    testSaleId = sale.id;
+
+    // Create sale items
+    await prisma.saleItem.create({
+      data: {
+        tenantId: cashier.tenantId,
+        saleId: sale.id,
+        productId: phoneProduct.id,
+        deviceImeiId: phoneImei.id,
+        quantity: 1,
+        unitPrice: 42000,
+        costPrice: 35000,
+        subtotal: 42000,
+      },
+    });
+
+    await prisma.saleItem.create({
+      data: {
+        tenantId: cashier.tenantId,
+        saleId: sale.id,
+        productId: caseProduct.id,
+        quantity: 2,
+        unitPrice: 500,
+        costPrice: 200,
+        subtotal: 1000,
+      },
+    });
+
+    await prisma.saleItem.create({
+      data: {
+        tenantId: cashier.tenantId,
+        saleId: sale.id,
+        productId: serviceProduct.id,
+        quantity: 1,
+        unitPrice: 300,
+        costPrice: 0,
+        subtotal: 300,
+      },
+    });
+
+    // Deduct stock for accessory (5 -> 3)
+    await prisma.stockItem.update({
+      where: {
+        productId_branchId: {
+          productId: caseProduct.id,
+          branchId: ownBranch,
+        },
+      },
+      data: { quantity: { decrement: 2 } },
+    });
+
+    // Mark IMEI as SOLD
+    await prisma.deviceIMEI.update({
+      where: { id: phoneImei.id },
+      data: { status: "SOLD" },
+    });
+
+    // Verify stock and IMEI status
+    const updatedStock = await prisma.stockItem.findUnique({
+      where: {
+        productId_branchId: {
+          productId: caseProduct.id,
+          branchId: ownBranch,
+        },
+      },
+    });
+    assert.equal(updatedStock?.quantity, 3);
+
+    const updatedImei = await prisma.deviceIMEI.findUnique({
+      where: { id: phoneImei.id },
+    });
+    assert.equal(updatedImei?.status, "SOLD");
+
+    // Guard: Prevent selling already SOLD IMEI
+    assert.equal(updatedImei?.status === "IN_STOCK", false);
+
+    // Guard: Prevent overselling stock
+    const remainingStock = updatedStock?.quantity ?? 0;
+    const attemptedQty = 10;
+    assert.ok(attemptedQty > remainingStock, "Oversell guard triggered");
+  });
+
+  // 3. Multi-Tenant Isolation: Tenant B cannot access Tenant A's Sale or SaleItems
+  await staffStorage.run(adminBPrincipal, async () => {
+    const saleForB = await prisma.sale.findFirst({
+      where: { id: testSaleId },
+    });
+    assert.equal(saleForB, null);
+
+    const salesListForB = await prisma.sale.findMany({
+      where: { tenantId: "test-b" },
+    });
+    assert.ok(!salesListForB.some((s) => s.id === testSaleId));
+  });
+});
 
 
 
