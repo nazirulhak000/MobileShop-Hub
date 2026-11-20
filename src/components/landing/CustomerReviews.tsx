@@ -434,6 +434,7 @@ export function CustomerReviews({
                   alt={currentCase.afterDesc || "After repair"}
                   className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                   loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     const target = e.currentTarget;
                     if (!target.dataset.fallbackApplied) {
@@ -456,6 +457,7 @@ export function CustomerReviews({
                     className="absolute inset-0 w-full h-full object-cover max-w-none"
                     style={{ width: containerRef.current?.clientWidth || "100%" }}
                     loading="lazy"
+                    decoding="async"
                     onError={(e) => {
                       const target = e.currentTarget;
                       if (!target.dataset.fallbackApplied) {

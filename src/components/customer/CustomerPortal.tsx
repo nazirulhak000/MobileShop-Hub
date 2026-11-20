@@ -1630,20 +1630,27 @@ function Empty({ text }: { text: string }) {
 }
 
 function LoginForm({ shopSlug, onSuccess }: { shopSlug: string; onSuccess: () => Promise<void> }) {
-  const [challengeId, setChallengeId] = useState("");
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
+  const [proof, setProof] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [developmentCode, setDevelopmentCode] = useState("");
 
   return (
     <div className="p-6 sm:p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm space-y-6">
       <div className="space-y-1">
-        <h2 className="text-xl font-bold text-slate-900 tracking-tight">เข้าบัญชีลูกค้า</h2>
+        <h2 className="text-xl font-bold text-slate-900 tracking-tight">เข้าสู่ระบบบัญชีลูกค้า</h2>
         <p className="text-xs text-slate-500 leading-relaxed">
-          ยืนยันเบอร์โทรด้วยรหัส SMS เพื่อดูงานของคุณกับร้านนี้
+          ยืนยันตัวตนด้วยเบอร์โทรศัพท์และเลขท้าย 4 ตัว เพื่อดูประวัติงานซ่อมและใบเสนอราคา
+        </p>
+      </div>
+
+      <div className="p-3.5 rounded-2xl bg-teal-50/70 border border-teal-200/80 text-xs text-teal-900 space-y-1">
+        <p className="font-semibold flex items-center gap-1.5">
+          <span>⚡</span> เข้าใช้งานด่วนฟรี ไม่ต้องรอรหัส SMS
+        </p>
+        <p className="text-teal-700 leading-relaxed">
+          ใช้เลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อม (เช่น 1234 หรือ 0001) ที่ระบุในใบรับเครื่องเพื่อยืนยันตัวตนทันที
         </p>
       </div>
 
@@ -1654,22 +1661,16 @@ function LoginForm({ shopSlug, onSuccess }: { shopSlug: string; onSuccess: () =>
           setBusy(true);
           setError("");
           try {
-            if (!challengeId) {
-              const result = await request("/api/customer/auth/request-code", { shopSlug, phone });
-              setChallengeId(result.challengeId);
-              setDevelopmentCode(result.developmentCode ?? "");
-            } else {
-              await request("/api/customer/auth/verify-code", {
-                shopSlug,
-                phone,
-                code,
-                displayName: name,
-                challengeId,
-              });
-              await onSuccess();
-            }
+            await request("/api/customer/auth/verify-code", {
+              shopSlug,
+              phone,
+              ticketProof: proof,
+              code: proof,
+              displayName: name,
+            });
+            await onSuccess();
           } catch (failure) {
-            setError(failure instanceof Error ? failure.message : "เชื่อมต่อไม่สำเร็จ");
+            setError(failure instanceof Error ? failure.message : "เข้าสู่ระบบไม่สำเร็จ");
           } finally {
             setBusy(false);
           }
@@ -1690,13 +1691,12 @@ function LoginForm({ shopSlug, onSuccess }: { shopSlug: string; onSuccess: () =>
         </label>
 
         <label className="block text-xs font-semibold text-slate-700">
-          เบอร์มือถือ
+          เบอร์โทรศัพท์ (ที่แจ้งไว้กับร้าน)
           <input
             className={input}
             autoComplete="tel"
             inputMode="tel"
             value={phone}
-            disabled={!!challengeId}
             onChange={(e) => setPhone(e.target.value)}
             required
             maxLength={20}
@@ -1704,28 +1704,21 @@ function LoginForm({ shopSlug, onSuccess }: { shopSlug: string; onSuccess: () =>
           />
         </label>
 
-        {challengeId && (
-          <label className="block text-xs font-semibold text-slate-700 animate-fade-in">
-            รหัสยืนยัน 6 หลัก
-            <input
-              className={input}
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-              pattern="[0-9]{6}"
-              maxLength={6}
-              placeholder="123456"
-            />
-          </label>
-        )}
-
-        {developmentCode && (
-          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-950 font-mono leading-relaxed border border-amber-200/80">
-            โหมดทดสอบในเครื่อง · ไม่มีการส่ง SMS · รหัส {developmentCode}
-          </p>
-        )}
+        <label className="block text-xs font-semibold text-slate-700">
+          เลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อม
+          <input
+            className={input}
+            value={proof}
+            onChange={(e) => setProof(e.target.value)}
+            required
+            minLength={4}
+            maxLength={30}
+            placeholder="เช่น 1234 หรือ 0001"
+          />
+          <span className="block mt-1 text-[11px] font-normal text-slate-500">
+            ดูได้จากใบรับเครื่อง หรือหลังตัวเครื่อง (ลูกค้าใหม่สามารถกำหนดรหัส 4 หลักเพื่อเริ่มต้นใช้งาน)
+          </span>
+        </label>
 
         {error && (
           <p role="alert" className="text-xs font-medium text-rose-700 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
@@ -1734,23 +1727,17 @@ function LoginForm({ shopSlug, onSuccess }: { shopSlug: string; onSuccess: () =>
         )}
 
         <button disabled={busy} type="submit" className={primary + " w-full mt-2"}>
-          {busy ? "กำลังดำเนินการ…" : challengeId ? "ยืนยันและเข้าสู่ระบบ" : "รับรหัสทาง SMS"}
+          {busy ? "กำลังตรวจสอบข้อมูล…" : "เข้าสู่ระบบเพื่อดูงานซ่อม"}
         </button>
 
-        {challengeId && (
-          <button
-            type="button"
-            disabled={busy}
-            className={secondary + " w-full"}
-            onClick={() => {
-              setChallengeId("");
-              setCode("");
-              setDevelopmentCode("");
-            }}
+        <div className="pt-2 border-t border-slate-100 text-center">
+          <Link
+            href="/track"
+            className="text-xs font-semibold text-teal-700 hover:text-teal-900 inline-flex items-center gap-1"
           >
-            เปลี่ยนเบอร์หรือขอรหัสใหม่
-          </button>
-        )}
+            <span>🔍</span> มีใบรับเครื่อง? สแกน QR หรือใส่รหัสติดตามฉบับเดียว ไม่ต้องล็อกอิน →
+          </Link>
+        </div>
       </form>
     </div>
   );

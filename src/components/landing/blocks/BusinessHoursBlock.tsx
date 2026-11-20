@@ -46,9 +46,101 @@ const DEFAULT_SCHEDULE: BusinessDaySchedule[] = [
 ];
 
 /**
- * Calculates whether the store is currently open based on Bangkok time (UTC+7)
+ * Formats a Gregorian date into Thai Buddhist Era (พ.ศ.) date in Asia/Bangkok timezone.
+ * Handles leap years, midnight UTC transitions, and Thai calendar years seamlessly.
  */
-function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
+export function formatThaiBuddhistDate(
+  date: Date,
+  options?: {
+    includeTime?: boolean;
+    format?: "short" | "medium" | "full";
+  }
+): string {
+  try {
+    const dtf = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: options?.format === "short" ? "short" : "long",
+      day: "numeric",
+      weekday: options?.format === "full" ? "long" : undefined,
+      hour: options?.includeTime ? "2-digit" : undefined,
+      minute: options?.includeTime ? "2-digit" : undefined,
+      hour12: false,
+    });
+    return dtf.format(date);
+  } catch {
+    const beYear = date.getFullYear() + 543;
+    return `${date.getDate()}/${date.getMonth() + 1}/${beYear}`;
+  }
+}
+
+/**
+ * Matches schedule item's day definition with Bangkok's current weekday
+ */
+export function matchesDaySchedule(itemDay: string | undefined, weekday: string): boolean {
+  if (!itemDay || typeof itemDay !== "string") return false;
+  const lower = itemDay.toLowerCase();
+
+  // Everyday / Daily check
+  if (lower.includes("ทุกวัน") || lower.includes("everyday") || lower.includes("daily") || lower.includes("all day")) {
+    return true;
+  }
+
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+  const isWeekend = ["Sat", "Sun"].includes(weekday);
+
+  // Mon-Fri range checks
+  if (isWeekday) {
+    if (
+      lower.includes("mon - fri") ||
+      lower.includes("mon-fri") ||
+      lower.includes("mon - thu") ||
+      (lower.includes("จันทร์") && lower.includes("ศุกร์"))
+    ) {
+      return true;
+    }
+  }
+
+  // Sat-Sun range checks
+  if (isWeekend) {
+    if (
+      lower.includes("sat - sun") ||
+      lower.includes("sat-sun") ||
+      (lower.includes("เสาร์") && lower.includes("อาทิตย์"))
+    ) {
+      return true;
+    }
+  }
+
+  // Specific single day checks
+  switch (weekday) {
+    case "Mon":
+      return lower.includes("mon") || lower.includes("จันทร์");
+    case "Tue":
+      return lower.includes("tue") || lower.includes("อังคาร");
+    case "Wed":
+      return lower.includes("wed") || lower.includes("พุธ");
+    case "Thu":
+      return lower.includes("thu") || lower.includes("พฤหัส");
+    case "Fri":
+      return lower.includes("fri") || lower.includes("ศุกร์");
+    case "Sat":
+      return lower.includes("sat") || lower.includes("เสาร์");
+    case "Sun":
+      return lower.includes("sun") || lower.includes("อาทิตย์");
+    default:
+      return false;
+  }
+}
+
+/**
+ * Calculates whether the store is currently open based on Bangkok time (UTC+7).
+ * Accepts optional targetDate for deterministic testing and SSR verification.
+ */
+export function getBangkokCurrentStatus(
+  schedule: BusinessDaySchedule[],
+  targetDate?: Date
+) {
   try {
     if (!Array.isArray(schedule) || schedule.length === 0) {
       return {
@@ -58,7 +150,7 @@ function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
       };
     }
 
-    const now = new Date();
+    const now = targetDate || new Date();
     // Format to Bangkok time
     const formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: "Asia/Bangkok",
@@ -81,24 +173,8 @@ function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
 
     const currentMinutes = hour * 60 + minute;
 
-    // Map weekday to typical schedule item
-    let relevantItem: BusinessDaySchedule | undefined;
-    if (["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday)) {
-      relevantItem = schedule.find(
-        (s) =>
-          s?.day?.includes("จันทร์") ||
-          s?.day?.includes("ศุกร์") ||
-          s?.day?.includes("Mon")
-      );
-    } else if (weekday === "Sat") {
-      relevantItem =
-        schedule.find((s) => s?.day?.includes("เสาร์") || s?.day?.includes("Sat")) ||
-        schedule.find((s) => s?.day?.includes("อาทิตย์"));
-    } else if (weekday === "Sun") {
-      relevantItem =
-        schedule.find((s) => s?.day?.includes("อาทิตย์") || s?.day?.includes("Sun")) ||
-        schedule.find((s) => s?.day?.includes("เสาร์"));
-    }
+    // Find relevant schedule item matching today's Bangkok weekday
+    const relevantItem = schedule.find((item) => matchesDaySchedule(item?.day, weekday));
 
     if (!relevantItem || relevantItem.isClosed) {
       return {
@@ -208,7 +284,7 @@ export function BusinessHoursBlock({
 
   return (
     <section
-      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto ${className}`}
+      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto overflow-hidden ${className}`}
       aria-label="Business Hours"
     >
       <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 sm:p-10 md:p-12 shadow-2xl backdrop-blur-md">
@@ -219,12 +295,12 @@ export function BusinessHoursBlock({
             <span>เวลาทำการ</span>
           </div>
 
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
             {resolvedTitle}
           </h2>
 
           {resolvedSubtitle && (
-            <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+            <p className="text-slate-300 text-sm sm:text-base leading-relaxed break-words">
               {resolvedSubtitle}
             </p>
           )}

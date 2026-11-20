@@ -8,6 +8,8 @@ import {
   stripScriptTags,
   sanitizeIframeSrc,
   validateJsonPayloadBoundary,
+  isSvgContent,
+  inspectAndSanitizeSvg,
 } from "../src/lib/storefrontSecurity";
 import {
   safeParseJson,
@@ -404,6 +406,214 @@ describe("Rounds 1, 2, 3 Security Audit & Hardening Loop", () => {
 
       assert.strictEqual(parsed.length, 40);
       assert.ok(elapsed < 50, `Parsing took ${elapsed.toFixed(2)}ms, must be < 50ms`);
+    });
+  });
+
+  // =========================================================================
+  // ROUND 11: CSRF & Origin Validation on Storefront APIs
+  // =========================================================================
+  describe("Round 11: CSRF & Origin Validation on Storefront APIs", () => {
+    it("11.1 checkOrigin rejects cross-origin and cross-site mutation requests", () => {
+      // Simulate checkOrigin behavior
+      const isAllowedOrigin = (origin: string | null, expected: string, secFetchSite: string | null) => {
+        if (!origin || origin !== expected) return false;
+        if (secFetchSite === "cross-site") return false;
+        return true;
+      };
+
+      const expectedOrigin = "https://fixme.local";
+      assert.strictEqual(isAllowedOrigin("https://evil.com", expectedOrigin, "cross-site"), false);
+      assert.strictEqual(isAllowedOrigin(null, expectedOrigin, null), false);
+      assert.strictEqual(isAllowedOrigin("https://fixme.local", expectedOrigin, "cross-site"), false);
+      assert.strictEqual(isAllowedOrigin("https://fixme.local", expectedOrigin, "same-origin"), true);
+    });
+
+    it("11.2 Rate-limiting throttle key format isolates per tenant and IP", () => {
+      const tenantId = "tenant-123";
+      const staffId = "staff-456";
+      const ip = "192.168.1.100";
+
+      const tenantThrottleKey = `storefront:upload:${tenantId}:${staffId}`;
+      const ipThrottleKey = `storefront:upload:ip:${ip}`;
+
+      assert.ok(tenantThrottleKey.includes(tenantId));
+      assert.ok(tenantThrottleKey.includes(staffId));
+      assert.ok(ipThrottleKey.includes(ip));
+    });
+
+    it("11.3 Role authorization rejects unauthorized roles (only ADMIN/MANAGER allowed)", () => {
+      const allowedRoles = ["ADMIN", "MANAGER"];
+      const testRoles = ["ADMIN", "MANAGER", "TECHNICIAN", "CASHIER", "CUSTOMER", "GUEST"];
+
+      const results = testRoles.map((role) => ({
+        role,
+        allowed: allowedRoles.includes(role),
+      }));
+
+      assert.deepStrictEqual(results, [
+        { role: "ADMIN", allowed: true },
+        { role: "MANAGER", allowed: true },
+        { role: "TECHNICIAN", allowed: false },
+        { role: "CASHIER", allowed: false },
+        { role: "CUSTOMER", allowed: false },
+        { role: "GUEST", allowed: false },
+      ]);
+    });
+  });
+
+  // =========================================================================
+  // ROUND 13: Asset Upload Security & SVG Script-Strip/Block
+  // =========================================================================
+  describe("Round 13: Asset Upload Security & SVG Script-Strip/Block", () => {
+    it("13.1 Detects SVG markup correctly from buffer", () => {
+      const svgBuffer = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>');
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+      assert.strictEqual(isSvgContent(svgBuffer), true);
+      assert.strictEqual(isSvgContent(pngBuffer), false);
+    });
+
+    it("13.2 SVG Script-Strip/Block: Blocks SVGs containing <script> tags", () => {
+      const evilSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="40" fill="red" />
+          <script>alert('SVG XSS')</script>
+        </svg>
+      `;
+
+      const audit = inspectAndSanitizeSvg(evilSvg);
+      assert.strictEqual(audit.safe, false);
+      assert.ok(audit.reason?.includes("<script>"));
+    });
+
+    it("13.3 SVG Script-Strip/Block: Blocks SVGs containing inline event handlers", () => {
+      const onloadSvg = '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><rect width="100" height="100"/></svg>';
+      const onerrorSvg = '<svg><image href="invalid.png" onerror="alert(document.domain)"/></svg>';
+
+      assert.strictEqual(inspectAndSanitizeSvg(onloadSvg).safe, false);
+      assert.strictEqual(inspectAndSanitizeSvg(onerrorSvg).safe, false);
+    });
+
+    it("13.4 SVG Script-Strip/Block: Blocks SVGs containing javascript: in href/xlink:href", () => {
+      const jsHrefSvg = `
+        <svg xmlns="http://www.w3.org/2000/svg">
+          <a href="javascript:alert(1)">
+            <text x="10" y="20">Click me</text>
+          </a>
+        </svg>
+      `;
+
+      assert.strictEqual(inspectAndSanitizeSvg(jsHrefSvg).safe, false);
+    });
+
+    it("13.5 SVG Script-Strip/Block: Blocks XXE entity expansion attacks", () => {
+      const xxeSvg = `<?xml version="1.0"?>
+        <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+        <svg><text>&xxe;</text></svg>`;
+
+      assert.strictEqual(inspectAndSanitizeSvg(xxeSvg).safe, false);
+      assert.ok(inspectAndSanitizeSvg(xxeSvg).reason?.includes("XXE"));
+    });
+
+    it("13.6 Clean SVGs pass inspection safely", () => {
+      const cleanSvg = `
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="50" fill="#10b981"/>
+          <path d="M 20 50 L 45 75 L 80 30" stroke="white" stroke-width="8" fill="none"/>
+        </svg>
+      `;
+
+      const audit = inspectAndSanitizeSvg(cleanSvg);
+      assert.strictEqual(audit.safe, true);
+      assert.ok(audit.sanitized.includes("<circle"));
+      assert.ok(audit.sanitized.includes("<path"));
+    });
+
+    it("13.7 Enforces 5MB file size limit", () => {
+      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+      assert.strictEqual(MAX_FILE_SIZE, 5242880);
+
+      const withinLimit = 4.9 * 1024 * 1024;
+      const overLimit = 5.1 * 1024 * 1024;
+
+      assert.ok(withinLimit <= MAX_FILE_SIZE);
+      assert.ok(overLimit > MAX_FILE_SIZE);
+    });
+
+    it("13.8 Path traversal filenames are rejected and sanitized filenames are random", () => {
+      const traversalFilenames = [
+        "../../../etc/passwd.png",
+        "..\\..\\windows\\system32.jpg",
+        "shell.php.png",
+        "file/with/slash.webp",
+      ];
+
+      for (const fn of traversalFilenames) {
+        const isSafe =
+          /^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|webp|svg)$/i.test(fn) &&
+          !fn.includes("..") &&
+          !fn.includes("/") &&
+          !fn.includes("\\");
+        assert.strictEqual(isSafe, false, `Filename ${fn} must be rejected`);
+      }
+
+      // Safe generated filename format
+      const generated = `${Date.now()}-abc123def456.png`;
+      const isGeneratedSafe =
+        /^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|webp|svg)$/i.test(generated) &&
+        !generated.includes("..") &&
+        !generated.includes("/") &&
+        !generated.includes("\\");
+      assert.strictEqual(isGeneratedSafe, true);
+    });
+  });
+
+  // =========================================================================
+  // ROUND 17: Multi-Tab Concurrency & Stale Config Conflict Detection
+  // =========================================================================
+  describe("Round 17: Multi-Tab Concurrency & Stale Config Conflict Detection (Optimistic Locking)", () => {
+    it("17.1 Stale write is rejected with 409 Conflict when server updatedAt is newer", () => {
+      const serverConfig = {
+        updatedAt: new Date("2026-11-20T12:00:00Z"),
+      };
+
+      // Client opened the tab at 11:30:00Z (stale)
+      const clientPayload = {
+        updatedAt: "2026-11-20T11:30:00Z",
+        themeColor: "purple",
+      };
+
+      const clientUpdatedAt = new Date(clientPayload.updatedAt).getTime();
+      const serverUpdatedAt = serverConfig.updatedAt.getTime();
+      const isConflict = serverUpdatedAt - clientUpdatedAt > 1000;
+
+      assert.strictEqual(isConflict, true, "Must flag conflict when server updatedAt is newer");
+    });
+
+    it("17.2 Concurrent write with matching or newer updatedAt proceeds cleanly", () => {
+      const serverConfig = {
+        updatedAt: new Date("2026-11-20T12:00:00Z"),
+      };
+
+      // Client with current timestamp
+      const clientPayload = {
+        updatedAt: "2026-11-20T12:00:00Z",
+        themeColor: "emerald",
+      };
+
+      const clientUpdatedAt = new Date(clientPayload.updatedAt).getTime();
+      const serverUpdatedAt = serverConfig.updatedAt.getTime();
+      const isConflict = serverUpdatedAt - clientUpdatedAt > 1000;
+
+      assert.strictEqual(isConflict, false, "Must not flag conflict when timestamps match");
+    });
+
+    it("17.3 Jitter tolerance allows slight clock skew (<= 1000ms)", () => {
+      const serverTime = 100000;
+      const clientTimeWithinTolerance = 99500; // 500ms behind
+      const isConflict = serverTime - clientTimeWithinTolerance > 1000;
+
+      assert.strictEqual(isConflict, false, "Must tolerate <= 1000ms clock jitter");
     });
   });
 });

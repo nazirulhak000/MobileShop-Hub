@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   Tag,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import { sanitizeUrl } from "@/lib/storefrontSecurity";
+import { generateResponsiveImageProps } from "@/lib/wordpress/mediaEngine";
 import { PromoBannerBlockProps } from "./types";
 
 export function PromoBannerBlock({
@@ -55,13 +56,22 @@ export function PromoBannerBlock({
 
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Memory leak prevention: clear timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const handleCopyCode = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!resolvedDiscountTag) return;
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     navigator.clipboard.writeText(resolvedDiscountTag);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   const isExternal =
@@ -72,7 +82,7 @@ export function PromoBannerBlock({
 
   return (
     <section
-      className={`w-full py-8 sm:py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto ${className}`}
+      className={`w-full py-8 sm:py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden ${className}`}
       aria-label="Promotion Banner"
     >
       <div
@@ -81,16 +91,37 @@ export function PromoBannerBlock({
             ? "bg-slate-950"
             : "bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950/95 backdrop-blur-xl"
         }`}
-        style={
-          resolvedBgType === "image" && resolvedBgImage
-            ? {
-                backgroundImage: `linear-gradient(to right, rgba(2, 6, 23, 0.94) 0%, rgba(2, 6, 23, 0.85) 50%, rgba(2, 6, 23, 0.65) 100%), url(${resolvedBgImage})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }
-            : undefined
-        }
       >
+        {/* Responsive Background Image with Srcset & Sizes */}
+        {resolvedBgType === "image" && resolvedBgImage && (
+          <>
+            {(() => {
+              const bgProps = generateResponsiveImageProps(
+                resolvedBgImage,
+                1920,
+                1080,
+                resolvedTitle,
+                "large"
+              );
+              return (
+                <img
+                  src={bgProps.src}
+                  srcSet={bgProps.srcSet}
+                  sizes={bgProps.sizes || "100vw"}
+                  alt={bgProps.alt}
+                  loading={bgProps.loading}
+                  decoding={bgProps.decoding}
+                  width={bgProps.width}
+                  height={bgProps.height}
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                />
+              );
+            })()}
+            {/* Dark readability gradient overlay over the image */}
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/85 to-slate-950/65 pointer-events-none" />
+          </>
+        )}
+
         {/* Decorative Ambient Radial Glow */}
         {resolvedBgType !== "image" && (
           <>
@@ -117,12 +148,12 @@ export function PromoBannerBlock({
             )}
 
             {/* Headline */}
-            <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white leading-snug">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white leading-snug break-words">
               {resolvedTitle}
             </h2>
 
             {/* Subtitle */}
-            <p className="text-slate-300 text-sm sm:text-base md:text-lg leading-relaxed">
+            <p className="text-slate-300 text-sm sm:text-base md:text-lg leading-relaxed break-words">
               {resolvedSubtitle}
             </p>
 
@@ -166,8 +197,34 @@ export function PromoBannerBlock({
             )}
           </div>
 
-          {/* Right Action Button Column */}
-          <div className="w-full lg:w-auto shrink-0 flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center gap-3">
+          {/* Right Action Button Column & Optional Graphic */}
+          <div className="w-full lg:w-auto shrink-0 flex flex-col sm:flex-row lg:flex-col items-stretch sm:items-center gap-4">
+            {resolvedBgType !== "image" && (imageUrl || data?.imageUrl) && (
+              <div className="hidden sm:block shrink-0 rounded-2xl overflow-hidden border border-slate-700/80 shadow-lg max-w-[220px]">
+                {(() => {
+                  const imgProps = generateResponsiveImageProps(
+                    imageUrl || data?.imageUrl || "",
+                    400,
+                    300,
+                    resolvedTitle,
+                    "medium"
+                  );
+                  return (
+                    <img
+                      src={imgProps.src}
+                      srcSet={imgProps.srcSet}
+                      sizes={imgProps.sizes || "220px"}
+                      alt={imgProps.alt}
+                      loading={imgProps.loading}
+                      decoding={imgProps.decoding}
+                      width={imgProps.width}
+                      height={imgProps.height}
+                      className="w-full h-auto object-cover"
+                    />
+                  );
+                })()}
+              </div>
+            )}
             {isExternal ? (
               <a
                 href={resolvedButtonUrl}

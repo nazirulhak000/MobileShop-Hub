@@ -143,7 +143,7 @@ export function VideoEmbedBlock({
 
   return (
     <section
-      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto ${className}`}
+      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto overflow-hidden ${className}`}
       aria-label="Video Presentation"
     >
       {/* Header */}
@@ -153,12 +153,12 @@ export function VideoEmbedBlock({
           <span>วิดีโอสาธิตการบริการ</span>
         </div>
 
-        <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
           {resolvedTitle}
         </h2>
 
         {resolvedDescription && (
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+          <p className="text-slate-300 text-sm sm:text-base leading-relaxed break-words">
             {resolvedDescription}
           </p>
         )}

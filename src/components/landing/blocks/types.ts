@@ -68,6 +68,14 @@ export interface RichTextBlockProps {
   themeColor?: StorefrontThemeColor;
   className?: string;
   data?: Record<string, any>;
+  shopSlug?: string;
+  tenantInfo?: {
+    phone?: string | null;
+    lineId?: string | null;
+    shopName?: string | null;
+    branchName?: string | null;
+    shopSlug?: string | null;
+  };
 }
 
 export interface CtaBlockProps {
@@ -128,10 +136,12 @@ export interface DynamicBlockRendererProps {
   block: CustomBlock;
   themeColor?: StorefrontThemeColor;
   className?: string;
+  shopSlug?: string;
   tenantInfo?: {
     phone?: string | null;
     lineId?: string | null;
     shopName?: string | null;
     branchName?: string | null;
+    shopSlug?: string | null;
   };
 }

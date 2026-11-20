@@ -82,19 +82,19 @@ export function HtmlEmbedBlock({
 
   return (
     <section
-      className={`w-full py-10 sm:py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto ${className}`}
+      className={`w-full py-10 sm:py-14 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden ${className}`}
       aria-label={resolvedTitle || "Custom Widget & Embed"}
     >
       {/* Header if provided */}
       {(resolvedTitle || resolvedSubtitle) && (
         <div className="text-center max-w-3xl mx-auto mb-8 space-y-2">
           {resolvedTitle && (
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
               {resolvedTitle}
             </h2>
           )}
           {resolvedSubtitle && (
-            <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+            <p className="text-slate-300 text-sm sm:text-base leading-relaxed break-words">
               {resolvedSubtitle}
             </p>
           )}

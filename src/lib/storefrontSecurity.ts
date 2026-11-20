@@ -168,3 +168,75 @@ export function validateJsonPayloadBoundary(
 
   return str;
 }
+
+/**
+ * Detects if a buffer contains SVG XML markup
+ */
+export function isSvgContent(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  const snippet = buffer.slice(0, Math.min(buffer.length, 1024)).toString("utf8").toLowerCase().trim();
+  return (
+    snippet.startsWith("<?xml") ||
+    snippet.includes("<svg") ||
+    snippet.includes("xmlns=\"http://www.w3.org/2000/svg\"")
+  );
+}
+
+/**
+ * Inspects SVG content for malicious scripts, event handlers, XXE entities, or HTML embedding.
+ * Returns { safe: false, reason } if dangerous injection is detected, or { safe: true, sanitized } if clean.
+ */
+export function inspectAndSanitizeSvg(svgText: string): { safe: boolean; sanitized: string; reason?: string } {
+  if (!svgText || typeof svgText !== "string") {
+    return { safe: false, sanitized: "", reason: "ไฟล์ SVG ว่างเปล่า" };
+  }
+
+  // 1. Check for XML Entity Expansion (XXE) attacks
+  if (/<!ENTITY/i.test(svgText) || /SYSTEM\s+["']/i.test(svgText)) {
+    return {
+      safe: false,
+      sanitized: "",
+      reason: "ตรวจพบ XXE / XML Entity ในไฟล์ SVG ซึ่งไม่ปลอดภัย",
+    };
+  }
+
+  // 2. Check for script tags
+  if (/<script\b/i.test(svgText)) {
+    return {
+      safe: false,
+      sanitized: "",
+      reason: "ตรวจพบ <script> tag ในไฟล์ SVG (XSS vector)",
+    };
+  }
+
+  // 3. Check for inline event handlers (onload, onerror, onbegin, etc.)
+  if (/\son[a-zA-Z]+\s*=/i.test(svgText)) {
+    return {
+      safe: false,
+      sanitized: "",
+      reason: "ตรวจพบ Event Handler (e.g. onload, onerror) ในไฟล์ SVG",
+    };
+  }
+
+  // 4. Check for javascript: in href or xlink:href
+  if (/(href|xlink:href)\s*=\s*["']\s*javascript:/i.test(svgText)) {
+    return {
+      safe: false,
+      sanitized: "",
+      reason: "ตรวจพบ javascript: URI ในไฟล์ SVG",
+    };
+  }
+
+  // 5. Check for foreignObject which can embed arbitrary HTML
+  if (/<foreignObject\b/i.test(svgText)) {
+    return {
+      safe: false,
+      sanitized: "",
+      reason: "ตรวจพบ <foreignObject> ในไฟล์ SVG ซึ่งอาจมี HTML แอบแฝง",
+    };
+  }
+
+  // Clean and sanitize any remaining tags
+  const sanitized = stripScriptTags(svgText);
+  return { safe: true, sanitized };
+}

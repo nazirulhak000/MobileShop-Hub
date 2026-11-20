@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import { sanitizeUrl } from "@/lib/storefrontSecurity";
+import { do_shortcode, shortcode_exists, ShortcodeContext } from "@/lib/wordpress/shortcodeEngine";
 import { RichTextBlockProps } from "./types";
 
 /**
@@ -164,6 +165,86 @@ function renderMarkdownContent(content: string, themeColor: StorefrontThemeColor
   return elements;
 }
 
+/**
+ * Processes content containing WordPress shortcodes and markdown
+ */
+function renderContentWithShortcodes(
+  content: string,
+  themeColor: StorefrontThemeColor,
+  context: ShortcodeContext
+): React.ReactNode {
+  if (!content || typeof content !== "string") return null;
+
+  // Shortcode pattern matching [tag ...]...[/tag], [tag ... /], or [tag ...]
+  const shortcodePattern = /\[([a-zA-Z0-9_-]+)([\s\S]*?)(?:\/\]|\](?:([\s\S]*?)\[\/\1\])?)/g;
+
+  // If no shortcode exists in content, render standard markdown directly
+  if (!shortcodePattern.test(content)) {
+    return renderMarkdownContent(content, themeColor);
+  }
+
+  // Reset regex index after test
+  shortcodePattern.lastIndex = 0;
+
+  const elements: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIndex = 0;
+
+  while ((match = shortcodePattern.exec(content)) !== null) {
+    const fullMatch = match[0];
+    const tagName = match[1].toLowerCase();
+    const matchIndex = match.index;
+
+    // Content before shortcode
+    if (matchIndex > lastIndex) {
+      const textBefore = content.substring(lastIndex, matchIndex).trim();
+      if (textBefore) {
+        elements.push(
+          <React.Fragment key={`md-${keyIndex++}`}>
+            {renderMarkdownContent(textBefore, themeColor)}
+          </React.Fragment>
+        );
+      }
+    }
+
+    // Process shortcode if registered
+    if (shortcode_exists(tagName)) {
+      const renderedHtml = do_shortcode(fullMatch, context);
+      elements.push(
+        <div
+          key={`sc-${keyIndex++}`}
+          className="my-6 w-full"
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
+      );
+    } else {
+      // Unregistered shortcode tag, treat as plain markdown text
+      elements.push(
+        <React.Fragment key={`md-${keyIndex++}`}>
+          {renderMarkdownContent(fullMatch, themeColor)}
+        </React.Fragment>
+      );
+    }
+
+    lastIndex = matchIndex + fullMatch.length;
+  }
+
+  // Trailing content after last shortcode
+  if (lastIndex < content.length) {
+    const textAfter = content.substring(lastIndex).trim();
+    if (textAfter) {
+      elements.push(
+        <React.Fragment key={`md-${keyIndex++}`}>
+          {renderMarkdownContent(textAfter, themeColor)}
+        </React.Fragment>
+      );
+    }
+  }
+
+  return elements;
+}
+
 const DEFAULT_RICH_TEXT = `## ความเป็นมาและปณิธานของเรา
 เราเริ่มต้นจากการเป็นศูนย์ซ่อมอิเล็กทรอนิกส์ขนาดเล็กด้วยความมุ่งมั่นที่จะให้บริการซ่อมแซมสมาร์ตโฟนด้วยความซื่อสัตย์ ใช้อะไหล่คุณภาพมาตรฐานสูง และมีราคาที่สมเหตุสมผลสำหรับทุกคน
 
@@ -187,6 +268,8 @@ export function RichTextBlock({
   themeColor = "emerald",
   className = "",
   data,
+  shopSlug,
+  tenantInfo,
 }: RichTextBlockProps) {
   const resolvedTitle = title || data?.title;
   const resolvedSubtitle = subtitle || data?.subtitle;
@@ -197,12 +280,20 @@ export function RichTextBlock({
   const resolvedAuthorAvatar = rawAuthorAvatar ? sanitizeUrl(rawAuthorAvatar) : undefined;
   const resolvedBadge = badge || data?.badge || "มาตรฐานและการรับรอง";
   const resolvedAlign = align || data?.align || "left";
+  const resolvedShopSlug = shopSlug || tenantInfo?.shopSlug || data?.shopSlug || undefined;
+
+  const shortcodeContext: ShortcodeContext = {
+    shopSlug: resolvedShopSlug,
+    shopName: tenantInfo?.shopName || data?.shopName || undefined,
+    phone: tenantInfo?.phone || data?.phone || undefined,
+    lineId: tenantInfo?.lineId || data?.lineId || undefined,
+  };
 
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
   return (
     <section
-      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto ${className}`}
+      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto overflow-hidden ${className}`}
       aria-label="Article & Credentials"
     >
       <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 sm:p-10 md:p-12 shadow-xl backdrop-blur-sm">
@@ -221,13 +312,13 @@ export function RichTextBlock({
             )}
 
             {resolvedTitle && (
-              <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
                 {resolvedTitle}
               </h2>
             )}
 
             {resolvedSubtitle && (
-              <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+              <p className="text-slate-300 text-sm sm:text-base leading-relaxed break-words">
                 {resolvedSubtitle}
               </p>
             )}
@@ -237,8 +328,8 @@ export function RichTextBlock({
         )}
 
         {/* Content Body */}
-        <div className="prose prose-invert max-w-none">
-          {renderMarkdownContent(resolvedContent, themeColor)}
+        <div className="prose prose-invert max-w-none break-words [overflow-wrap:anywhere]">
+          {renderContentWithShortcodes(resolvedContent, themeColor, shortcodeContext)}
         </div>
 
         {/* Author / Technician Card (if provided) */}
@@ -248,7 +339,11 @@ export function RichTextBlock({
               <img
                 src={resolvedAuthorAvatar}
                 alt={resolvedAuthor || "ผู้เขียน"}
-                className="w-14 h-14 rounded-full object-cover border-2 border-emerald-500 shadow-md"
+                width={56}
+                height={56}
+                loading="lazy"
+                decoding="async"
+                className="w-14 h-14 rounded-full object-cover border-2 border-emerald-500 shadow-md shrink-0"
               />
             ) : (
               <div className="w-14 h-14 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">

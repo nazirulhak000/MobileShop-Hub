@@ -15,6 +15,8 @@ import {
   ExternalLink,
   Save,
   RotateCcw,
+  Activity,
+  History,
   Sparkles,
   CheckCircle2,
   AlertCircle,
@@ -89,6 +91,19 @@ import {
   safeParseSectionsOrder,
   safeParseNavMenu,
 } from "@/lib/storefrontTheme";
+import {
+  getAllBlockPatterns,
+  expandPattern,
+  BlockPattern,
+} from "@/lib/wordpress/blockPatterns";
+import {
+  serializeToGutenberg,
+  parseGutenbergContent,
+} from "@/lib/wordpress/gutenbergConverter";
+import {
+  generateThemeJson,
+  compileThemeJsonToCss,
+} from "@/lib/wordpress/themeJsonEngine";
 
 type ActiveTab =
   | "theme"
@@ -103,7 +118,7 @@ type ViewportMode = "desktop" | "tablet" | "mobile";
 
 interface ToastState {
   message: string;
-  type: "success" | "error" | "warning";
+  type: "success" | "error" | "warning" | "info";
 }
 
 /**
@@ -332,6 +347,51 @@ export default function StorefrontCustomizerPage() {
   const [newNavHref, setNewNavHref] = useState<string>("#services");
   const [newNavIsExternal, setNewNavIsExternal] = useState<boolean>(false);
 
+  // Disaster Recovery / Factory Reset modal state
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+  const [resetStep, setResetStep] = useState<1 | 2>(1);
+
+  // Round 19: Offline draft & network error recovery states
+  const [tenantId, setTenantId] = useState<string>("");
+  const [hasOfflineDraft, setHasOfflineDraft] = useState<boolean>(false);
+  const [offlineDraftTimestamp, setOfflineDraftTimestamp] = useState<number>(0);
+  const [saveFailed, setSaveFailed] = useState<boolean>(false);
+
+  // Round 32: Site Health Diagnostic Modal state
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState<boolean>(false);
+  const [healthReport, setHealthReport] = useState<any>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState<boolean>(false);
+
+  // Round 33: Revision History & 1-Click Rollback Modal state
+  const [isRevisionsModalOpen, setIsRevisionsModalOpen] = useState<boolean>(false);
+  const [revisionsList, setRevisionsList] = useState<any[]>([]);
+  const [isLoadingRevisions, setIsLoadingRevisions] = useState<boolean>(false);
+  const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
+
+  // Round 34: WordPress Block Patterns Library state
+  const [isPatternLibraryOpen, setIsPatternLibraryOpen] = useState<boolean>(false);
+  const [patternFilterCategory, setPatternFilterCategory] = useState<string>("all");
+
+  // Round 35: Gutenberg HTML Import/Export Modal state
+  const [isGutenbergModalOpen, setIsGutenbergModalOpen] = useState<boolean>(false);
+  const [gutenbergMode, setGutenbergMode] = useState<"export" | "import">("export");
+  const [gutenbergHtml, setGutenbergHtml] = useState<string>("");
+  const [copiedGutenberg, setCopiedGutenberg] = useState<boolean>(false);
+  const [gutenbergError, setGutenbergError] = useState<string | null>(null);
+
+  // Round 39: WordPress theme.json CSS Variables compilation for preview canvas
+  const compiledThemeCss = useMemo(() => {
+    try {
+      const tj = generateThemeJson(
+        { themeColor: config.themeColor, fontFamily: config.fontFamily },
+        config.headline
+      );
+      return compileThemeJsonToCss(tj);
+    } catch {
+      return "";
+    }
+  }, [config.themeColor, config.fontFamily, config.headline]);
+
   // Set browser origin on client mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -359,11 +419,25 @@ export default function StorefrontCustomizerPage() {
             setInitialConfig(loadedConfig);
 
             if (data.tenant) {
+              if (data.tenant.id) setTenantId(data.tenant.id);
               if (data.tenant.name) {
                 setShopName(data.tenant.name);
                 setInitialShopName(data.tenant.name);
               }
               if (data.tenant.slug) setShopSlug(data.tenant.slug);
+
+              // Check for locally backed-up offline draft
+              const targetKey = `fixme_storefront_draft_${data.tenant.id || data.tenant.slug || "default"}`;
+              try {
+                const localDraftRaw = typeof window !== "undefined" ? localStorage.getItem(targetKey) : null;
+                if (localDraftRaw) {
+                  const parsed = JSON.parse(localDraftRaw);
+                  if (parsed?.savedAt) {
+                    setHasOfflineDraft(true);
+                    setOfflineDraftTimestamp(parsed.savedAt);
+                  }
+                }
+              } catch (_) {}
             }
 
             // Parse cases
@@ -468,6 +542,73 @@ export default function StorefrontCustomizerPage() {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirty]);
+
+  // Round 19: Auto-save offline draft to localStorage when dirty
+  useEffect(() => {
+    if (!isDirty || typeof window === "undefined") return;
+    const key = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+    const timer = setTimeout(() => {
+      try {
+        const draft = {
+          config,
+          shopName,
+          casesList,
+          sectionsOrder,
+          customSectionsList,
+          customPagesList,
+          navMenuList,
+          savedAt: Date.now(),
+        };
+        localStorage.setItem(key, JSON.stringify(draft));
+      } catch (_) {}
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [
+    isDirty,
+    config,
+    shopName,
+    casesList,
+    sectionsOrder,
+    customSectionsList,
+    customPagesList,
+    navMenuList,
+    tenantId,
+    shopSlug,
+  ]);
+
+  // Restore offline draft
+  const restoreOfflineDraft = () => {
+    const key = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+    try {
+      const local = typeof window !== "undefined" ? localStorage.getItem(key) : null;
+      if (!local) return;
+      const parsed = JSON.parse(local);
+      if (parsed.config) setConfig(parsed.config);
+      if (parsed.shopName) setShopName(parsed.shopName);
+      if (parsed.casesList) setCasesList(parsed.casesList);
+      if (parsed.sectionsOrder) setSectionsOrder(parsed.sectionsOrder);
+      if (parsed.customSectionsList) setCustomSectionsList(parsed.customSectionsList);
+      if (parsed.customPagesList) setCustomPagesList(parsed.customPagesList);
+      if (parsed.navMenuList) setNavMenuList(parsed.navMenuList);
+      setHasOfflineDraft(false);
+      setToast({
+        message: "กู้คืนข้อมูลฉบับร่างที่สำรองไว้ในเครื่องเรียบร้อยแล้ว",
+        type: "success",
+      });
+    } catch (err) {
+      console.error("Failed to restore draft:", err);
+    }
+  };
+
+  // Discard offline draft
+  const discardOfflineDraft = () => {
+    const key = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+    try {
+      if (typeof window !== "undefined") localStorage.removeItem(key);
+    } catch (_) {}
+    setHasOfflineDraft(false);
+    setToast({ message: "ละทิ้งฉบับร่างเรียบร้อยแล้ว", type: "warning" });
+  };
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -630,6 +771,14 @@ export default function StorefrontCustomizerPage() {
       if (res.ok && data.success) {
         setToast({ message: "บันทึกการตั้งค่าหน้าร้านเรียบร้อยแล้ว!", type: "success" });
 
+        // Round 19: Clear local offline draft upon verified server save
+        const draftKey = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+        try {
+          if (typeof window !== "undefined") localStorage.removeItem(draftKey);
+        } catch (_) {}
+        setSaveFailed(false);
+        setHasOfflineDraft(false);
+
         if (data.config) {
           const freshConfig: StorefrontConfigData = {
             ...DEFAULT_STOREFRONT_CONFIG,
@@ -651,15 +800,47 @@ export default function StorefrontCustomizerPage() {
         setInitialCustomPagesList([...customPagesList]);
         setInitialNavMenuList([...navMenuList]);
       } else {
+        // Round 19: Persist local draft backup on server error
+        const draftKey = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+        try {
+          const draftPayload = {
+            config,
+            shopName,
+            casesList,
+            sectionsOrder,
+            customSectionsList,
+            customPagesList,
+            navMenuList,
+            savedAt: Date.now(),
+          };
+          if (typeof window !== "undefined") localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+        } catch (_) {}
+        setSaveFailed(true);
         setToast({
-          message: data.error || `ไม่สามารถบันทึกข้อมูลได้ (รหัสสถานะ: ${res.status})`,
+          message: data.error || `ไม่สามารถบันทึกข้อมูลได้ (รหัสสถานะ: ${res.status}) - ข้อมูลถูกสำรองไว้ในเครื่องแล้ว`,
           type: "error",
         });
       }
     } catch (err) {
       console.error("Save error:", err);
+      // Round 19: Offline resilience backup on network drop
+      const draftKey = `fixme_storefront_draft_${tenantId || shopSlug || "default"}`;
+      try {
+        const draftPayload = {
+          config,
+          shopName,
+          casesList,
+          sectionsOrder,
+          customSectionsList,
+          customPagesList,
+          navMenuList,
+          savedAt: Date.now(),
+        };
+        if (typeof window !== "undefined") localStorage.setItem(draftKey, JSON.stringify(draftPayload));
+      } catch (_) {}
+      setSaveFailed(true);
       setToast({
-        message: "เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาตรวจสอบอินเทอร์เน็ต",
+        message: "เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ (ข้อมูลถูกสำรองไว้ในเครื่องแล้ว กด 'ลองใหม่')",
         type: "error",
       });
     } finally {
@@ -667,24 +848,196 @@ export default function StorefrontCustomizerPage() {
     }
   };
 
-  // Reset to Defaults
-  const handleResetDefaults = () => {
-    if (
-      window.confirm(
-        "คุณต้องการรีเซ็ตการตั้งค่าธีม ส่วนประกอบ และเมนูกลับเป็นค่าเริ่มต้นมาตรฐานใช่หรือไม่?\n(การเปลี่ยนแปลงจะมีผลเมื่อคลิก 'บันทึกการเปลี่ยนแปลง')"
-      )
-    ) {
-      setConfig({ ...DEFAULT_STOREFRONT_CONFIG });
-      setCasesList([...BEFORE_AFTER_CASES]);
-      setSectionsOrder([...DEFAULT_SECTIONS_ORDER]);
-      setCustomSectionsList([]);
-      setCustomPagesList([...DEFAULT_CUSTOM_PAGES]);
-      setNavMenuList([...DEFAULT_NAV_MENU]);
-      setSelectedPageSlug("");
+  // Execute Factory Reset / Disaster Recovery
+  const executeResetDefaults = () => {
+    setConfig({ ...DEFAULT_STOREFRONT_CONFIG });
+    setCasesList([...BEFORE_AFTER_CASES]);
+    setSectionsOrder([...DEFAULT_SECTIONS_ORDER]);
+    setCustomSectionsList([]);
+    setCustomPagesList([...DEFAULT_CUSTOM_PAGES]);
+    setNavMenuList([...DEFAULT_NAV_MENU]);
+    setSelectedPageSlug("");
+    setIsResetModalOpen(false);
+    setResetStep(1);
+
+    // Clear auto-saved localStorage draft if present
+    try {
+      if (typeof window !== "undefined" && shopSlug) {
+        localStorage.removeItem(`fixme_storefront_draft_${shopSlug}`);
+      }
+    } catch (_) {}
+
+    setToast({
+      message: "รีเซ็ตค่ากลับเป็นพิมพ์เขียวมาตรฐาน (Blueprint) เรียบร้อยแล้ว (คลิก 'บันทึกการเปลี่ยนแปลง' เพื่อนำไปใช้งานจริง)",
+      type: "success",
+    });
+  };
+
+  // Round 35: Import blocks from Gutenberg HTML markup
+  const handleImportGutenberg = () => {
+    if (!gutenbergHtml.trim()) {
+      setGutenbergError("กรุณาวางโค้ด Gutenberg HTML ก่อนดำเนินการนำเข้า");
+      return;
+    }
+    try {
+      const parsedBlocks = parseGutenbergContent(gutenbergHtml);
+      if (!parsedBlocks || parsedBlocks.length === 0) {
+        setGutenbergError("ไม่พบโครงสร้างบล็อก Gutenberg ที่ถูกต้องในโค้ดที่วาง");
+        return;
+      }
+
+      if (selectedPageSlug && activeSubPage) {
+        // Append blocks to active subpage
+        setCustomPagesList((prev) =>
+          prev.map((page) =>
+            page.slug === selectedPageSlug
+              ? {
+                  ...page,
+                  sections: [...(page.sections || []), ...parsedBlocks],
+                }
+              : page
+          )
+        );
+      } else {
+        // Append blocks to customSectionsList and sectionsOrder
+        setCustomSectionsList((prev) => [...prev, ...parsedBlocks]);
+        setSectionsOrder((prev) => [
+          ...prev,
+          ...parsedBlocks.map((b) => b.id).filter((id) => !prev.includes(id)),
+        ]);
+      }
+
       setToast({
-        message: "รีเซ็ตค่าเป็นค่ามาตรฐานแล้ว (คลิก 'บันทึกการเปลี่ยนแปลง' เพื่อนำไปใช้จริง)",
+        message: `นำเข้าบล็อก WordPress Gutenberg สำเร็จ ${parsedBlocks.length} บล็อก!`,
         type: "success",
       });
+      setIsGutenbergModalOpen(false);
+      setGutenbergHtml("");
+      setGutenbergError(null);
+    } catch (err: any) {
+      setGutenbergError(`เกิดข้อผิดพลาดในการแปลงบล็อก: ${err?.message || "Invalid markup"}`);
+    }
+  };
+
+  // Reset to Defaults (Opens double-confirmation Disaster Recovery modal)
+  const handleResetDefaults = () => {
+    setResetStep(1);
+    setIsResetModalOpen(true);
+  };
+
+  // Round 32: Open Site Health Diagnostic modal & fetch report
+  const handleOpenSiteHealth = async () => {
+    setIsHealthModalOpen(true);
+    setIsLoadingHealth(true);
+    try {
+      const res = await fetch("/api/storefront/health", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          config: {
+            ...config,
+            sectionsOrder: JSON.stringify(sectionsOrder),
+            customSections: JSON.stringify(customSectionsList),
+            customPages: JSON.stringify(customPagesList),
+            navigationMenu: JSON.stringify(navMenuList),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.report) {
+        setHealthReport(data.report);
+      }
+    } catch (err) {
+      console.error("Site Health fetch error:", err);
+    } finally {
+      setIsLoadingHealth(false);
+    }
+  };
+
+  // Round 33: Open Revisions History modal & fetch revisions
+  const handleOpenRevisions = async () => {
+    setIsRevisionsModalOpen(true);
+    setIsLoadingRevisions(true);
+    try {
+      const res = await fetch("/api/storefront/config?action=revisions");
+      const data = await res.json();
+      if (data.success && Array.isArray(data.revisions)) {
+        setRevisionsList(data.revisions);
+      }
+    } catch (err) {
+      console.error("Revisions fetch error:", err);
+    } finally {
+      setIsLoadingRevisions(false);
+    }
+  };
+
+  // Round 33: Rollback to selected revision
+  const handleRollback = async (revisionId: string) => {
+    if (!confirm("คุณต้องการย้อนกลับไปยังเวอร์ชันนี้หรือไม่? การเปลี่ยนแปลงที่ยังไม่ได้บันทึกจะถูกแทนที่")) {
+      return;
+    }
+    setIsRollingBack(true);
+    try {
+      const res = await fetch("/api/storefront/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rollback", revisionId }),
+      });
+      const data = await res.json();
+      if (data.success && data.config) {
+        const restored = data.config;
+        setConfig((prev) => ({
+          ...prev,
+          themeColor: restored.themeColor || prev.themeColor,
+          fontFamily: restored.fontFamily || prev.fontFamily,
+          heroLayout: restored.heroLayout || prev.heroLayout,
+          headline: restored.headline ?? prev.headline,
+          subheadline: restored.subheadline ?? prev.subheadline,
+          badge: restored.badge ?? prev.badge,
+          announcementText: restored.announcementText ?? prev.announcementText,
+          announcementEnabled: restored.announcementEnabled ?? prev.announcementEnabled,
+          phone: restored.phone ?? prev.phone,
+          lineId: restored.lineId ?? prev.lineId,
+          lineQrUrl: restored.lineQrUrl ?? prev.lineQrUrl,
+          googleMapsUrl: restored.googleMapsUrl ?? prev.googleMapsUrl,
+          showLiveTracking: restored.showLiveTracking ?? prev.showLiveTracking,
+          showHardwareScanner: restored.showHardwareScanner ?? prev.showHardwareScanner,
+          showServicesBento: restored.showServicesBento ?? prev.showServicesBento,
+          showInspectionBench: restored.showInspectionBench ?? prev.showInspectionBench,
+          showPriceEstimator: restored.showPriceEstimator ?? prev.showPriceEstimator,
+          showBeforeAfterSlider: restored.showBeforeAfterSlider ?? prev.showBeforeAfterSlider,
+          showCustomerReviews: restored.showCustomerReviews ?? prev.showCustomerReviews,
+          showLocationSection: restored.showLocationSection ?? prev.showLocationSection,
+          showFaqSection: restored.showFaqSection ?? prev.showFaqSection,
+          showMobileQuickBar: restored.showMobileQuickBar ?? prev.showMobileQuickBar,
+        }));
+        if (restored.sectionsOrder) setSectionsOrder(safeParseSectionsOrder(restored.sectionsOrder));
+        if (restored.customSections) setCustomSectionsList(safeParseCustomSections(restored.customSections));
+        if (restored.customPages) setCustomPagesList(safeParseCustomPages(restored.customPages));
+        if (restored.navigationMenu) setNavMenuList(safeParseNavMenu(restored.navigationMenu));
+        setInitialConfig(restored);
+        if (restored.sectionsOrder) setInitialSectionsOrder(safeParseSectionsOrder(restored.sectionsOrder));
+        if (restored.customSections) setInitialCustomSectionsList(safeParseCustomSections(restored.customSections));
+        if (restored.customPages) setInitialCustomPagesList(safeParseCustomPages(restored.customPages));
+        if (restored.navigationMenu) setInitialNavMenuList(safeParseNavMenu(restored.navigationMenu));
+        setIsRevisionsModalOpen(false);
+        setToast({
+          message: "ย้อนกลับไปยังเวอร์ชันที่เลือกเรียบร้อยแล้ว",
+          type: "success",
+        });
+      } else {
+        setToast({
+          message: data.error || "เกิดข้อผิดพลาดในการย้อนกลับเวอร์ชัน",
+          type: "error",
+        });
+      }
+    } catch {
+      setToast({
+        message: "เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์",
+        type: "error",
+      });
+    } finally {
+      setIsRollingBack(false);
     }
   };
 
@@ -824,6 +1177,41 @@ export default function StorefrontCustomizerPage() {
     setIsAddBlockModalOpen(false);
     setEditingBlock(newBlock);
     setToast({ message: `เพิ่มบล็อก "${template.title}" เรียบร้อยแล้ว`, type: "success" });
+  };
+
+  // Round 34: Insert WordPress Synced Pattern into active page or homepage
+  const handleInsertPattern = (pattern: BlockPattern) => {
+    try {
+      const expandedBlocks = expandPattern(pattern.name, undefined, tenantId);
+      if (!expandedBlocks || expandedBlocks.length === 0) {
+        setToast({ message: "ไม่พบบล็อกในชุดคลังสำเร็จรูปนี้", type: "error" });
+        return;
+      }
+
+      if (selectedPageSlug && activeSubPage) {
+        // Insert into active custom subpage
+        setCustomPagesList((prev) =>
+          prev.map((p) =>
+            p.slug === selectedPageSlug
+              ? { ...p, sections: [...(p.sections || []), ...expandedBlocks] }
+              : p
+          )
+        );
+      } else {
+        // Insert into Home page custom sections
+        setCustomSectionsList((prev) => [...prev, ...expandedBlocks]);
+        setSectionsOrder((prev) => [...prev, ...expandedBlocks.map((b) => b.id)]);
+      }
+
+      setIsPatternLibraryOpen(false);
+      setToast({
+        message: `เพิ่มบล็อกสำเร็จรูป "${pattern.title}" (${expandedBlocks.length} บล็อก) เรียบร้อยแล้ว`,
+        type: "success",
+      });
+    } catch (err) {
+      console.error("Failed to insert block pattern:", err);
+      setToast({ message: "เกิดข้อผิดพลาดในการเพิ่มบล็อกสำเร็จรูป", type: "error" });
+    }
   };
 
   // Delete Custom Block
@@ -1235,6 +1623,49 @@ export default function StorefrontCustomizerPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Round 32: Site Health Diagnostic Button */}
+          <button
+            type="button"
+            onClick={handleOpenSiteHealth}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80 text-emerald-800 text-xs font-semibold transition-colors min-h-[36px]"
+            title="ตรวจสอบความพร้อมและสุขภาพเว็บไซต์ (Site Health Diagnostic)"
+          >
+            <Activity className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">สุขภาพเว็บ</span>
+          </button>
+
+          {/* Round 33: Revision History Button */}
+          <button
+            type="button"
+            onClick={handleOpenRevisions}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors min-h-[36px]"
+            title="ดูประวัติการแก้ไขและย้อนกลับเวอร์ชัน (Revisions)"
+          >
+            <History className="h-3.5 w-3.5 text-slate-500" />
+            <span className="hidden sm:inline">ประวัติแก้ไข</span>
+          </button>
+
+          {/* Round 35: Gutenberg HTML Import/Export Modal Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const targetBlocks =
+                selectedPageSlug && activeSubPage
+                  ? activeSubPage.sections || []
+                  : customSectionsList;
+              setGutenbergHtml(serializeToGutenberg(targetBlocks));
+              setGutenbergMode("export");
+              setGutenbergError(null);
+              setCopiedGutenberg(false);
+              setIsGutenbergModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100/80 text-indigo-800 text-xs font-semibold transition-colors min-h-[36px]"
+            title="แปลงโค้ดบล็อก WordPress Gutenberg (นำเข้า / ส่งออก)"
+          >
+            <Code className="h-3.5 w-3.5 text-indigo-600" />
+            <span className="hidden sm:inline">Gutenberg WP</span>
+          </button>
+
           <button
             type="button"
             onClick={handleResetDefaults}
@@ -1255,6 +1686,19 @@ export default function StorefrontCustomizerPage() {
             <span className="hidden sm:inline">ดูหน้าร้านจริง</span>
             <ExternalLink className="h-3.5 w-3.5 text-slate-500" />
           </Link>
+
+          {saveFailed && (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSave}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-xs transition-all active:scale-95 min-h-[36px]"
+              title="ลองบันทึกอีกครั้ง"
+            >
+              <RotateCcw className={`h-3.5 w-3.5 ${isSaving ? "animate-spin" : ""}`} />
+              <span>ลองใหม่</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1288,6 +1732,53 @@ export default function StorefrontCustomizerPage() {
           </button>
         </div>
       </header>
+
+      {/* Round 19: Offline Draft Restoration Banner */}
+      {hasOfflineDraft && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between text-xs text-amber-900 gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold">⚠️ พบฉบับร่างที่บันทึกไว้ในเครื่อง (Offline Backup):</span>
+            <span className="text-amber-700">
+              {offlineDraftTimestamp ? `บันทึกเมื่อ ${new Date(offlineDraftTimestamp).toLocaleTimeString("th-TH")}` : "บันทึกจากการแก้ไขล่าสุด"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={restoreOfflineDraft}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold shadow-xs transition-colors"
+            >
+              กู้คืนฉบับร่าง
+            </button>
+            <button
+              type="button"
+              onClick={discardOfflineDraft}
+              className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 text-amber-800 rounded-lg font-medium transition-colors"
+            >
+              ละทิ้ง
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Round 19: Network Save Error Banner with Retry */}
+      {saveFailed && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2.5 flex items-center justify-between text-xs text-rose-900 gap-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+            <span>การเชื่อมต่อขัดข้อง: บันทึกข้อมูลไม่สำเร็จ แต่ข้อมูลถูกสำรองไว้ในเครื่องแล้ว (Offline Backup)</span>
+          </div>
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={handleSave}
+            className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold shadow-xs transition-colors shrink-0 flex items-center gap-1.5"
+          >
+            <RotateCcw className={`h-3.5 w-3.5 ${isSaving ? "animate-spin" : ""}`} />
+            <span>ลองบันทึกอีกครั้ง</span>
+          </button>
+        </div>
+      )}
 
       {/* 2. MAIN TWO-COLUMN SPLIT WORKSPACE */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
@@ -1577,14 +2068,43 @@ export default function StorefrontCustomizerPage() {
                       จัดลำดับขึ้น-ลง เปิด/ปิดการแสดงผล หรือเพิ่มบล็อกใหม่สไตล์ Gutenberg
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddBlockModalOpen(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs shrink-0"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    <span>เพิ่มบล็อก</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetBlocks =
+                          selectedPageSlug && activeSubPage
+                            ? activeSubPage.sections || []
+                            : customSectionsList;
+                        setGutenbergHtml(serializeToGutenberg(targetBlocks));
+                        setGutenbergMode("export");
+                        setGutenbergError(null);
+                        setCopiedGutenberg(false);
+                        setIsGutenbergModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-bold transition-all shadow-2xs"
+                      title="ส่งออก / นำเข้าโค้ด WordPress Gutenberg"
+                    >
+                      <Code className="h-3.5 w-3.5 text-slate-600" />
+                      <span className="hidden sm:inline">Gutenberg Code</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPatternLibraryOpen(true)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all shadow-2xs"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>คลังสำเร็จรูป (Patterns)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddBlockModalOpen(true)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>เพิ่มบล็อก</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Blocks List */}
@@ -1698,14 +2218,22 @@ export default function StorefrontCustomizerPage() {
                   ))}
                 </div>
 
-                <div className="pt-2">
+                <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setIsAddBlockModalOpen(true)}
-                    className="w-full py-3 rounded-2xl border border-dashed border-slate-300 hover:border-emerald-500 bg-white hover:bg-emerald-50/30 text-xs font-bold text-slate-700 hover:text-emerald-700 flex items-center justify-center gap-2 transition-all shadow-2xs"
+                    className="py-3 px-4 rounded-2xl border border-dashed border-slate-300 hover:border-emerald-500 bg-white hover:bg-emerald-50/30 text-xs font-bold text-slate-700 hover:text-emerald-700 flex items-center justify-center gap-2 transition-all shadow-2xs"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>เพิ่มบล็อกเนื้อหาใหม่ (Add Block)</span>
+                    <span>เพิ่มบล็อกเดี่ยว (Add Block)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPatternLibraryOpen(true)}
+                    className="py-3 px-4 rounded-2xl border border-dashed border-indigo-300 hover:border-indigo-500 bg-white hover:bg-indigo-50/40 text-xs font-bold text-indigo-700 flex items-center justify-center gap-2 transition-all shadow-2xs"
+                  >
+                    <Sparkles className="h-4 w-4 text-indigo-600" />
+                    <span>เลือกชุดบล็อกสำเร็จรูป (Pattern Library)</span>
                   </button>
                 </div>
               </div>
@@ -1801,9 +2329,17 @@ export default function StorefrontCustomizerPage() {
                                   เผยแพร่แล้ว
                                 </span>
                               )}
-                              {p.template === "blank-canvas" && (
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
-                                  Blank Canvas
+                              {p.template && p.template !== "default" && (
+                                <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono border shrink-0 ${
+                                  p.template === "blank-canvas"
+                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                    : p.template === "sidebar-right"
+                                    ? "bg-sky-50 text-sky-700 border-sky-200"
+                                    : p.template === "boxed-fluid"
+                                    ? "bg-purple-50 text-purple-700 border-purple-200"
+                                    : "bg-amber-50 text-amber-700 border-amber-200"
+                                }`}>
+                                  {p.template}
                                 </span>
                               )}
                             </div>
@@ -1941,6 +2477,9 @@ export default function StorefrontCustomizerPage() {
                                 >
                                   <option value="default">ค่ามาตรฐาน (Default with Banner)</option>
                                   <option value="blank-canvas">หน้าว่าง / แคมเปญ (Blank Canvas)</option>
+                                  <option value="sidebar-right">คอลัมน์คู่พร้อมแถบข้าง (Sidebar Right)</option>
+                                  <option value="boxed-fluid">การ์ดลอยจัดกึ่งกลาง (Boxed Fluid Card)</option>
+                                  <option value="landing-lead">โปรโมตยอดขาย (Landing Lead)</option>
                                 </select>
                               </div>
                             </div>
@@ -2340,6 +2879,12 @@ export default function StorefrontCustomizerPage() {
               href={`https://fonts.googleapis.com/css2?family=${currentFont.googleFont}&display=swap`}
             />
 
+            {/* Round 39: WordPress theme.json CSS Variables preview style */}
+            <style
+              id="wp-theme-json-preview-presets"
+              dangerouslySetInnerHTML={{ __html: compiledThemeCss }}
+            />
+
             {/* Desktop Frame */}
             {viewport === "desktop" && (
               <div className="w-full bg-white transition-all duration-300 rounded-2xl shadow-xl overflow-hidden border border-slate-300 flex flex-col max-w-full">
@@ -2428,7 +2973,8 @@ export default function StorefrontCustomizerPage() {
                             key={b.id}
                             block={b}
                             themeColor={config.themeColor}
-                            tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                            tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                           />
                         ))}
                       </div>
@@ -2542,7 +3088,8 @@ export default function StorefrontCustomizerPage() {
                               key={customBlock.id}
                               block={customBlock}
                               themeColor={config.themeColor}
-                              tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                              tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                             />
                           );
                         }
@@ -2628,7 +3175,8 @@ export default function StorefrontCustomizerPage() {
                               key={b.id}
                               block={b}
                               themeColor={config.themeColor}
-                              tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                              tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                             />
                           ))}
                         </div>
@@ -2734,7 +3282,8 @@ export default function StorefrontCustomizerPage() {
                                 key={customBlock.id}
                                 block={customBlock}
                                 themeColor={config.themeColor}
-                                tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                                tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                               />
                             );
                           }
@@ -2825,7 +3374,8 @@ export default function StorefrontCustomizerPage() {
                               key={b.id}
                               block={b}
                               themeColor={config.themeColor}
-                              tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                              tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                             />
                           ))}
                         </div>
@@ -2931,7 +3481,8 @@ export default function StorefrontCustomizerPage() {
                                 key={customBlock.id}
                                 block={customBlock}
                                 themeColor={config.themeColor}
-                                tenantInfo={{ phone: config.phone, lineId: config.lineId }}
+                                tenantInfo={{ phone: config.phone, lineId: config.lineId, shopName, shopSlug }}
+                            shopSlug={shopSlug}
                               />
                             );
                           }
@@ -3060,6 +3611,9 @@ export default function StorefrontCustomizerPage() {
                 >
                   <option value="default">ค่ามาตรฐาน (Default with Banner)</option>
                   <option value="blank-canvas">หน้าว่าง / แคมเปญ (Blank Canvas / Landing Page)</option>
+                  <option value="sidebar-right">คอลัมน์คู่พร้อมแถบข้าง (Sidebar Right)</option>
+                  <option value="boxed-fluid">การ์ดลอยจัดกึ่งกลาง (Boxed Fluid Card)</option>
+                  <option value="landing-lead">โปรโมตยอดขาย (Landing Lead)</option>
                 </select>
               </div>
 
@@ -3159,6 +3713,157 @@ export default function StorefrontCustomizerPage() {
               <button
                 type="button"
                 onClick={() => setIsAddBlockModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2.5: WordPress Synced Patterns Library (Round 34) */}
+      {isPatternLibraryOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="คลังบล็อกสำเร็จรูป (Pattern Library)"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    คลังบล็อกสำเร็จรูป (WordPress Pattern Library)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    เลือกชุดบล็อกที่ออกแบบไว้ล่วงหน้าเพื่อแทรกลงใน
+                    <strong className="text-slate-800 ml-1">
+                      {selectedPageSlug && activeSubPage ? `หน้า "${activeSubPage.title}"` : "หน้าแรก (Home Page)"}
+                    </strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPatternLibraryOpen(false)}
+                className="min-w-[40px] min-h-[40px] p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors flex items-center justify-center"
+                aria-label="ปิดหน้าต่างคลังบล็อกสำเร็จรูป"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 shrink-0">
+              {[
+                { id: "all", label: "ทั้งหมด" },
+                { id: "promotions", label: "โปรโมชั่น (Promotions)" },
+                { id: "services", label: "บริการ (Services)" },
+                { id: "faq", label: "คำถามที่พบบ่อย (FAQ)" },
+                { id: "delivery", label: "การจัดส่ง (Delivery)" },
+              ].map((cat) => {
+                const isActive = patternFilterCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setPatternFilterCategory(cat.id)}
+                    className={`min-h-[36px] px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all shrink-0 ${
+                      isActive
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Patterns List Grid */}
+            <div className="flex-1 overflow-y-auto space-y-3.5 pr-1">
+              {(() => {
+                const patterns = getAllBlockPatterns(
+                  patternFilterCategory === "all" ? undefined : patternFilterCategory,
+                  tenantId
+                );
+
+                if (patterns.length === 0) {
+                  return (
+                    <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-xs text-slate-500">ไม่พบบล็อกสำเร็จรูปในหมวดหมู่นี้</p>
+                    </div>
+                  );
+                }
+
+                return patterns.map((pat) => (
+                  <div
+                    key={pat.name}
+                    className="p-5 rounded-2xl border border-slate-200/90 hover:border-indigo-400 hover:bg-indigo-50/10 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs group"
+                  >
+                    <div className="flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900 group-hover:text-indigo-900">
+                          {pat.title}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                          {pat.blocks.length} บล็อก
+                        </span>
+                        {pat.syncStatus === "synced" && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            Synced Pattern
+                          </span>
+                        )}
+                      </div>
+
+                      {pat.description && (
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          {pat.description}
+                        </p>
+                      )}
+
+                      {/* Block chips preview */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[11px] text-slate-400 font-medium">ประกอบด้วย:</span>
+                        {pat.blocks.map((b, bIdx) => (
+                          <span
+                            key={`${pat.name}-b-${bIdx}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200/60"
+                          >
+                            <span>🧩</span>
+                            <span>{b.title || b.type}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleInsertPattern(pat)}
+                      className="min-h-[42px] px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 shrink-0 group-hover:scale-105"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>แทรกชุดบล็อกนี้</span>
+                    </button>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0">
+              <span className="text-[11px] text-slate-400 font-mono">
+                Reverse-engineered WordPress Pattern Architecture
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsPatternLibraryOpen(false)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
               >
                 ปิด
@@ -3754,6 +4459,621 @@ export default function StorefrontCustomizerPage() {
               >
                 เพิ่มเมนู
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Disaster Recovery & Factory Reset Double Confirmation Modal */}
+      {isResetModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="กู้คืนการตั้งค่าเริ่มต้นมาตรฐาน"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl ${resetStep === 1 ? "bg-amber-50 text-amber-600" : "bg-rose-50 text-rose-600"}`}>
+                  <RotateCcw className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {resetStep === 1 ? "กู้คืนการตั้งค่าเริ่มต้น (Factory Reset)" : "ยืนยันการคืนค่าขั้นสุดท้าย (Double Confirm)"}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    ขั้นตอนที่ {resetStep} จาก 2
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsResetModalOpen(false);
+                  setResetStep(1);
+                }}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                aria-label="ปิดหน้าต่างยืนยัน"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {resetStep === 1 ? (
+              <div className="space-y-3.5 text-xs text-slate-600 leading-relaxed">
+                <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-amber-900 space-y-1.5">
+                  <span className="font-bold flex items-center gap-1.5 text-amber-800">
+                    ⚠️ คำเตือนการรีเซ็ตหน้าร้าน
+                  </span>
+                  <p className="text-[11px]">
+                    ระบบจะล้างการปรับแต่งธีม สี บล็อกกำหนดเอง และเมนูนำทางทั้งหมด เพื่อคืนค่ากลับสู่พิมพ์เขียวมาตรฐาน (Blueprint Template)
+                  </p>
+                </div>
+
+                <ul className="space-y-1.5 pl-2 list-disc text-slate-600 text-[11px]">
+                  <li>ธีมและสี: รีเซ็ตเป็นสี Emerald (เขียวมรกต)</li>
+                  <li>ฟอนต์: รีเซ็ตเป็น Anuphan</li>
+                  <li>บล็อกกำหนดเอง: ล้างบล็อกที่เพิ่มเองทั้งหมด</li>
+                  <li>หน้าพิเศษ: คืนค่าเป็นหน้าตัวอย่างมาตรฐาน</li>
+                  <li>เมนูนำทาง: รีเซ็ตกลับเป็นเมนูมาตรฐาน</li>
+                </ul>
+
+                <p className="text-slate-500 text-[11px] pt-1">
+                  คลิก &apos;ต่อไป&apos; เพื่อเข้าสู่ขั้นตอนยืนยันขั้นสุดท้าย
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3.5 text-xs text-slate-600 leading-relaxed">
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 space-y-1.5">
+                  <span className="font-bold flex items-center gap-1.5 text-rose-800">
+                    🚨 ยืนยันการดำเนินการขั้นสุดท้าย
+                  </span>
+                  <p className="text-[11px]">
+                    ท่านแน่ใจหรือไม่ว่าต้องการคืนค่ากลับสู่พิมพ์เขียวเริ่มต้นทันที? เมื่อคลิกบันทึกหลังจากนี้ ข้อมูลเดิมจะไม่สามารถกู้คืนได้
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  if (resetStep === 2) {
+                    setResetStep(1);
+                  } else {
+                    setIsResetModalOpen(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                {resetStep === 2 ? "ย้อนกลับ" : "ยกเลิก"}
+              </button>
+
+              {resetStep === 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setResetStep(2)}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition-all"
+                >
+                  ต่อไป (ขั้นตอนที่ 2)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={executeResetDefaults}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-xs transition-all"
+                >
+                  ยืนยันรีเซ็ตกลับเป็นพิมพ์เขียวมาตรฐาน
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: Site Health Diagnostic Modal (Round 32) */}
+      {isHealthModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="ตรวจสุขภาพเว็บไซต์ (Site Health Diagnostic)"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    สุขภาพเว็บไซต์และการตรวจวินิจฉัย (Site Health)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    วิเคราะห์ความปลอดภัย, SEO, ประสิทธิภาพ และความสมบูรณ์ของเนื้อหาหน้าร้าน
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsHealthModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                aria-label="ปิดหน้าต่าง"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {isLoadingHealth ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-500 text-xs">
+                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+                  <span>กำลังรันระบบตรวจสุขภาพหน้าร้านอัตโนมัติ...</span>
+                </div>
+              ) : healthReport ? (
+                <div className="space-y-4">
+                  {/* Score & Status Banner */}
+                  <div className={`p-4 rounded-2xl flex items-center justify-between border ${
+                    healthReport.status === "good"
+                      ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                      : healthReport.status === "recommended"
+                      ? "bg-amber-50/70 border-amber-200 text-amber-950"
+                      : "bg-rose-50/70 border-rose-200 text-rose-950"
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-extrabold text-xl shadow-xs ${
+                        healthReport.status === "good"
+                          ? "bg-emerald-600 text-white"
+                          : healthReport.status === "recommended"
+                          ? "bg-amber-600 text-white"
+                          : "bg-rose-600 text-white"
+                      }`}>
+                        {healthReport.score}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold">
+                          {healthReport.status === "good"
+                            ? "✅ ระบบมีสุขภาพดีเยี่ยม (Good)"
+                            : healthReport.status === "recommended"
+                            ? "⚠️ มีข้อแนะนำที่ควรปรับปรุง (Should Improve)"
+                            : "🚨 พบปัญหาสำคัญที่ควรแก้ไข (Critical Issues)"}
+                        </div>
+                        <div className="text-[11px] opacity-80 pt-0.5">
+                          ผ่าน {healthReport.passedCount} รายการ • ควรปรับปรุง {healthReport.recommendedCount} รายการ • สำคัญ {healthReport.criticalCount} รายการ
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenSiteHealth}
+                      className="px-3 py-1.5 rounded-xl bg-white/80 hover:bg-white text-xs font-semibold text-slate-700 shadow-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>ตรวจซ้ำ</span>
+                    </button>
+                  </div>
+
+                  {/* Categories Overview */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                    {healthReport.categories && Object.entries(healthReport.categories).map(([catKey, cat]: [string, any]) => (
+                      <div key={catKey} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+                        <div className="text-[11px] text-slate-500 truncate">{cat.label}</div>
+                        <div className="font-bold flex items-center justify-between">
+                          <span>{cat.passed} / {cat.total} ผ่าน</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                            cat.status === "good"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : cat.status === "recommended"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-rose-100 text-rose-800"
+                          }`}>
+                            {cat.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Diagnostic Tests List */}
+                  <div className="space-y-2 pt-2">
+                    <h4 className="text-xs font-bold text-slate-700">รายการทดสอบและผลวินิจฉัยละเอียด ({healthReport.tests?.length || 0})</h4>
+                    <div className="space-y-2">
+                      {healthReport.tests?.map((t: any) => (
+                        <div
+                          key={t.id}
+                          className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+                            t.status === "good"
+                              ? "bg-white border-slate-200"
+                              : t.status === "recommended"
+                              ? "bg-amber-50/40 border-amber-200"
+                              : "bg-rose-50/40 border-rose-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                              {t.status === "good" ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              ) : t.status === "recommended" ? (
+                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                              )}
+                              <span>{t.label}</span>
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                              t.status === "good"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : t.status === "recommended"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-rose-100 text-rose-800"
+                            }`}>
+                              {t.status === "good" ? "ผ่าน" : t.status === "recommended" ? "แนะนำ" : "ต้องแก้ไข"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">{t.description}</p>
+                          {t.recommendation && (
+                            <div className="p-2 rounded-xl bg-slate-900/5 text-slate-800 text-[11px] font-medium flex items-start gap-1.5">
+                              <span>💡</span>
+                              <span>{t.recommendation}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  ไม่พบข้อมูลรายงานสุขภาพ
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsHealthModalOpen(false)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-colors"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: Revisions History & 1-Click Rollback Modal (Round 33) */}
+      {isRevisionsModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="ประวัติการแก้ไขและจุดย้อนกลับ (Revisions)"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                  <History className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    ประวัติการแก้ไขและย้อนกลับเวอร์ชัน (Revisions)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    เก็บบันทึก snapshot ย้อนหลัง 10 เวอร์ชันล่าสุด พร้อมระบบกู้คืนในคลิกเดียว (Time-Travel)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRevisionsModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                aria-label="ปิดหน้าต่าง"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {isLoadingRevisions ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-500 text-xs">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <span>กำลังดึงประวัติการแก้ไขล่าสุด...</span>
+                </div>
+              ) : revisionsList.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-500 space-y-2">
+                  <History className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-medium text-slate-700">ยังไม่มีประวัติการแก้ไขที่ถูกบันทึก</p>
+                  <p className="text-[11px]">ระบบจะสร้าง snapshot อัตโนมัติทุกครั้งที่คุณกด &apos;บันทึกการตั้งค่า&apos;</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {revisionsList.map((rev: any, idx: number) => {
+                    const isLatest = idx === 0;
+                    return (
+                      <div
+                        key={rev.id}
+                        className={`p-4 rounded-2xl border text-xs space-y-2 transition-all ${
+                          isLatest
+                            ? "bg-blue-50/50 border-blue-200 ring-1 ring-blue-200"
+                            : "bg-white border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900 text-xs">
+                                {new Date(rev.timestamp).toLocaleString("th-TH", {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                })}
+                              </span>
+                              {isLatest && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-600 text-white">
+                                  เวอร์ชันปัจจุบัน
+                                </span>
+                              )}
+                              <span className="text-[10px] font-mono text-slate-400">
+                                #{rev.id.slice(0, 12)}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                              <span>👤 โดย {rev.author?.name || "ไม่ระบุผู้ใช้"}</span>
+                              {rev.note && <span className="text-slate-600">• {rev.note}</span>}
+                            </div>
+                          </div>
+
+                          {!isLatest && (
+                            <button
+                              type="button"
+                              disabled={isRollingBack}
+                              onClick={() => handleRollback(rev.id)}
+                              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition-transform active:scale-95 shrink-0 flex items-center gap-1.5"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>ย้อนกลับ</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {rev.snapshot && (
+                          <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 text-[10px] text-slate-500">
+                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                              ธีม: {rev.snapshot.themeColor || "emerald"}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                              ฟอนต์: {rev.snapshot.fontFamily || "anuphan"}
+                            </span>
+                            {rev.snapshot.headline && (
+                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 truncate max-w-[200px]">
+                                {rev.snapshot.headline}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsRevisionsModalOpen(false)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 8: Gutenberg HTML Import & Export Modal (Round 35) */}
+      {isGutenbergModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="WordPress Gutenberg Block Code Import & Export"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col p-6 shadow-2xl border border-slate-200 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                  <Code className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    WordPress Gutenberg Block Code (Import / Export)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    แปลงโค้ดบล็อกไป-กลับระหว่าง FixMe Storefront และ WordPress Block Grammar
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGutenbergModalOpen(false);
+                  setGutenbergError(null);
+                }}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                aria-label="ปิดหน้าต่าง Gutenberg"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Mode Switcher Tabs */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetBlocks =
+                    selectedPageSlug && activeSubPage
+                      ? activeSubPage.sections || []
+                      : customSectionsList;
+                  setGutenbergHtml(serializeToGutenberg(targetBlocks));
+                  setGutenbergMode("export");
+                  setGutenbergError(null);
+                  setCopiedGutenberg(false);
+                }}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-center transition-all ${
+                  gutenbergMode === "export"
+                    ? "bg-white text-indigo-900 shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                📤 ส่งออกโค้ด (Export to WordPress)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGutenbergMode("import");
+                  setGutenbergHtml("");
+                  setGutenbergError(null);
+                }}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-center transition-all ${
+                  gutenbergMode === "import"
+                    ? "bg-white text-indigo-900 shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                📥 นำเข้าโค้ด (Import from WordPress)
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {gutenbergMode === "export" ? (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-100 text-indigo-950 text-xs leading-relaxed">
+                    <span className="font-bold block mb-1">
+                      💡 คำแนะนำการใช้งานบน WordPress
+                    </span>
+                    <p className="text-[11px] text-indigo-900/90">
+                      คัดลอกโค้ด Gutenberg ด้านล่างนี้ แล้วไปที่หน้าแก้ไข Page หรือ Post ใน WordPress คลิกเมนูสามจุดมุมขวาบน เลือก &quot;Code Editor&quot; แล้ววางโค้ดนี้ลงไป บล็อกจะถูกแสดงผลตามมาตรฐานบล็อกของ WordPress ทันที
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <label className="font-semibold text-slate-700">
+                        โค้ดมาร์กอัป Gutenberg HTML
+                      </label>
+                      <span className="text-[11px] text-slate-500 font-mono">
+                        {selectedPageSlug && activeSubPage
+                          ? `(หน้า: ${activeSubPage.title})`
+                          : `(${customSectionsList.length} บล็อกกำหนดเอง)`}
+                      </span>
+                    </div>
+
+                    <textarea
+                      readOnly
+                      value={gutenbergHtml}
+                      onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                      className="w-full font-mono text-xs p-3.5 rounded-xl border border-slate-200 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 h-64 select-all leading-relaxed"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-950 text-xs leading-relaxed">
+                    <span className="font-bold block mb-1">
+                      📥 นำเข้าบล็อก Gutenberg สู่ FixMe
+                    </span>
+                    <p className="text-[11px] text-amber-900/90">
+                      วางโค้ด Gutenberg Block Comments (เช่น <code>&lt;!-- wp:fixme/promo-banner ... --&gt;</code> หรือบล็อกมาตรฐาน WordPress เช่น <code>&lt;!-- wp:paragraph --&gt;</code>) เพื่อแปลงเป็นบล็อกหน้าร้านโดยอัตโนมัติ
+                    </p>
+                    <div className="text-[11px] text-amber-800 font-semibold mt-1">
+                      เป้าหมายการนำเข้า: {selectedPageSlug && activeSubPage ? `หน้า "${activeSubPage.title}"` : "หน้าแรก (Home Layout)"}
+                    </div>
+                  </div>
+
+                  {gutenbergError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{gutenbergError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      วางโค้ด Gutenberg HTML ที่นี่ *
+                    </label>
+                    <textarea
+                      placeholder={`<!-- wp:fixme/promo-banner {"title":"โปรโมชั่นเปลี่ยนแบตเตอรี่แท้"} /-->\n\n<!-- wp:core/paragraph -->\n<p>ข้อความตัวอย่างจาก WordPress</p>\n<!-- /wp:core/paragraph -->`}
+                      value={gutenbergHtml}
+                      onChange={(e) => {
+                        setGutenbergHtml(e.target.value);
+                        setGutenbergError(null);
+                      }}
+                      className="w-full font-mono text-xs p-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 h-64 leading-relaxed"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsGutenbergModalOpen(false);
+                  setGutenbergError(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                ยกเลิก
+              </button>
+
+              <div className="flex items-center gap-2">
+                {gutenbergMode === "export" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!gutenbergHtml) return;
+                      navigator.clipboard.writeText(gutenbergHtml);
+                      setCopiedGutenberg(true);
+                      setTimeout(() => setCopiedGutenberg(false), 2000);
+                      setToast({
+                        message: "คัดลอกโค้ด Gutenberg เรียบร้อยแล้ว!",
+                        type: "success",
+                      });
+                    }}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-all flex items-center gap-1.5"
+                  >
+                    {copiedGutenberg ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>คัดลอกแล้ว</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>คัดลอกโค้ด Gutenberg</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleImportGutenberg}
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-all flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>แปลงและนำเข้าบล็อก</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -87,7 +87,7 @@ export function CtaBlock({
 
   return (
     <section
-      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto ${className}`}
+      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto overflow-hidden ${className}`}
       aria-label="Call to Action"
     >
       <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 p-8 sm:p-12 md:p-16 shadow-2xl">
@@ -108,12 +108,12 @@ export function CtaBlock({
           )}
 
           {/* Heading */}
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white leading-snug">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white leading-snug break-words">
             {resolvedTitle}
           </h2>
 
           {/* Subtitle */}
-          <p className="text-slate-300 text-base sm:text-lg md:text-xl leading-relaxed max-w-2xl">
+          <p className="text-slate-300 text-base sm:text-lg md:text-xl leading-relaxed max-w-2xl break-words">
             {resolvedSubtitle}
           </p>
 

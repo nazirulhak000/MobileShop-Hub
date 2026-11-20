@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
@@ -34,6 +34,55 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, t
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [quickCode, setQuickCode] = useState("");
   const [modalError, setModalError] = useState("");
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+  const triggerButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard accessibility: Escape key listener, Tab focus trap, and body scroll lock
+  useEffect(() => {
+    if (!showTrackModal) return;
+
+    // Lock body scroll
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setShowTrackModal(false);
+        triggerButtonRef.current?.focus();
+        return;
+      }
+
+      // Tab key focus trap inside modal dialog
+      if (e.key === "Tab" && modalContainerRef.current) {
+        const focusableElements = modalContainerRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [showTrackModal]);
 
   const handleTrackSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +110,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, t
         <div className={`grid ${gridCols} gap-1 items-center`}>
           {/* Action 1: Track Repair */}
           <button
+            ref={triggerButtonRef}
             type="button"
             onClick={() => {
               setShowTrackModal(true);
@@ -140,6 +190,7 @@ export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, t
       {/* Quick Track Bottom Sheet Modal for Mobile */}
       {showTrackModal && (
         <div
+          ref={modalContainerRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="track-modal-title"

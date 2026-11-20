@@ -32,7 +32,7 @@ export function AnnouncementBar({
   return (
     <aside
       aria-label="ประกาศร้านค้า"
-      className={`relative w-full py-2.5 px-4 text-xs font-medium border-b transition-all duration-200 z-50 ${theme.announcement.bg} ${theme.announcement.text} ${theme.announcement.border}`}
+      className={`relative w-full py-2.5 px-4 text-xs font-medium border-b transition-all duration-200 z-50 overflow-hidden ${theme.announcement.bg} ${theme.announcement.text} ${theme.announcement.border}`}
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
         <div className="flex-1 flex items-center justify-center gap-2.5 text-center flex-wrap">
@@ -42,7 +42,7 @@ export function AnnouncementBar({
             <Sparkles className="h-3 w-3" />
             <span>ประกาศ</span>
           </span>
-          <span className="leading-snug">{text}</span>
+          <span className="leading-snug break-words">{text}</span>
           {actionText && actionUrl && (
             <a
               href={actionUrl}

@@ -3,6 +3,7 @@
 import React from "react";
 import { StorefrontThemeColor } from "@/lib/storefrontTheme";
 import { sanitizeCssClass } from "@/lib/storefrontSecurity";
+import { do_shortcode } from "@/lib/wordpress/shortcodeEngine";
 import { CustomBlock, DynamicBlockRendererProps } from "./types";
 import { PromoBannerBlock } from "./PromoBannerBlock";
 import { PhotoGalleryBlock } from "./PhotoGalleryBlock";
@@ -24,6 +25,7 @@ function normalizeBlockType(typeStr: string | undefined): string {
   if (cleaned.includes("rich") || cleaned.includes("article") || cleaned === "text")
     return "rich-text";
   if (cleaned.includes("cta")) return "cta";
+  if (cleaned.includes("shortcode")) return "shortcode";
   if (cleaned.includes("html") || cleaned.includes("widget") || cleaned.includes("embed") || cleaned.includes("map"))
     return "html-embed";
   if (cleaned.includes("hour") || cleaned.includes("schedule") || cleaned.includes("time"))
@@ -35,6 +37,7 @@ export function DynamicBlockRenderer({
   block,
   themeColor = "emerald",
   className = "",
+  shopSlug,
   tenantInfo,
 }: DynamicBlockRendererProps) {
   // If block is undefined or null, fail safely
@@ -61,6 +64,7 @@ export function DynamicBlockRenderer({
     .join(" ");
 
   const normalizedType = normalizeBlockType(block.type);
+  const effectiveShopSlug = shopSlug || tenantInfo?.shopSlug || mergedData.shopSlug || undefined;
 
   try {
     switch (normalizedType) {
@@ -129,8 +133,27 @@ export function DynamicBlockRenderer({
             themeColor={themeColor}
             className={blockClassName}
             data={block.data || block.metadata}
+            shopSlug={effectiveShopSlug}
+            tenantInfo={tenantInfo}
           />
         );
+
+      case "shortcode": {
+        const shortcodeContent = mergedData.content || mergedData.code || mergedData.shortcode || "";
+        const rawContent = shortcodeContent.startsWith("[") ? shortcodeContent : `[${shortcodeContent}]`;
+        const renderedHtml = do_shortcode(rawContent, {
+          shopSlug: effectiveShopSlug,
+          shopName: tenantInfo?.shopName || undefined,
+          phone: tenantInfo?.phone || undefined,
+          lineId: tenantInfo?.lineId || undefined,
+        });
+        return (
+          <div
+            className={`w-full py-6 px-4 max-w-4xl mx-auto overflow-hidden ${blockClassName}`}
+            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          />
+        );
+      }
 
       case "cta":
         return (
@@ -154,13 +177,23 @@ export function DynamicBlockRenderer({
           />
         );
 
-      case "html-embed":
+      case "html-embed": {
+        const rawHtml = mergedData.html || mergedData.code;
+        const processedHtml = rawHtml
+          ? do_shortcode(rawHtml, {
+              shopSlug: effectiveShopSlug,
+              shopName: tenantInfo?.shopName || undefined,
+              phone: tenantInfo?.phone || undefined,
+              lineId: tenantInfo?.lineId || undefined,
+            })
+          : rawHtml;
+
         return (
           <HtmlEmbedBlock
             id={block.id}
             title={mergedData.title}
             subtitle={mergedData.subtitle}
-            html={mergedData.html || mergedData.code}
+            html={processedHtml}
             embedType={mergedData.embedType}
             height={mergedData.height}
             themeColor={themeColor}
@@ -168,6 +201,7 @@ export function DynamicBlockRenderer({
             data={block.data || block.metadata}
           />
         );
+      }
 
       case "business-hours": {
         // Map hours array [{day, open, close, isClosed}] to schedule format if needed

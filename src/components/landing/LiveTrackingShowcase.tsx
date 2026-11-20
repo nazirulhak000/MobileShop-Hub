@@ -409,8 +409,11 @@ export function LiveTrackingShowcase() {
                     <img
                       src={current.photoUrl}
                       alt={current.photoCaption}
-                      className="w-full h-full object-cover transition-opacity duration-300"
+                      width={600}
+                      height={450}
                       loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover transition-opacity duration-300"
                     />
                     <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 backdrop-blur-xs p-2.5 text-white">
                       <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono tabular-nums">

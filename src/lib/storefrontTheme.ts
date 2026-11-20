@@ -503,6 +503,13 @@ export interface CustomBlock {
   [key: string]: any;
 }
 
+export type PageTemplateType =
+  | "default"
+  | "blank-canvas"
+  | "sidebar-right"
+  | "boxed-fluid"
+  | "landing-lead";
+
 export interface CustomPage {
   id?: string;
   slug: string;
@@ -512,7 +519,9 @@ export interface CustomPage {
   sections?: CustomBlock[];
   metaDescription?: string;
   published?: boolean;
-  template?: "default" | "blank-canvas" | string;
+  template?: PageTemplateType | string;
+  categories?: string[];
+  tags?: string[];
   updatedAt?: string;
 }
 
@@ -856,7 +865,15 @@ export function safeParseCustomPages(raw: unknown): CustomPage[] {
         sections: safeParseCustomSections(item.sections),
         metaDescription: item.metaDescription ? String(item.metaDescription).slice(0, 300) : undefined,
         published: item.published !== undefined ? Boolean(item.published) : true,
-        template: item.template === "blank-canvas" ? "blank-canvas" : "default",
+        template: (["default", "blank-canvas", "sidebar-right", "boxed-fluid", "landing-lead"].includes(String(item.template))
+          ? (item.template as PageTemplateType)
+          : "default"),
+        categories: Array.isArray(item.categories)
+          ? item.categories.map((c: any) => String(c).trim().slice(0, 50)).filter(Boolean)
+          : undefined,
+        tags: Array.isArray(item.tags)
+          ? item.tags.map((t: any) => String(t).trim().slice(0, 50)).filter(Boolean)
+          : undefined,
         updatedAt: item.updatedAt ? String(item.updatedAt).slice(0, 50) : undefined,
       };
     });

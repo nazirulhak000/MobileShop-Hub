@@ -33,6 +33,7 @@ import {
 } from "@/lib/storefrontTheme";
 import { resolveTenantBySlug } from "@/lib/storefrontTenant";
 import { buildStoreMetadata } from "@/lib/storefrontMetadata";
+import { generateThemeJson, compileThemeJsonToCss } from "@/lib/wordpress/themeJsonEngine";
 
 // Round 10: ISR edge caching and serverless runtime safety
 export const revalidate = 60; // 60s stale-while-revalidate edge CDN cache
@@ -141,6 +142,13 @@ export default async function TenantStorePage({ params }: StorePageProps) {
 
   // Resolve dynamic font configuration
   const fontConfig = FONT_FAMILY_CONFIG[config.fontFamily] || FONT_FAMILY_CONFIG.anuphan;
+
+  // Round 39: Generate WordPress theme.json design tokens and CSS custom properties
+  const wpThemeJson = generateThemeJson(
+    { themeColor: config.themeColor, fontFamily: config.fontFamily },
+    shopName
+  );
+  const wpThemeCss = compileThemeJsonToCss(wpThemeJson);
 
   // Safe-parse custom configurations so corrupted data in DB never crashes storefront
   const parsedCases = (safeParseBeforeAfterCases(config.customBeforeAfterCases) as BeforeAfterCase[]) || undefined;
@@ -307,11 +315,13 @@ export default async function TenantStorePage({ params }: StorePageProps) {
               key={`custom-block-${customBlock.id}`}
               block={customBlock}
               themeColor={themeColor}
+              shopSlug={shopSlug}
               tenantInfo={{
                 phone: config.phone,
                 lineId: config.lineId,
                 shopName,
                 branchName,
+                shopSlug,
               }}
             />
           );
@@ -335,6 +345,12 @@ export default async function TenantStorePage({ params }: StorePageProps) {
       <link
         rel="stylesheet"
         href={`https://fonts.googleapis.com/css2?family=${fontConfig.googleFont}&display=swap`}
+      />
+
+      {/* Round 39: WordPress theme.json compiled CSS custom properties */}
+      <style
+        id="wp-theme-json-presets"
+        dangerouslySetInnerHTML={{ __html: wpThemeCss }}
       />
 
       {/* 1. Top Announcement Bar */}
@@ -368,11 +384,13 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             key={`remaining-block-${block.id}`}
             block={block}
             themeColor={themeColor}
+            shopSlug={shopSlug}
             tenantInfo={{
               phone: config.phone,
               lineId: config.lineId,
               shopName,
               branchName,
+              shopSlug,
             }}
           />
         ))}

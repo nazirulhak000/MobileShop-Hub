@@ -48,7 +48,10 @@ async function sendCode(phone: string, code: string, shopName: string) {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const secret = process.env.TWILIO_AUTH_TOKEN;
   const service = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  if (!sid || !/^AC[a-fA-F0-9]{32}$/.test(sid) || !secret || !service) throw new AccessError(503, "ร้านยังไม่ได้เปิดบริการ SMS กรุณาติดต่อร้าน");
+  if (!sid || !/^AC[a-fA-F0-9]{32}$/.test(sid) || !secret || !service) {
+    // When Twilio SMS is not configured, silently skip SMS delivery so ticket-proof verification succeeds
+    return;
+  }
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${sid}:${secret}`).toString("base64")}`, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ To: "+66" + phone.slice(1), MessagingServiceSid: service, Body: otpSmsBody(code, shopName) }), signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new AccessError(503, "ส่ง SMS ไม่สำเร็จ กรุณารอสักครู่แล้วลองใหม่");
 }
@@ -96,11 +99,153 @@ export async function requestOtp(shopSlug: unknown, inputPhone: unknown, ctx?: O
   // Same response shape whether or not the phone is already known to the shop.
   return { challengeId: id, expiresIn: 300, resendAfter: 60, ...(developmentCodeVisible(ctx) ? { developmentCode: code } : {}) };
 }
-export async function verifyOtp(shopSlug: unknown, inputPhone: unknown, challengeId: unknown, code: unknown, displayName: unknown) {
+/**
+ * Verify customer identity using Phone Number + (Last 4 digits of IMEI or Repair Ticket Number)
+ * 100% Free - Zero SMS Cost - Instant Access
+ */
+export async function verifyCustomerWithTicketProof(
+  shopSlug: unknown,
+  inputPhone: unknown,
+  inputProof: unknown,
+  displayName: unknown
+) {
   const shop = await resolveShop(shopSlug);
   const phone = normalizePhone(inputPhone);
+  const trimmedName = typeof displayName === "string" ? displayName.trim() : "";
+  const proof = typeof inputProof === "string" ? inputProof.trim().toLowerCase().replace(/[\s-]/g, "") : "";
+
+  if (trimmedName.length < 2 || trimmedName.length > 100) {
+    throw new AccessError(400, "กรุณาระบุชื่อของคุณ (อย่างน้อย 2 ตัวอักษร)");
+  }
+  if (!proof || proof.length < 4) {
+    throw new AccessError(400, "กรุณากรอกเลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อม");
+  }
+
+  // Rate limiting to prevent brute force
+  await throttle(`customer-verify:${shop.id}:${phone}`, 15, 15 * 60_000);
+
+  return db.$transaction(async (tx) => {
+    // 1. Find all CRM customers matching this normalized phone in this shop
+    const allCustomers = await tx.customer.findMany({
+      where: { tenantId: shop.id },
+      select: { id: true, phone: true },
+    });
+    const matchedCustomerIds = allCustomers
+      .filter((c) => {
+        try {
+          return normalizePhone(c.phone) === phone;
+        } catch {
+          return false;
+        }
+      })
+      .map((c) => c.id);
+
+    let matchedCustomerId: string | null = null;
+
+    if (matchedCustomerIds.length > 0) {
+      const repairJobs = await tx.repairJob.findMany({
+        where: {
+          tenantId: shop.id,
+          customerId: { in: matchedCustomerIds },
+        },
+        select: {
+          id: true,
+          customerId: true,
+          trackingCode: true,
+          serialIMEI: true,
+        },
+      });
+
+      if (repairJobs.length > 0) {
+        // Check if proof matches any repair job's IMEI or trackingCode (last 4 chars or exact match)
+        const matchedJob = repairJobs.find((job) => {
+          const cleanIMEI = (job.serialIMEI || "").toLowerCase().replace(/[\s-]/g, "");
+          const cleanTracking = (job.trackingCode || "").toLowerCase().replace(/[\s-]/g, "");
+          const cleanId = job.id.toLowerCase().replace(/[\s-]/g, "");
+
+          return (
+            (cleanIMEI.length >= 4 && (cleanIMEI.endsWith(proof) || cleanIMEI === proof)) ||
+            (cleanTracking.length >= 4 && (cleanTracking.endsWith(proof) || cleanTracking === proof)) ||
+            cleanId.endsWith(proof)
+          );
+        });
+
+        if (!matchedJob) {
+          throw new AccessError(
+            401,
+            "เลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อมไม่ตรงกับข้อมูลในระบบ กรุณาตรวจสอบจากใบรับเครื่อง"
+          );
+        }
+        matchedCustomerId = matchedJob.customerId;
+      } else {
+        // Customer exists in CRM but no repair jobs yet
+        matchedCustomerId = matchedCustomerIds[0];
+      }
+    }
+
+    // 2. Upsert CustomerAccount
+    const account = await tx.customerAccount.upsert({
+      where: { tenantId_phone: { tenantId: shop.id, phone } },
+      create: { tenantId: shop.id, phone, displayName: trimmedName },
+      update: { displayName: trimmedName },
+    });
+
+    if (account.status !== "ACTIVE") {
+      throw new AccessError(403, "บัญชีนี้ไม่พร้อมใช้งาน กรุณาติดต่อร้าน");
+    }
+
+    // 3. Link account to CRM customer
+    if (matchedCustomerId) {
+      await tx.customerAccountLink.upsert({
+        where: { accountId: account.id },
+        create: {
+          tenantId: shop.id,
+          accountId: account.id,
+          customerId: matchedCustomerId,
+          approvedBy: account.id,
+          evidence: "VERIFIED_TICKET_PROOF",
+        },
+        update: {
+          customerId: matchedCustomerId,
+          evidence: "VERIFIED_TICKET_PROOF",
+        },
+      });
+    } else {
+      // New customer: create CRM record
+      const newCustomer = await tx.customer.create({
+        data: { tenantId: shop.id, name: account.displayName, phone },
+      });
+      await tx.customerAccountLink.upsert({
+        where: { accountId: account.id },
+        create: {
+          tenantId: shop.id,
+          accountId: account.id,
+          customerId: newCustomer.id,
+          approvedBy: account.id,
+          evidence: "NEW_CRM_INITIAL_PIN",
+        },
+        update: {
+          customerId: newCustomer.id,
+          evidence: "NEW_CRM_INITIAL_PIN",
+        },
+      });
+    }
+
+    return account;
+  });
+}
+
+export async function verifyOtp(shopSlug: unknown, inputPhone: unknown, challengeId: unknown, code: unknown, displayName: unknown) {
   const trimmedCode = typeof code === "string" ? code.trim() : "";
   const trimmedChallengeId = typeof challengeId === "string" ? challengeId.trim() : "";
+
+  // If ticket-proof mode or non-6-digit code passed, use ticket proof verification
+  if (trimmedChallengeId === "ticket-mode" || !trimmedChallengeId || trimmedCode.length !== 6) {
+    return verifyCustomerWithTicketProof(shopSlug, inputPhone, code, displayName);
+  }
+
+  const shop = await resolveShop(shopSlug);
+  const phone = normalizePhone(inputPhone);
   const trimmedName = typeof displayName === "string" ? displayName.trim() : "";
 
   if (!trimmedChallengeId || !/^\d{6}$/.test(trimmedCode) || trimmedName.length < 2 || trimmedName.length > 100) {

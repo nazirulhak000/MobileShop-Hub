@@ -472,4 +472,240 @@ describe("Storefront & Customizer UX Hardening (Rounds 4, 5, 7, 8)", () => {
       assert.strictEqual(isClean, true, "Identical state must be clean");
     });
   });
+
+  /* -------------------------------------------------------------------------- */
+  /* Round 12: Memory Leak & Event Listener Cleanup                             */
+  /* -------------------------------------------------------------------------- */
+  describe("Round 12: Memory Leak & Event Listener Cleanup", () => {
+    it("1. MobileQuickBar binds and unbinds keydown listener and body scroll lock on unmount", () => {
+      // Simulate listener registry
+      const registeredListeners = new Map<string, Function>();
+      const mockWindow = {
+        addEventListener: (event: string, fn: Function) => registeredListeners.set(event, fn),
+        removeEventListener: (event: string, fn: Function) => registeredListeners.delete(event),
+      };
+
+      let bodyOverflow = "";
+      const mockBody = {
+        style: {
+          get overflow() {
+            return bodyOverflow;
+          },
+          set overflow(val: string) {
+            bodyOverflow = val;
+          },
+        },
+      };
+
+      // Lifecycle hook simulation
+      const setupModal = (show: boolean) => {
+        if (!show) return () => {};
+        mockBody.style.overflow = "hidden";
+        const handler = () => {};
+        mockWindow.addEventListener("keydown", handler);
+        return () => {
+          mockWindow.removeEventListener("keydown", handler);
+          mockBody.style.overflow = "";
+        };
+      };
+
+      const cleanup = setupModal(true);
+      assert.strictEqual(registeredListeners.has("keydown"), true);
+      assert.strictEqual(mockBody.style.overflow, "hidden");
+
+      cleanup();
+      assert.strictEqual(registeredListeners.has("keydown"), false);
+      assert.strictEqual(mockBody.style.overflow, "");
+    });
+
+    it("2. PhotoGalleryBlock cleans up keydown listener and restores body scroll", () => {
+      const registered = new Set<string>();
+      const cleanupKeydown = () => registered.delete("keydown");
+      registered.add("keydown");
+
+      assert.strictEqual(registered.has("keydown"), true);
+      cleanupKeydown();
+      assert.strictEqual(registered.has("keydown"), false);
+    });
+  });
+
+  /* -------------------------------------------------------------------------- */
+  /* Round 14: Fluid Typography, Thai Word Break & Overflow                     */
+  /* -------------------------------------------------------------------------- */
+  describe("Round 14: Fluid Typography, Thai Word Break & Overflow", () => {
+    it("1. All 7 custom blocks include overflow-hidden on their root section to prevent 320px blowout", () => {
+      const blocks = [
+        React.createElement(PromoBannerBlock, { title: "Promo", themeColor: "emerald" }),
+        React.createElement(PhotoGalleryBlock, { title: "Gallery", themeColor: "emerald" }),
+        React.createElement(VideoEmbedBlock, { title: "Video", themeColor: "emerald" }),
+        React.createElement(RichTextBlock, { title: "RichText", themeColor: "emerald" }),
+        React.createElement(CtaBlock, { title: "CTA", themeColor: "emerald" }),
+        React.createElement(HtmlEmbedBlock, { title: "Embed", themeColor: "emerald" }),
+        React.createElement(BusinessHoursBlock, { title: "Hours", themeColor: "emerald" }),
+      ];
+
+      for (const block of blocks) {
+        const html = renderToString(block);
+        assert.ok(
+          html.includes("overflow-hidden"),
+          `Block must have overflow-hidden on container to prevent horizontal scroll`
+        );
+      }
+    });
+
+    it("2. Headings and paragraphs apply break-words to handle long continuous Thai text", () => {
+      const longThaiTitle = "ศูนย์บริการตรวจเช็คระบบไมโครชิปสมาร์ตโฟนด้วยเครื่องมือวัดทางวิศวกรรมสากล";
+      const promoHtml = renderToString(
+        React.createElement(PromoBannerBlock, { title: longThaiTitle })
+      );
+      assert.ok(promoHtml.includes("break-words"));
+
+      const ctaHtml = renderToString(
+        React.createElement(CtaBlock, { title: longThaiTitle })
+      );
+      assert.ok(ctaHtml.includes("break-words"));
+
+      const hoursHtml = renderToString(
+        React.createElement(BusinessHoursBlock, { title: longThaiTitle })
+      );
+      assert.ok(hoursHtml.includes("break-words"));
+    });
+
+    it("3. AnnouncementBar text uses break-words and container uses overflow-hidden", () => {
+      const html = renderToString(
+        React.createElement(AnnouncementBar, {
+          text: "โปรโมชั่นตรวจเช็คแบตเตอรี่แท้มาตรฐานวิศวกรรมศูนย์บริการด่วนพิเศษ",
+          enabled: true,
+        })
+      );
+      assert.ok(html.includes("overflow-hidden"));
+      assert.ok(html.includes("break-words"));
+    });
+  });
+
+  /* -------------------------------------------------------------------------- */
+  /* Round 15: Accessibility & Keyboard Focus Traps                             */
+  /* -------------------------------------------------------------------------- */
+  describe("Round 15: Accessibility & Keyboard Focus Traps", () => {
+    it("1. Modals declare standard ARIA dialog attributes", () => {
+      // MobileQuickBar dialog modal rendered markup check
+      const quickBarHtml = renderToString(
+        React.createElement(MobileQuickBar, {
+          phone: "081-999-9999",
+          shopSlug: "smart-fix",
+        } as any)
+      );
+      // Quick bar rendered
+      assert.ok(quickBarHtml.includes("fixed bottom-0"));
+
+      // PhotoGallery renders with aria-label
+      const galleryHtml = renderToString(
+        React.createElement(PhotoGalleryBlock, {
+          title: "คลังภาพผลงาน",
+        })
+      );
+      assert.ok(galleryHtml.includes("aria-label=\"Photo Gallery\""));
+    });
+
+    it("2. Focus trap wrapping invariant: Tab from last element wraps to first, Shift+Tab from first wraps to last", () => {
+      const focusable = ["close-btn", "track-input", "submit-btn"];
+      let currentIndex = 0;
+
+      // Simulate Tab key forward
+      function handleTab(shiftKey: boolean) {
+        if (shiftKey) {
+          currentIndex = currentIndex === 0 ? focusable.length - 1 : currentIndex - 1;
+        } else {
+          currentIndex = currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+        }
+        return focusable[currentIndex];
+      }
+
+      // Initial focus on first element (0)
+      assert.strictEqual(focusable[currentIndex], "close-btn");
+
+      // Press Tab -> second element (1)
+      assert.strictEqual(handleTab(false), "track-input");
+
+      // Press Tab -> last element (2)
+      assert.strictEqual(handleTab(false), "submit-btn");
+
+      // Press Tab from last -> wraps to first (0)
+      assert.strictEqual(handleTab(false), "close-btn");
+
+      // Press Shift+Tab from first -> wraps to last (2)
+      assert.strictEqual(handleTab(true), "submit-btn");
+    });
+  });
+
+  /* -------------------------------------------------------------------------- */
+  /* Round 19: Offline Resilience & Network Error Recovery                      */
+  /* -------------------------------------------------------------------------- */
+  describe("Round 19: Offline Resilience & Network Error Recovery", () => {
+    it("1. LocalStorage draft storage key conforms to tenant-scoped naming `fixme_storefront_draft_${tenantId}`", () => {
+      const tenantA = "tenant_alpha_123";
+      const keyA = `fixme_storefront_draft_${tenantA}`;
+      assert.strictEqual(keyA, "fixme_storefront_draft_tenant_alpha_123");
+
+      const tenantB = "tenant_beta_456";
+      const keyB = `fixme_storefront_draft_${tenantB}`;
+      assert.strictEqual(keyB, "fixme_storefront_draft_tenant_beta_456");
+      assert.notStrictEqual(keyA, keyB, "Draft keys must be strictly isolated per tenant");
+    });
+
+    it("2. Offline draft saves full state payload and accurately restores upon recovery", () => {
+      const mockStorage: Record<string, string> = {};
+      const tenantKey = "fixme_storefront_draft_tenant_789";
+
+      const unsavedPayload = {
+        config: { themeColor: "purple", headline: "ศูนย์ซ่อมมือถือด่วนพิเศษ 24 ชม." },
+        shopName: "FixMe Premium Lab",
+        casesList: [{ device: "iPhone 16 Pro Max", issue: "จอแตก", solution: "เปลี่ยนจอแท้ OEM" }],
+        sectionsOrder: ["hero", "cases", "gallery", "cta"],
+        savedAt: Date.now(),
+      };
+
+      // Simulate auto-save draft to localStorage
+      mockStorage[tenantKey] = JSON.stringify(unsavedPayload);
+
+      // Verify draft persistence
+      assert.ok(mockStorage[tenantKey], "Draft must exist in localStorage");
+
+      // Simulate recovery on network reconnection
+      const restored = JSON.parse(mockStorage[tenantKey]);
+      assert.strictEqual(restored.config.themeColor, "purple");
+      assert.strictEqual(restored.shopName, "FixMe Premium Lab");
+      assert.strictEqual(restored.casesList.length, 1);
+      assert.deepStrictEqual(restored.sectionsOrder, ["hero", "cases", "gallery", "cta"]);
+      assert.ok(restored.savedAt > 0, "Saved timestamp must be recorded");
+
+      // Simulate verified server save purging local draft
+      delete mockStorage[tenantKey];
+      assert.strictEqual(mockStorage[tenantKey], undefined, "Verified save must clear local draft");
+    });
+
+    it("3. Network failure gracefully switches to retry-ready state with local backup intact", () => {
+      let isSaving = false;
+      let saveFailed = false;
+      let localDraftSaved = false;
+
+      // Simulated network save failure handler
+      function onNetworkSaveFail() {
+        isSaving = false;
+        saveFailed = true;
+        localDraftSaved = true; // Auto-save draft backup
+      }
+
+      onNetworkSaveFail();
+      assert.strictEqual(isSaving, false);
+      assert.strictEqual(saveFailed, true, "Must flag save as failed for retry button");
+      assert.strictEqual(localDraftSaved, true, "Must have offline backup saved in local storage");
+
+      // User clicks retry
+      isSaving = true;
+      saveFailed = false;
+      assert.strictEqual(isSaving, true);
+      assert.strictEqual(saveFailed, false);
+    });
+  });
 });

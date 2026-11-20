@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { checkOrigin, hashToken, requireStaffSession, staffTokens } from "@/lib/staff-auth";
+import { checkOrigin, hashToken, requireStaffSession, staffTokens, throttle } from "@/lib/staff-auth";
 import { safeError } from "@/lib/staff-http";
 import {
   DEFAULT_STOREFRONT_CONFIG,
@@ -14,6 +14,11 @@ import {
   safeParseCustomPages,
 } from "@/lib/storefrontTheme";
 import { validateJsonPayloadBoundary } from "@/lib/storefrontSecurity";
+import {
+  createRevision,
+  getRevisions,
+  rollbackToRevision,
+} from "@/lib/wordpress/revisionEngine";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +87,13 @@ async function resolveTenantId(req: NextRequest): Promise<{ tenantId: string | n
 
 export async function GET(req: NextRequest) {
   try {
+    // Round 33: Retrieve revision snapshot history for staff
+    if (req.nextUrl.searchParams.get("action") === "revisions") {
+      const actor = await requireStaffSession(req);
+      const revisions = getRevisions(actor.tenantId, "storefront");
+      return NextResponse.json({ success: true, revisions });
+    }
+
     const { tenantId, slugRequested } = await resolveTenantId(req);
     if (!tenantId) {
       return NextResponse.json(
@@ -248,12 +260,42 @@ export async function PUT(req: NextRequest) {
     }
 
     const tenantId = actor.tenantId;
+
+    // Round 11: Rate-limiting throttle per IP and tenant
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
+    await throttle(`storefront:config:${tenantId}`, 60, 60 * 1000);
+    await throttle(`storefront:config:ip:${ip}`, 100, 60 * 1000);
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
       return NextResponse.json(
         { success: false, error: "รูปแบบข้อมูล JSON ไม่ถูกต้อง" },
         { status: 400 }
       );
+    }
+
+    // Round 17: Multi-Tab Concurrency & Stale Config Conflict Detection (Optimistic Locking)
+    if (body.updatedAt) {
+      const existingConfig = await db.storefrontConfig.findUnique({
+        where: { tenantId },
+        select: { updatedAt: true },
+      });
+
+      if (existingConfig) {
+        const clientUpdatedAt = new Date(body.updatedAt).getTime();
+        const serverUpdatedAt = new Date(existingConfig.updatedAt).getTime();
+        if (serverUpdatedAt - clientUpdatedAt > 1000) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "ข้อมูลการตั้งค่าถูกแก้ไขโดยผู้อื่นหรือในแท็บอื่นแล้ว กรุณารีเฟรชหน้าเพื่อโหลดข้อมูลล่าสุดก่อนแก้ไข (HTTP 409 Conflict)",
+              code: "STALE_WRITE_CONFLICT",
+              serverUpdatedAt: existingConfig.updatedAt.toISOString(),
+            },
+            { status: 409 }
+          );
+        }
+      }
     }
 
     const stringifyIfNeeded = (val: unknown) => {
@@ -453,11 +495,112 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    // Round 33: Create revision snapshot in timeline
+    try {
+      createRevision(
+        tenantId,
+        "storefront",
+        config,
+        { id: actor.id, name: actor.name, role: actor.role },
+        body.revisionNote || body.note || "บันทึกการตั้งค่าหน้าร้าน"
+      );
+    } catch (revErr) {
+      console.warn("createRevision error:", revErr);
+    }
+
     return NextResponse.json({
       success: true,
       config,
       tenant: updatedTenant,
     });
+  } catch (error) {
+    return safeError(error);
+  }
+}
+
+/**
+ * POST /api/storefront/config
+ * Handles action-based operations such as 1-click revision rollback
+ */
+export async function POST(req: NextRequest) {
+  try {
+    checkOrigin(req);
+    const actor = await requireStaffSession(req);
+    if (!["ADMIN", "MANAGER"].includes(actor.role)) {
+      return NextResponse.json(
+        { success: false, error: "ไม่มีสิทธิ์ย้อนกลับเวอร์ชัน (เฉพาะ ADMIN หรือ MANAGER)" },
+        { status: 403 }
+      );
+    }
+
+    const tenantId = actor.tenantId;
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || req.nextUrl.searchParams.get("action");
+
+    if (action === "rollback") {
+      const revisionId = String(body.revisionId || "").trim();
+      if (!revisionId) {
+        return NextResponse.json(
+          { success: false, error: "กรุณาระบุ revisionId ที่ต้องการกู้คืน" },
+          { status: 400 }
+        );
+      }
+
+      const rollbackResult = rollbackToRevision(
+        tenantId,
+        "storefront",
+        revisionId,
+        { id: actor.id, name: actor.name, role: actor.role }
+      );
+
+      if (!rollbackResult.success || !rollbackResult.config) {
+        return NextResponse.json(
+          { success: false, error: "ไม่พบเวอร์ชันที่ระบุหรือไม่สามารถกู้คืนได้" },
+          { status: 404 }
+        );
+      }
+
+      const restored = rollbackResult.config as Record<string, any>;
+
+      // Remove relational / primary keys before upsert
+      const { id, tenantId: _, createdAt, updatedAt, ...cleanRestored } = restored;
+
+      const updatedConfig = await db.storefrontConfig.upsert({
+        where: { tenantId },
+        create: {
+          tenantId,
+          ...cleanRestored,
+        },
+        update: {
+          ...cleanRestored,
+        },
+      });
+
+      const tenant = await db.tenant.findUnique({
+        where: { id: tenantId },
+        select: { id: true, name: true, slug: true },
+      });
+
+      if (tenant?.slug) {
+        try {
+          revalidatePath(`/store/${tenant.slug}`);
+          revalidatePath(`/store/${tenant.slug}`, "layout");
+          revalidatePath(`/store/${tenant.slug}/[pageSlug]`, "page");
+        } catch {}
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "กู้คืนเวอร์ชันสำเร็จ",
+        config: updatedConfig,
+        revision: rollbackResult.revision,
+      });
+    }
+
+    return NextResponse.json(
+      { success: false, error: "ไม่พบ action ที่ระบุ" },
+      { status: 400 }
+    );
   } catch (error) {
     return safeError(error);
   }

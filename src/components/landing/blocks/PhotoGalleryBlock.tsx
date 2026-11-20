@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   ZoomIn,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import { sanitizeUrl } from "@/lib/storefrontSecurity";
+import { generateResponsiveImageProps } from "@/lib/wordpress/mediaEngine";
 import { PhotoGalleryBlockProps, GalleryImageItem } from "./types";
 
 const DEFAULT_GALLERY_IMAGES: GalleryImageItem[] = [
@@ -91,6 +92,7 @@ export function PhotoGalleryBlock({
   }, [rawImages]);
 
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const lightboxRef = useRef<HTMLDivElement>(null);
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
   const closeLightbox = useCallback(() => {
@@ -109,14 +111,44 @@ export function PhotoGalleryBlock({
     );
   }, [imageList.length]);
 
-  // Handle keyboard navigation for lightbox
+  // Handle keyboard navigation & focus trapping for lightbox
   useEffect(() => {
     if (lightboxIndex === null) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeLightbox();
-      if (e.key === "ArrowRight") showNext();
-      if (e.key === "ArrowLeft") showPrev();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeLightbox();
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        showNext();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        showPrev();
+        return;
+      }
+
+      // Tab key focus trap inside lightbox modal
+      if (e.key === "Tab" && lightboxRef.current) {
+        const focusable = lightboxRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length > 0) {
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -144,7 +176,7 @@ export function PhotoGalleryBlock({
 
   return (
     <section
-      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto ${className}`}
+      className={`w-full py-12 sm:py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden ${className}`}
       aria-label="Photo Gallery"
     >
       {/* Header */}
@@ -153,11 +185,11 @@ export function PhotoGalleryBlock({
           <Images className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>แกลเลอรีภาพถ่าย</span>
         </div>
-        <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
           {resolvedTitle}
         </h2>
         {resolvedSubtitle && (
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
+          <p className="text-slate-300 text-sm sm:text-base leading-relaxed break-words">
             {resolvedSubtitle}
           </p>
         )}
@@ -177,16 +209,32 @@ export function PhotoGalleryBlock({
                 setLightboxIndex(index);
               }
             }}
-            className="group relative h-64 sm:h-72 rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/70 shadow-lg cursor-pointer transition-all duration-300 hover:border-slate-700 hover:shadow-2xl hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            className="group relative aspect-[4/3] rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/70 shadow-lg cursor-pointer transition-all duration-300 hover:border-slate-700 hover:shadow-2xl hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
             aria-label={`ดูรูปภาพขนาดเต็ม: ${img.caption || img.alt}`}
           >
-            {/* Image */}
-            <img
-              src={img.url}
-              alt={img.alt || img.caption || "ภาพผลงานซ่อม"}
-              loading="lazy"
-              className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-110"
-            />
+            {/* Image with Responsive Srcset & Sizes */}
+            {(() => {
+              const respProps = generateResponsiveImageProps(
+                img.url,
+                900,
+                675,
+                img.alt || img.caption || "ภาพผลงานซ่อม",
+                "medium_large"
+              );
+              return (
+                <img
+                  src={respProps.src}
+                  srcSet={respProps.srcSet}
+                  sizes={respProps.sizes || "(max-width: 768px) 100vw, 33vw"}
+                  alt={respProps.alt}
+                  loading={respProps.loading}
+                  decoding={respProps.decoding}
+                  width={respProps.width}
+                  height={respProps.height}
+                  className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-110"
+                />
+              );
+            })()}
 
             {/* Gradient Overlay & Caption */}
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/30 to-transparent opacity-80 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4 sm:p-5">
@@ -206,6 +254,7 @@ export function PhotoGalleryBlock({
       {/* Lightbox Modal */}
       {lightboxIndex !== null && imageList[lightboxIndex] && (
         <div
+          ref={lightboxRef}
           role="dialog"
           aria-modal="true"
           aria-label="ภาพถ่ายขนาดเต็ม"
@@ -248,17 +297,31 @@ export function PhotoGalleryBlock({
               </button>
             )}
 
-            {/* Current Large Image */}
+            {/* Current Large Image with Responsive Full Resolution Srcset */}
             <div className="relative max-h-[75vh] max-w-full flex items-center justify-center">
-              <img
-                src={imageList[lightboxIndex].url}
-                alt={
-                  imageList[lightboxIndex].alt ||
-                  imageList[lightboxIndex].caption ||
-                  "ภาพขนาดเต็ม"
-                }
-                className="max-h-[75vh] max-w-full object-contain rounded-xl shadow-2xl border border-slate-800"
-              />
+              {(() => {
+                const activeImg = imageList[lightboxIndex];
+                const respLightboxProps = generateResponsiveImageProps(
+                  activeImg.url,
+                  1920,
+                  1080,
+                  activeImg.alt || activeImg.caption || "ภาพขนาดเต็ม",
+                  "full"
+                );
+                return (
+                  <img
+                    src={respLightboxProps.src}
+                    srcSet={respLightboxProps.srcSet}
+                    sizes={respLightboxProps.sizes || "100vw"}
+                    alt={respLightboxProps.alt}
+                    loading="eager"
+                    decoding="async"
+                    width={respLightboxProps.width}
+                    height={respLightboxProps.height}
+                    className="max-h-[75vh] max-w-full object-contain rounded-xl shadow-2xl border border-slate-800"
+                  />
+                );
+              })()}
             </div>
 
             {/* Next Button */}
