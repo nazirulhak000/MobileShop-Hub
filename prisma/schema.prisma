@@ -704,25 +704,38 @@ model InstallmentPayment {
 // ==========================================
 
 model ShopExpense {
-  tenantId    String?
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  id          String   @id @default(cuid())
-  expenseNo   String // EXP-202611-001
-  branchId    String
-  branch      Branch   @relation(fields: [branchId], references: [id])
-  category    String // RENT, UTILITIES, CONSUMABLES, MARKETING, MAINTENANCE, WELFARE, OTHER
-  title       String
-  amount      Float
-  date        DateTime @default(now())
-  receiptUrl  String?
-  createdById String?
-  createdBy   User?    @relation(fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  tenantId      String?
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id            String   @id @default(cuid())
+  expenseNo     String // EXP-202611-001
+  branchId      String
+  branch        Branch   @relation(fields: [branchId], references: [id])
+  category      String // RENT, UTILITIES, SUPPLIES, CONSUMABLES, MARKETING, MAINTENANCE, SALARIES, WELFARE, OTHER
+  title         String
+  amount        Float
+  date          DateTime @default(now())
+  paymentMethod String   @default("CASH") // CASH, TRANSFER, CREDIT_CARD, PROMPTPAY, CHEQUE
+  payee         String? // Payee / Vendor name
+  payeeTaxId    String? // 13-digit Thai Tax ID
+  taxInvoiceNo  String? // Receipt / Tax Invoice number
+  isVatEligible Boolean  @default(false) // ภาษีซื้อที่ขอคืนได้ตาม ภ.พ.30
+  vatRate       Float    @default(0) // VAT rate % (e.g. 7)
+  vatAmount     Float    @default(0) // Input VAT amount (ภาษีซื้อ)
+  whtRate       Float    @default(0) // WHT rate % (1, 2, 3, 5)
+  whtAmount     Float    @default(0) // WHT amount (ภาษีหัก ณ ที่จ่าย)
+  whtType       String? // PND3 (บุคคลธรรมดา) / PND53 (นิติบุคคล)
+  netPayment    Float? // Net payment after WHT (amount - whtAmount)
+  notes         String? // Additional remarks
+  receiptUrl    String?
+  createdById   String?
+  createdBy     User?    @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([tenantId, expenseNo])
   @@index([branchId, date])
   @@index([tenantId])
+  @@index([tenantId, isVatEligible, date])
 }
 
 model AttendanceRecord {

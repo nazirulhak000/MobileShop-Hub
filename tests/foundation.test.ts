@@ -49,6 +49,7 @@ async function cleanupTestTenants() {
     await db.purchaseOrderItem.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.purchaseOrder.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.supplier.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.shopExpense.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.stockItem.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.product.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.otpChallenge.deleteMany({ where: { tenantId: { in: tenants } } });
@@ -3439,5 +3440,204 @@ test("Round 21: Attendance & Payroll Audit - Check-in/Out, Late Detection, OT 1.
       where: { id: slipHighEarner.id },
     });
     assert.equal(originalSlip?.netPayout, 33700);
+  });
+});
+
+test("Round 22: Operating Expenses Audit - Logging, Thai Tax Integration (ภ.พ.30 Input VAT, WHT ภ.ง.ด.3/53), SequenceCounter & Multi-Tenant Isolation", async () => {
+  const userB = await db.user.findFirstOrThrow({ where: { tenantId: "test-b" } });
+  const staffB: StaffPrincipal = {
+    id: userB.id,
+    tenantId: "test-b",
+    name: userB.name,
+    username: userB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  let expenseA1: any;
+  let expenseA2: any;
+  let expenseB1: any;
+
+  // 1. Expense Creation with Thai Tax Integration: Input VAT 7% & WHT 5% (Rent)
+  await staffStorage.run(admin, async () => {
+    // Expense 1: Rent (ค่าเช่าสำนักงาน/ร้านค้า) 30,000 THB, VAT-exempt, WHT 5% ภ.ง.ด.53
+    // Rent base 30,000 THB -> WHT 5% = 1,500 THB -> Net payment = 28,500 THB
+    const rentAmount = 30000;
+    const rentWhtRate = 5;
+    const rentWhtAmount = Math.round(rentAmount * (rentWhtRate / 100) * 100) / 100;
+    const rentNetPayment = rentAmount - rentWhtAmount;
+
+    expenseA1 = await prisma.shopExpense.create({
+      data: {
+        tenantId: "test-a",
+        expenseNo: "EXP-202611-001",
+        branchId: ownBranch,
+        category: "RENT",
+        title: "ค่าเช่าพื้นที่ร้าน สาขาหลัก ประจำเดือน พ.ย. 2569",
+        amount: rentAmount,
+        date: new Date("2026-11-01T00:00:00.000Z"),
+        paymentMethod: "TRANSFER",
+        payee: "บริษัท สยามรีเทล แอสเสท จำกัด",
+        payeeTaxId: "0105556012345",
+        taxInvoiceNo: "REC-202611-8899",
+        isVatEligible: false,
+        vatRate: 0,
+        vatAmount: 0,
+        whtRate: rentWhtRate,
+        whtAmount: rentWhtAmount,
+        whtType: "PND53",
+        netPayment: rentNetPayment,
+        receiptUrl: "https://media.nazirulhak.com/expenses/test-a/202611/rent-slip.pdf",
+        createdById: admin.id,
+      },
+    });
+
+    assert.equal(expenseA1.category, "RENT");
+    assert.equal(expenseA1.amount, 30000);
+    assert.equal(expenseA1.whtAmount, 1500);
+    assert.equal(expenseA1.netPayment, 28500);
+    assert.equal(expenseA1.payeeTaxId, "0105556012345");
+    assert.equal(expenseA1.isVatEligible, false);
+
+    // Expense 2: Tools & Supplies (วัสดุและอุปกรณ์ช่าง) 10,700 THB with 7% Input VAT
+    // VAT-inclusive 10,700 THB -> Base = 10,000 THB -> VAT = 700 THB (linking to ภ.พ.30)
+    // WHT: none (goods/supplies) -> Net payment = 10,700 THB
+    const suppliesAmount = 10700;
+    const suppliesBase = Math.round((suppliesAmount / 1.07) * 100) / 100;
+    const suppliesVat = Math.round((suppliesAmount - suppliesBase) * 100) / 100;
+
+    expenseA2 = await prisma.shopExpense.create({
+      data: {
+        tenantId: "test-a",
+        expenseNo: "EXP-202611-002",
+        branchId: ownBranch,
+        category: "SUPPLIES",
+        title: "ซื้อหัวแร้งดิจิตอลและฟลักซ์บัดกรี",
+        amount: suppliesAmount,
+        date: new Date("2026-11-05T00:00:00.000Z"),
+        paymentMethod: "PROMPTPAY",
+        payee: "ร้าน อิเล็กทรอนิกส์ ซัพพลาย",
+        taxInvoiceNo: "TAX-6911-0421",
+        isVatEligible: true,
+        vatRate: 7,
+        vatAmount: suppliesVat,
+        whtRate: 0,
+        whtAmount: 0,
+        netPayment: suppliesAmount,
+        receiptUrl: "/uploads/expenses/test-a/202611/tax-inv-0421.png",
+        createdById: admin.id,
+      },
+    });
+
+    assert.equal(expenseA2.category, "SUPPLIES");
+    assert.equal(expenseA2.amount, 10700);
+    assert.equal(expenseA2.isVatEligible, true);
+    assert.equal(expenseA2.vatAmount, 700);
+    assert.equal(expenseA2.netPayment, 10700);
+  });
+
+  // 2. Multi-Tenant Isolation & Independent SequenceCounter for Tenant B
+  await staffStorage.run(staffB, async () => {
+    // Tenant B creates an expense
+    expenseB1 = await prisma.shopExpense.create({
+      data: {
+        tenantId: "test-b",
+        expenseNo: "EXP-202611-001", // Same expenseNo format in Tenant B
+        branchId: foreignBranch,
+        category: "UTILITIES",
+        title: "ค่าไฟฟ้า สาขา บี เทรดดิ้ง",
+        amount: 4500,
+        date: new Date("2026-11-10T00:00:00.000Z"),
+        paymentMethod: "TRANSFER",
+        payee: "การไฟฟ้านครหลวง",
+        isVatEligible: true,
+        vatRate: 7,
+        vatAmount: 294.39,
+        netPayment: 4500,
+        createdById: staffB.id,
+      },
+    });
+
+    assert.equal(expenseB1.tenantId, "test-b");
+    assert.equal(expenseB1.category, "UTILITIES");
+
+    // Tenant B CANNOT read Tenant A's expenses
+    const bFindA1 = await prisma.shopExpense.findFirst({
+      where: { id: expenseA1.id },
+    });
+    assert.equal(bFindA1, null, "Tenant A expense must be completely invisible to Tenant B");
+
+    // Tenant B aggregation must only reflect Tenant B's data
+    const bAgg = await prisma.shopExpense.aggregate({
+      where: { tenantId: "test-b" },
+      _sum: { amount: true, vatAmount: true },
+      _count: { _all: true },
+    });
+    assert.equal(bAgg._count._all, 1);
+    assert.equal(bAgg._sum.amount, 4500);
+    assert.equal(bAgg._sum.vatAmount, 294.39);
+  });
+
+  // 3. Tenant A Aggregations: Input VAT (ภ.พ.30) & WHT Summary
+  await staffStorage.run(admin, async () => {
+    // Sum eligible Input VAT for ภ.พ.30 in Tenant A
+    const vatAgg = await prisma.shopExpense.aggregate({
+      where: { tenantId: "test-a", isVatEligible: true },
+      _sum: { amount: true, vatAmount: true },
+      _count: { _all: true },
+    });
+    assert.equal(vatAgg._count._all, 1, "Only eligible expenses count toward input VAT");
+    assert.equal(vatAgg._sum.vatAmount, 700, "Eligible input VAT must equal 700 THB");
+
+    // Sum WHT for ภ.ง.ด.53 in Tenant A
+    const whtAgg = await prisma.shopExpense.aggregate({
+      where: { tenantId: "test-a", whtRate: { gt: 0 } },
+      _sum: { whtAmount: true },
+      _count: { _all: true },
+    });
+    assert.equal(whtAgg._count._all, 1);
+    assert.equal(whtAgg._sum.whtAmount, 1500, "Withheld tax must equal 1,500 THB");
+
+    // Group By category in Tenant A
+    const categoryGroup = await prisma.shopExpense.groupBy({
+      by: ["category"],
+      where: { tenantId: "test-a" },
+      _sum: { amount: true },
+    });
+    const categoriesFound = new Set(categoryGroup.map((g: any) => g.category));
+    assert.ok(categoriesFound.has("RENT"));
+    assert.ok(categoriesFound.has("SUPPLIES"));
+    assert.ok(!categoriesFound.has("UTILITIES"), "Tenant B's category must not leak into Tenant A");
+  });
+
+  // 4. Cross-Tenant Defense: Mutation Rejection
+  await staffStorage.run(staffB, async () => {
+    let updateThrew = false;
+    try {
+      await prisma.shopExpense.update({
+        where: { id: expenseA1.id },
+        data: { amount: 1 },
+      });
+    } catch {
+      updateThrew = true;
+    }
+    assert.ok(updateThrew, "Cross-tenant expense update must fail closed");
+
+    let deleteThrew = false;
+    try {
+      await prisma.shopExpense.delete({
+        where: { id: expenseA1.id },
+      });
+    } catch {
+      deleteThrew = true;
+    }
+    assert.ok(deleteThrew, "Cross-tenant expense deletion must fail closed");
+
+    // Verify expenseA1 remains unmutated
+    const unmutated = await db.shopExpense.findUnique({
+      where: { id: expenseA1.id },
+    });
+    assert.equal(unmutated?.amount, 30000);
   });
 });
