@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
 import { NavigationMenuItem, StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import {
@@ -17,6 +18,62 @@ import {
   UserRound,
   CalendarDays,
 } from "lucide-react";
+
+/**
+ * Resolves a nav link href defensively across home and subpages:
+ * - Sanitizes javascript: or vbscript: URLs to "#"
+ * - Automatically detects external URLs (https://, http://, //, mailto:, tel:)
+ * - Resolves internal hash anchors (#services) to /store/[shopSlug]#services on subpages
+ * - Resolves relative subpage slugs ("about" or "/about") to /store/[shopSlug]/about
+ */
+export function resolveNavHref(
+  href: string,
+  isSubpage: boolean,
+  shopSlug?: string
+): { resolvedHref: string; isExternal: boolean } {
+  if (!href) return { resolvedHref: "#", isExternal: false };
+  const trimmed = href.trim();
+
+  // Guard against javascript: and vbscript: execution
+  if (/^(javascript|vbscript):/i.test(trimmed)) {
+    return { resolvedHref: "#", isExternal: false };
+  }
+
+  // Explicit external or special protocol links
+  if (/^(https?:\/\/|\/\/|mailto:|tel:)/i.test(trimmed)) {
+    return { resolvedHref: trimmed, isExternal: true };
+  }
+
+  // Internal hash anchors (e.g. "#services", "#faq")
+  if (trimmed.startsWith("#")) {
+    if (isSubpage && shopSlug) {
+      return { resolvedHref: `/store/${shopSlug}${trimmed}`, isExternal: false };
+    }
+    return { resolvedHref: trimmed, isExternal: false };
+  }
+
+  // Known absolute routes across the platform
+  if (
+    trimmed.startsWith("/store/") ||
+    trimmed.startsWith("/s/") ||
+    trimmed.startsWith("/track/") ||
+    trimmed.startsWith("/dashboard") ||
+    trimmed.startsWith("/customer") ||
+    trimmed.startsWith("/landing") ||
+    trimmed.startsWith("/login") ||
+    trimmed.startsWith("/register")
+  ) {
+    return { resolvedHref: trimmed, isExternal: false };
+  }
+
+  // Relative subpage slug or nested path (e.g. "about", "/about", "policy/warranty")
+  if (shopSlug) {
+    const cleanSlug = trimmed.replace(/^\//, "");
+    return { resolvedHref: `/store/${shopSlug}/${cleanSlug}`, isExternal: false };
+  }
+
+  return { resolvedHref: trimmed, isExternal: false };
+}
 
 interface LandingNavbarProps {
   shopName?: string;
@@ -54,13 +111,50 @@ export function LandingNavbar({
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [trackingCode, setTrackingCode] = useState("");
+  const [activeHash, setActiveHash] = useState<string>("");
+
+  const pathname = usePathname();
 
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 20);
     };
+
+    const handleHash = () => {
+      setActiveHash(window.location.hash);
+    };
+
+    handleHash();
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    window.addEventListener("hashchange", handleHash);
+
+    // Active navigation indicator: observe section viewports on home page
+    let observer: IntersectionObserver | null = null;
+    try {
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting && entry.target.id) {
+              setActiveHash(`#${entry.target.id}`);
+            }
+          }
+        },
+        { rootMargin: "-20% 0px -60% 0px" }
+      );
+
+      const sectionElements = document.querySelectorAll(
+        "section[id], div[id='track-search'], div[id='services'], div[id='location']"
+      );
+      sectionElements.forEach((el) => observer?.observe(el));
+    } catch (_) {
+      // IntersectionObserver fallback gracefully
+    }
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("hashchange", handleHash);
+      observer?.disconnect();
+    };
   }, []);
 
   const defaultLinks = [
@@ -83,6 +177,21 @@ export function LandingNavbar({
       : defaultLinks;
 
   const navLinks = rawLinks.filter((link) => !hiddenSections.includes(link.href));
+
+  const isLinkActive = (resolvedHref: string, originalHref: string) => {
+    if (isSubpage) {
+      if (!pathname) return false;
+      return pathname === resolvedHref || pathname.endsWith(`/${originalHref.replace(/^\//, "")}`);
+    }
+    // On home page:
+    if (originalHref.startsWith("#")) {
+      return activeHash === originalHref;
+    }
+    if (pathname) {
+      return pathname === resolvedHref;
+    }
+    return false;
+  };
 
   const handleQuickTrackSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,21 +280,27 @@ export function LandingNavbar({
 
             {/* Desktop Navigation Links */}
             {navLinks.length > 0 && (
-              <nav className="hidden xl:flex items-center gap-1.5 lg:gap-3" aria-label="เมนูหลัก">
+              <nav className="hidden xl:flex items-center gap-1.5 lg:gap-2" aria-label="เมนูหลัก">
                 {navLinks.map((link) => {
-                  const resolvedHref =
-                    isSubpage && link.href.startsWith("#") && shopSlug
-                      ? `/store/${shopSlug}${link.href}`
-                      : link.href;
+                  const { resolvedHref, isExternal } = resolveNavHref(link.href, isSubpage, shopSlug);
+                  const effectiveExternal = Boolean(link.isExternal) || isExternal;
+                  const isActive = isLinkActive(resolvedHref, link.href);
 
-                  if (link.isExternal) {
+                  const linkClasses = `text-xs py-1.5 px-3 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} ${
+                    isActive
+                      ? `${theme.lightBg} ${theme.lightAccentText} font-semibold ring-1 ring-inset ${theme.lightBorder} shadow-2xs`
+                      : "font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  }`;
+
+                  if (effectiveExternal) {
                     return (
                       <a
                         key={link.href}
                         href={resolvedHref}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                        className={linkClasses}
+                        aria-current={isActive ? (isSubpage ? "page" : "location") : undefined}
                       >
                         {link.label}
                       </a>
@@ -198,7 +313,8 @@ export function LandingNavbar({
                       <Link
                         key={link.href}
                         href={resolvedHref}
-                        className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                        className={linkClasses}
+                        aria-current={isActive ? "page" : undefined}
                       >
                         {link.label}
                       </Link>
@@ -209,7 +325,8 @@ export function LandingNavbar({
                     <a
                       key={link.href}
                       href={resolvedHref}
-                      className={`text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                      className={linkClasses}
+                      aria-current={isActive ? "location" : undefined}
                     >
                       {link.label}
                     </a>
@@ -282,7 +399,7 @@ export function LandingNavbar({
             <div className="flex items-center gap-2 lg:hidden">
               {!hiddenSections.includes("#track-search") && (
                 <a
-                  href="#track-search"
+                  href={isSubpage && shopSlug ? `/store/${shopSlug}#track-search` : "#track-search"}
                   className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl ${theme.lightAccentText} ${theme.lightBg} hover:opacity-90 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
                   aria-label="ไปยังช่องค้นหาสถานะซ่อม"
                 >
@@ -334,12 +451,17 @@ export function LandingNavbar({
             {navLinks.length > 0 && (
               <nav className="divide-y divide-slate-100" aria-label="เมนูมือถือ">
                 {navLinks.map((link) => {
-                  const resolvedHref =
-                    isSubpage && link.href.startsWith("#") && shopSlug
-                      ? `/store/${shopSlug}${link.href}`
-                      : link.href;
+                  const { resolvedHref, isExternal } = resolveNavHref(link.href, isSubpage, shopSlug);
+                  const effectiveExternal = Boolean(link.isExternal) || isExternal;
+                  const isActive = isLinkActive(resolvedHref, link.href);
 
-                  if (link.isExternal) {
+                  const mobileClasses = `flex items-center justify-between min-h-[44px] py-2.5 px-2 text-sm rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} ${
+                    isActive
+                      ? `bg-slate-50 ${theme.lightAccentText} font-semibold border-l-4 ${theme.accentBorder} pl-3`
+                      : "font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50/50"
+                  }`;
+
+                  if (effectiveExternal) {
                     return (
                       <a
                         key={link.href}
@@ -347,7 +469,8 @@ export function LandingNavbar({
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => setMobileMenuOpen(false)}
-                        className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                        className={mobileClasses}
+                        aria-current={isActive ? (isSubpage ? "page" : "location") : undefined}
                       >
                         <span>{link.label}</span>
                         <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -361,7 +484,8 @@ export function LandingNavbar({
                         key={link.href}
                         href={resolvedHref}
                         onClick={() => setMobileMenuOpen(false)}
-                        className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                        className={mobileClasses}
+                        aria-current={isActive ? "page" : undefined}
                       >
                         <span>{link.label}</span>
                         <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -374,7 +498,8 @@ export function LandingNavbar({
                       key={link.href}
                       href={resolvedHref}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
+                      className={mobileClasses}
+                      aria-current={isActive ? "location" : undefined}
                     >
                       <span>{link.label}</span>
                       <ChevronRight className="h-4 w-4 text-slate-400" />

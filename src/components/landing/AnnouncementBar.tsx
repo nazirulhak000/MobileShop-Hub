@@ -58,10 +58,10 @@ export function AnnouncementBar({
           <button
             type="button"
             onClick={() => setDismissed(true)}
-            className="p-1 rounded-md opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
+            className="p-2 rounded-md opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
             aria-label="ปิดประกาศ"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>

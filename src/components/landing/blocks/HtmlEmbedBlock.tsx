@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Code2, MapPin, AlertCircle } from "lucide-react";
+import { Code2, MapPin, AlertCircle, ShieldAlert } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { sanitizeIframeSrc, stripScriptTags } from "@/lib/storefrontSecurity";
 import { HtmlEmbedBlockProps } from "./types";
 
 /**
@@ -26,20 +27,33 @@ export function HtmlEmbedBlock({
 }: HtmlEmbedBlockProps) {
   const resolvedTitle = title || data?.title;
   const resolvedSubtitle = subtitle || data?.subtitle;
-  const rawHtml = (html || data?.html || data?.code || "").trim();
-  const resolvedHeight = Number(height || data?.height || 450);
+  const rawContent =
+    typeof html === "string"
+      ? html
+      : typeof data?.html === "string"
+      ? data.html
+      : typeof data?.code === "string"
+      ? data.code
+      : "";
+  const rawHtml = rawContent.trim();
+  const numHeight = Number(height || data?.height || 450);
+  const resolvedHeight = isNaN(numHeight) || numHeight < 80 ? 450 : Math.min(numHeight, 2000);
 
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
-  // Check if content is an iframe or raw HTML
+  // Check if content is an iframe, direct URL, or raw HTML
   const parsed = useMemo(() => {
     if (!rawHtml) return { type: "empty" };
 
     const iframeSrc = extractIframeSrc(rawHtml);
     if (iframeSrc) {
+      const safeSrc = sanitizeIframeSrc(iframeSrc);
+      if (!safeSrc) {
+        return { type: "blocked-unsafe", reason: "ไม่อนุญาตให้ใช้ URL ชนิดนี้ใน iframe" };
+      }
       return {
         type: "iframe-src",
-        src: iframeSrc,
+        src: safeSrc,
       };
     }
 
@@ -48,15 +62,21 @@ export function HtmlEmbedBlock({
       (rawHtml.startsWith("https://") || rawHtml.startsWith("http://")) &&
       !rawHtml.includes("<")
     ) {
+      const safeSrc = sanitizeIframeSrc(rawHtml);
+      if (!safeSrc) {
+        return { type: "blocked-unsafe", reason: "URL ไม่ปลอดภัย" };
+      }
       return {
         type: "iframe-src",
-        src: rawHtml,
+        src: safeSrc,
       };
     }
 
+    // Raw HTML / Widget code: strip raw script tags and render in sandboxed iframe without allow-same-origin
+    const sanitizedHtml = stripScriptTags(rawHtml);
     return {
       type: "srcdoc",
-      content: rawHtml,
+      content: sanitizedHtml,
     };
   }, [rawHtml]);
 
@@ -91,7 +111,7 @@ export function HtmlEmbedBlock({
             loading="lazy"
             allowFullScreen
             referrerPolicy="no-referrer-when-downgrade"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            sandbox="allow-scripts allow-popups allow-forms"
             title={resolvedTitle || "Custom Embed"}
           />
         )}
@@ -101,9 +121,24 @@ export function HtmlEmbedBlock({
             srcDoc={parsed.content}
             style={{ height: `${resolvedHeight}px` }}
             className="w-full border-0 rounded-3xl bg-white"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            sandbox="allow-scripts allow-popups allow-forms"
             title={resolvedTitle || "Custom HTML Widget"}
           />
+        )}
+
+        {parsed.type === "blocked-unsafe" && (
+          <div
+            style={{ height: `${Math.min(resolvedHeight, 260)}px` }}
+            className="flex flex-col items-center justify-center p-8 text-center space-y-3 bg-red-950/30 border border-red-900/50"
+          >
+            <ShieldAlert className="w-10 h-10 text-red-400" />
+            <p className="text-red-200 font-medium text-sm sm:text-base">
+              เนื้อหา Embed ถูกระงับเนื่องจากความปลอดภัย
+            </p>
+            <p className="text-red-400 text-xs max-w-md">
+              ระบบไม่อนุญาตให้ฝัง URL หรือสคริปต์ที่ไม่ปลอดภัย (อนุญาตเฉพาะ HTTPS URL หรือโค้ด HTML มาตรฐาน)
+            </p>
+          </div>
         )}
 
         {parsed.type === "empty" && (

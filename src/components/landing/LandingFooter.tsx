@@ -10,7 +10,7 @@ import {
   CalendarDays,
   UserRound,
 } from "lucide-react";
-import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { CustomPage, FooterSocialLinks, StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface LandingFooterProps {
   /** Shop display name. Defaults to the platform name on the demo landing. */
@@ -27,6 +27,10 @@ interface LandingFooterProps {
   isSubpage?: boolean;
   /** Theme color palette */
   themeColor?: StorefrontThemeColor;
+  /** Dynamic custom subpages configured for this store */
+  customPages?: CustomPage[];
+  /** Social links configured in storefront settings */
+  footerSocialLinks?: FooterSocialLinks;
 }
 
 export function LandingFooter({
@@ -37,10 +41,13 @@ export function LandingFooter({
   hiddenSections = [],
   isSubpage = false,
   themeColor = "emerald",
+  customPages,
+  footerSocialLinks,
 }: LandingFooterProps = {}) {
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const shows = (href: string) => !hiddenSections.includes(href);
   const resolveAnchor = (anchor: string) => (isSubpage && shopSlug ? `/store/${shopSlug}${anchor}` : anchor);
+  const publishedSubpages = (customPages || []).filter((p) => p.published !== false);
 
   return (
     <footer className="bg-slate-950 text-slate-400 text-xs border-t border-slate-800">
@@ -94,7 +101,7 @@ export function LandingFooter({
       </div>
 
       {/* Main Footer Links Columns */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-24 sm:py-16">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           {/* Col 1: Brand & Bio (2 cols on lg) */}
           <div className="lg:col-span-2 space-y-4">
@@ -139,6 +146,61 @@ export function LandingFooter({
                 </a>
               )}
             </div>
+
+            {footerSocialLinks && Object.values(footerSocialLinks).some(Boolean) && (
+              <div className="pt-2 flex flex-wrap items-center gap-2">
+                {footerSocialLinks.facebook && (
+                  <a
+                    href={footerSocialLinks.facebook}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                  >
+                    Facebook
+                  </a>
+                )}
+                {footerSocialLinks.line && (
+                  <a
+                    href={footerSocialLinks.line}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                  >
+                    LINE
+                  </a>
+                )}
+                {footerSocialLinks.tiktok && (
+                  <a
+                    href={footerSocialLinks.tiktok}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                  >
+                    TikTok
+                  </a>
+                )}
+                {footerSocialLinks.instagram && (
+                  <a
+                    href={footerSocialLinks.instagram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                  >
+                    Instagram
+                  </a>
+                )}
+                {footerSocialLinks.youtube && (
+                  <a
+                    href={footerSocialLinks.youtube}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                  >
+                    YouTube
+                  </a>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Col 2: Services */}
@@ -225,6 +287,25 @@ export function LandingFooter({
                     คำถามที่พบบ่อย (FAQ)
                   </a>
                 </li>
+              )}
+              {publishedSubpages.length > 0 && shopSlug && (
+                <>
+                  <li className="pt-2 border-t border-slate-800/80">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                      ข้อมูลและนโยบายร้าน
+                    </span>
+                  </li>
+                  {publishedSubpages.map((p) => (
+                    <li key={p.slug}>
+                      <Link
+                        href={`/store/${shopSlug}/${p.slug}`}
+                        className="hover:text-white transition-colors duration-150 text-slate-300"
+                      >
+                        {p.title}
+                      </Link>
+                    </li>
+                  ))}
+                </>
               )}
             </ul>
           </div>

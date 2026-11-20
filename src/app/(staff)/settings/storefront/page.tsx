@@ -591,6 +591,7 @@ export default function StorefrontCustomizerPage() {
 
   // Handle Save
   const handleSave = async () => {
+    if (isSaving) return; // Prevent concurrent duplicate saves & race conditions
     if (hasErrors) {
       const firstError = Object.values(validationErrors)[0];
       setToast({
@@ -744,8 +745,9 @@ export default function StorefrontCustomizerPage() {
       // Reorder blocks within subpage
       const subBlocks = [...(activeSubPage.sections || [])];
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= subBlocks.length) return;
+      if (idx < 0 || idx >= subBlocks.length || targetIdx < 0 || targetIdx >= subBlocks.length) return;
       const [moved] = subBlocks.splice(idx, 1);
+      if (!moved) return;
       subBlocks.splice(targetIdx, 0, moved);
 
       setCustomPagesList((prev) =>
@@ -755,8 +757,9 @@ export default function StorefrontCustomizerPage() {
       // Reorder home page sectionsOrder
       const current = [...sectionsOrder];
       const targetIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= current.length) return;
+      if (idx < 0 || idx >= current.length || targetIdx < 0 || targetIdx >= current.length) return;
       const [moved] = current.splice(idx, 1);
+      if (!moved) return;
       current.splice(targetIdx, 0, moved);
       setSectionsOrder(current);
     }
@@ -844,7 +847,10 @@ export default function StorefrontCustomizerPage() {
 
   // Duplicate Custom Block
   const handleDuplicateBlock = (blockId: string) => {
-    const newId = `block_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? `block_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`
+        : `block_${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${Math.floor(Math.random() * 10000)}`;
 
     if (selectedPageSlug && activeSubPage) {
       const subBlocks = [...(activeSubPage.sections || [])];

@@ -12,17 +12,25 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { sanitizeUrl } from "@/lib/storefrontSecurity";
 import { CtaBlockProps } from "./types";
 
 function formatTelHref(phone: string): string {
-  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+  if (!phone || typeof phone !== "string") return "";
+  const digits = phone.replace(/[^\d+]/g, "");
+  return digits ? `tel:${digits}` : "";
 }
 
 function formatLineHref(lineId: string, directUrl?: string): string {
-  if (directUrl && (directUrl.startsWith("http://") || directUrl.startsWith("https://"))) {
-    return directUrl;
+  if (directUrl && typeof directUrl === "string") {
+    const safeDirect = sanitizeUrl(directUrl);
+    if (safeDirect.startsWith("http://") || safeDirect.startsWith("https://")) {
+      return safeDirect;
+    }
   }
+  if (!lineId || typeof lineId !== "string") return "#";
   const cleanId = lineId.trim();
+  if (!cleanId) return "#";
   const formattedId = cleanId.startsWith("@") ? cleanId : `@${cleanId}`;
   return `https://line.me/R/ti/p/${encodeURIComponent(formattedId)}`;
 }
@@ -60,11 +68,20 @@ export function CtaBlock({
   const resolvedLineId = lineId || data?.lineId || "@mobileshop";
   const resolvedLineUrl = lineUrl || data?.lineUrl;
   const resolvedPhone = phone || data?.phone || "081-234-5678";
-  const resolvedBenefits = benefits || data?.benefits || DEFAULT_BENEFITS;
+  const resolvedBenefits = Array.isArray(benefits)
+    ? benefits
+    : Array.isArray(data?.benefits)
+    ? data.benefits
+    : DEFAULT_BENEFITS;
   const resolvedPrimaryAction = primaryAction || data?.primaryAction || "line";
 
   const resolvedCustomText = customButtonText || data?.customButtonText;
-  const resolvedCustomUrl = customButtonUrl || data?.customButtonUrl;
+  const rawCustomUrl = customButtonUrl || data?.customButtonUrl;
+  const resolvedCustomUrl = rawCustomUrl ? sanitizeUrl(rawCustomUrl) : "";
+
+  const resolvedSecondaryText = secondaryButtonText || data?.secondaryButtonText;
+  const rawSecondaryUrl = secondaryButtonUrl || data?.secondaryButtonUrl;
+  const resolvedSecondaryUrl = rawSecondaryUrl ? sanitizeUrl(rawSecondaryUrl) : "";
 
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
@@ -91,7 +108,7 @@ export function CtaBlock({
           )}
 
           {/* Heading */}
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-white leading-snug">
             {resolvedTitle}
           </h2>
 
@@ -147,6 +164,17 @@ export function CtaBlock({
               >
                 <span>{resolvedCustomText}</span>
                 <ArrowRight className="w-5 h-5 shrink-0" />
+              </a>
+            )}
+
+            {/* Optional Secondary Button */}
+            {resolvedSecondaryText && resolvedSecondaryUrl && (
+              <a
+                href={resolvedSecondaryUrl}
+                className="min-h-[52px] min-w-[44px] px-8 py-3.5 rounded-2xl font-bold text-base sm:text-lg text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 shadow-xl flex items-center justify-center gap-3 transition-all duration-300 hover:scale-[1.03] active:scale-[0.98]"
+              >
+                <span>{resolvedSecondaryText}</span>
+                <ExternalLink className="w-5 h-5 shrink-0" />
               </a>
             )}
           </div>

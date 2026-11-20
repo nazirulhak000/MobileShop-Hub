@@ -50,6 +50,14 @@ const DEFAULT_SCHEDULE: BusinessDaySchedule[] = [
  */
 function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
   try {
+    if (!Array.isArray(schedule) || schedule.length === 0) {
+      return {
+        isOpen: true,
+        message: "เปิดให้บริการตามเวลาทำการ",
+        subMessage: "สอบถามเพิ่มเติมได้ตลอดเวลา",
+      };
+    }
+
     const now = new Date();
     // Format to Bangkok time
     const formatter = new Intl.DateTimeFormat("en-US", {
@@ -78,18 +86,18 @@ function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
     if (["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday)) {
       relevantItem = schedule.find(
         (s) =>
-          s.day.includes("จันทร์") ||
-          s.day.includes("ศุกร์") ||
-          s.day.includes("Mon")
+          s?.day?.includes("จันทร์") ||
+          s?.day?.includes("ศุกร์") ||
+          s?.day?.includes("Mon")
       );
     } else if (weekday === "Sat") {
       relevantItem =
-        schedule.find((s) => s.day.includes("เสาร์") || s.day.includes("Sat")) ||
-        schedule.find((s) => s.day.includes("อาทิตย์"));
+        schedule.find((s) => s?.day?.includes("เสาร์") || s?.day?.includes("Sat")) ||
+        schedule.find((s) => s?.day?.includes("อาทิตย์"));
     } else if (weekday === "Sun") {
       relevantItem =
-        schedule.find((s) => s.day.includes("อาทิตย์") || s.day.includes("Sun")) ||
-        schedule.find((s) => s.day.includes("เสาร์"));
+        schedule.find((s) => s?.day?.includes("อาทิตย์") || s?.day?.includes("Sun")) ||
+        schedule.find((s) => s?.day?.includes("เสาร์"));
     }
 
     if (!relevantItem || relevantItem.isClosed) {
@@ -100,11 +108,11 @@ function getBangkokCurrentStatus(schedule: BusinessDaySchedule[]) {
       };
     }
 
-    const [openH, openM] = (relevantItem.openTime || "09:00").split(":").map(Number);
-    const [closeH, closeM] = (relevantItem.closeTime || "19:30").split(":").map(Number);
+    const [openH, openM] = String(relevantItem.openTime || "09:00").split(":").map(Number);
+    const [closeH, closeM] = String(relevantItem.closeTime || "19:30").split(":").map(Number);
 
-    const openMinutes = openH * 60 + (openM || 0);
-    const closeMinutes = closeH * 60 + (closeM || 0);
+    const openMinutes = (Number(openH) || 9) * 60 + (Number(openM) || 0);
+    const closeMinutes = (Number(closeH) || 19) * 60 + (Number(closeM) || 30);
 
     if (currentMinutes >= openMinutes && currentMinutes < closeMinutes) {
       return {
@@ -149,19 +157,22 @@ export function BusinessHoursBlock({
   const resolvedSchedule: BusinessDaySchedule[] = useMemo(() => {
     const rawList = schedule || hours || data?.schedule || data?.hours;
     if (Array.isArray(rawList) && rawList.length > 0) {
-      return rawList.map((item: any) => ({
-        day: String(item.day || ""),
-        openTime: item.openTime || item.open || "09:00",
-        closeTime: item.closeTime || item.close || "19:30",
-        hoursText:
-          item.hoursText ||
-          (item.open && item.close
-            ? `${item.open} - ${item.close} น.`
-            : item.openTime && item.closeTime
-            ? `${item.openTime} - ${item.closeTime} น.`
-            : undefined),
-        isClosed: Boolean(item.isClosed),
-      }));
+      const valid = rawList.filter(Boolean);
+      if (valid.length > 0) {
+        return valid.map((item: any) => ({
+          day: String(item?.day || ""),
+          openTime: item?.openTime || item?.open || "09:00",
+          closeTime: item?.closeTime || item?.close || "19:30",
+          hoursText:
+            item?.hoursText ||
+            (item?.open && item?.close
+              ? `${item.open} - ${item.close} น.`
+              : item?.openTime && item?.closeTime
+              ? `${item.openTime} - ${item.closeTime} น.`
+              : undefined),
+          isClosed: Boolean(item?.isClosed),
+        }));
+      }
     }
     return DEFAULT_SCHEDULE;
   }, [schedule, hours, data?.schedule, data?.hours]);

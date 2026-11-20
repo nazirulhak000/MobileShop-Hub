@@ -5,6 +5,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { isR2Configured, uploadToR2 } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
     const uploadDir = path.resolve(process.cwd(), "public", "uploads", "storefront");
 
-    if (!existsSync(uploadDir)) {
+    if (!isR2Configured() && !existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
     }
 
@@ -141,17 +142,22 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const filePath = path.resolve(uploadDir, filename);
-      if (!filePath.startsWith(uploadDir + path.sep)) {
-        return NextResponse.json(
-          { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
-          { status: 400 }
-        );
+      let publicUrl: string;
+
+      if (isR2Configured()) {
+        publicUrl = await uploadToR2(buffer, filename, detectedMime);
+      } else {
+        const filePath = path.resolve(uploadDir, filename);
+        if (!filePath.startsWith(uploadDir + path.sep)) {
+          return NextResponse.json(
+            { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
+            { status: 400 }
+          );
+        }
+        await writeFile(filePath, buffer);
+        publicUrl = `/uploads/storefront/${filename}`;
       }
 
-      await writeFile(filePath, buffer);
-
-      const publicUrl = `/uploads/storefront/${filename}`;
       return NextResponse.json({
         success: true,
         url: publicUrl,
@@ -240,17 +246,22 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const filePath = path.resolve(uploadDir, filename);
-      if (!filePath.startsWith(uploadDir + path.sep)) {
-        return NextResponse.json(
-          { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
-          { status: 400 }
-        );
+      let publicUrl: string;
+
+      if (isR2Configured()) {
+        publicUrl = await uploadToR2(buffer, filename, detectedMime);
+      } else {
+        const filePath = path.resolve(uploadDir, filename);
+        if (!filePath.startsWith(uploadDir + path.sep)) {
+          return NextResponse.json(
+            { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
+            { status: 400 }
+          );
+        }
+        await writeFile(filePath, buffer);
+        publicUrl = `/uploads/storefront/${filename}`;
       }
 
-      await writeFile(filePath, buffer);
-
-      const publicUrl = `/uploads/storefront/${filename}`;
       return NextResponse.json({
         success: true,
         url: publicUrl,

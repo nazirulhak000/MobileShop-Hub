@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { sanitizeUrl } from "@/lib/storefrontSecurity";
 import { PromoBannerBlockProps } from "./types";
 
 export function PromoBannerBlock({
@@ -38,10 +39,16 @@ export function PromoBannerBlock({
     "รับส่วนลดค่าบริการซ่อมและเปลี่ยนแบตเตอรี่แท้ พร้อมตรวจเช็คสภาพเครื่อง 20 รายการฟรี";
   const resolvedBadge = badge || data?.badge || "🔥 โปรโมชั่นจำกัดเวลา";
   const resolvedButtonText = buttonText || data?.buttonText || "รับสิทธิ์โปรโมชั่นเลย";
-  const resolvedButtonUrl = buttonUrl || data?.buttonUrl || "#repair-quote";
+  const rawButtonUrl = buttonUrl || data?.buttonUrl || "#repair-quote";
+  const resolvedButtonUrl = sanitizeUrl(rawButtonUrl, "#repair-quote");
   const resolvedBgImage = bgImageUrl || imageUrl || data?.bgImageUrl || data?.imageUrl;
+  const rawBgType = bgType || data?.bgType;
   const resolvedBgType =
-    bgType || data?.bgType || (resolvedBgImage ? "image" : "gradient");
+    rawBgType === "image" || rawBgType === "solid" || rawBgType === "gradient"
+      ? rawBgType
+      : resolvedBgImage
+      ? "image"
+      : "gradient";
   const resolvedDiscountTag = discountTag || data?.discountTag;
   const resolvedExpiryNotice =
     expiryNotice || data?.expiryNotice || "⚡ สิทธิ์มีจำนวนจำกัดต่อวัน หรือจนกว่าจะสิ้นสุดแคมเปญ";
@@ -110,7 +117,7 @@ export function PromoBannerBlock({
             )}
 
             {/* Headline */}
-            <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white tracking-tight leading-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white leading-snug">
               {resolvedTitle}
             </h2>
 

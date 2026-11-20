@@ -2,6 +2,7 @@
 
 import React from "react";
 import { StorefrontThemeColor } from "@/lib/storefrontTheme";
+import { sanitizeCssClass } from "@/lib/storefrontSecurity";
 import { CustomBlock, DynamicBlockRendererProps } from "./types";
 import { PromoBannerBlock } from "./PromoBannerBlock";
 import { PhotoGalleryBlock } from "./PhotoGalleryBlock";
@@ -36,6 +37,11 @@ export function DynamicBlockRenderer({
   className = "",
   tenantInfo,
 }: DynamicBlockRendererProps) {
+  // If block is undefined or null, fail safely
+  if (!block || typeof block !== "object") {
+    return null;
+  }
+
   // If block is explicitly marked hidden or disabled, do not render
   if (block.visible === false || block.enabled === false) {
     return null;
@@ -48,7 +54,9 @@ export function DynamicBlockRenderer({
     ...block,
   };
 
-  const blockClassName = [className, mergedData.customCssClass, mergedData.className]
+  const safeCustomClass = sanitizeCssClass(mergedData.customCssClass);
+  const safeMergedClass = sanitizeCssClass(mergedData.className);
+  const blockClassName = [className, safeCustomClass, safeMergedClass]
     .filter(Boolean)
     .join(" ");
 
@@ -201,7 +209,7 @@ export function DynamicBlockRenderer({
         return null;
     }
   } catch (err) {
-    console.error(`[DynamicBlockRenderer] Error rendering block ${block.id}:`, err);
+    console.error(`[DynamicBlockRenderer] Error rendering block ${block?.id}:`, err);
     return null;
   }
 }

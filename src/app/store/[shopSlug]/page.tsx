@@ -28,8 +28,15 @@ import {
   safeParseSectionsOrder,
   safeParseCustomSections,
   safeParseNavMenu,
+  safeParseCustomPages,
+  safeParseSocialLinks,
 } from "@/lib/storefrontTheme";
 import { resolveTenantBySlug } from "@/lib/storefrontTenant";
+import { buildStoreMetadata } from "@/lib/storefrontMetadata";
+
+// Round 10: ISR edge caching and serverless runtime safety
+export const revalidate = 60; // 60s stale-while-revalidate edge CDN cache
+export const runtime = "nodejs"; // Prisma DB requires Node.js serverless runtime
 
 interface StorePageProps {
   params: Promise<{
@@ -40,20 +47,7 @@ interface StorePageProps {
 export async function generateMetadata({ params }: StorePageProps): Promise<Metadata> {
   const { shopSlug } = await params;
   const tenant = await resolveTenantBySlug(shopSlug);
-
-  const customTitle = tenant?.storefrontConfig?.headline;
-  const title = tenant
-    ? `${tenant.name} | ${customTitle || "ศูนย์บริการซ่อมมือถือด่วน เช็คสถานะสด 24 ชม."}`
-    : "MobileShop-Hub | ศูนย์บริการซ่อมมือถือด่วน";
-
-  const description =
-    tenant?.storefrontConfig?.subheadline ||
-    `ศูนย์บริการซ่อมมือถือและจำหน่ายสมาร์ตโฟนครบวงจร ${tenant ? tenant.name : ""}`;
-
-  return {
-    title,
-    description,
-  };
+  return buildStoreMetadata(tenant, shopSlug);
 }
 
 export default async function TenantStorePage({ params }: StorePageProps) {
@@ -132,7 +126,9 @@ export default async function TenantStorePage({ params }: StorePageProps) {
     showMobileQuickBar: rawConfig?.showMobileQuickBar ?? true,
     sectionsOrder: rawConfig?.sectionsOrder,
     customSections: rawConfig?.customSections,
+    customPages: rawConfig?.customPages,
     navigationMenu: rawConfig?.navigationMenu,
+    footerSocialLinks: rawConfig?.footerSocialLinks,
     customBeforeAfterCases: rawConfig?.customBeforeAfterCases,
     customPricingRates: rawConfig?.customPricingRates,
     customFaqs: rawConfig?.customFaqs,
@@ -452,6 +448,8 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         phone={config.phone}
         hiddenSections={hiddenSections}
         themeColor={themeColor}
+        customPages={safeParseCustomPages(config.customPages)}
+        footerSocialLinks={safeParseSocialLinks(rawConfig?.footerSocialLinks)}
       />
 
       {/* 6. Mobile Sticky Action Bar */}

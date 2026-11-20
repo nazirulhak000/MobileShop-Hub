@@ -2,6 +2,7 @@ import React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import {
   Store,
   Sparkles,
@@ -16,7 +17,10 @@ import {
   ShieldCheck,
   CalendarDays,
   Share2,
+  EyeOff,
 } from "lucide-react";
+import { db } from "@/lib/db";
+import { staffTokens, hashToken } from "@/lib/staff-auth";
 import { AnnouncementBar } from "@/components/landing/AnnouncementBar";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { LandingFooter } from "@/components/landing/LandingFooter";
@@ -30,8 +34,38 @@ import {
   THEME_PALETTES,
   safeParseCustomPages,
   safeParseNavMenu,
+  safeParseSocialLinks,
 } from "@/lib/storefrontTheme";
 import { resolveTenantBySlug } from "@/lib/storefrontTenant";
+import { buildSubpageMetadata } from "@/lib/storefrontMetadata";
+
+// Round 10: ISR edge caching and serverless runtime safety
+export const revalidate = 60; // 60s stale-while-revalidate edge CDN cache
+export const runtime = "nodejs"; // Prisma DB requires Node.js serverless runtime
+
+/**
+ * Checks whether the current request holds a valid staff session matching this tenant.
+ * Guarantees strict multi-tenant isolation: staff from Tenant A can never view drafts of Tenant B.
+ */
+async function isAuthorizedStaffForTenant(tenantId: string): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const token = staffTokens(cookieStore)[0];
+    if (!token) return false;
+    const session = await db.staffSession.findUnique({
+      where: { tokenHash: hashToken(token) },
+      select: { tenantId: true, expiresAt: true, revokedAt: true },
+    });
+    return Boolean(
+      session &&
+      !session.revokedAt &&
+      session.expiresAt > new Date() &&
+      session.tenantId === tenantId
+    );
+  } catch {
+    return false;
+  }
+}
 
 interface SubpageProps {
   params: Promise<{
@@ -43,38 +77,8 @@ interface SubpageProps {
 export async function generateMetadata({ params }: SubpageProps): Promise<Metadata> {
   const { shopSlug, pageSlug } = await params;
   const tenant = await resolveTenantBySlug(shopSlug);
-
-  if (!tenant) {
-    return {
-      title: "MobileShop-Hub | ไม่พบร้านค้า",
-    };
-  }
-
-  const normalizedPageSlug = decodeURIComponent(pageSlug).trim().toLowerCase();
-  const customPages = safeParseCustomPages(tenant.storefrontConfig?.customPages);
-  const page = customPages.find(
-    (p) => p.slug.toLowerCase() === normalizedPageSlug && p.published !== false
-  );
-
-  if (!page) {
-    return {
-      title: `ไม่พบหน้า | ${tenant.name}`,
-      description: `ไม่พบหน้าที่คุณต้องการในระบบร้านค้า ${tenant.name}`,
-    };
-  }
-
-  const title = `${page.title} | ${tenant.name}`;
-  const description =
-    page.metaDescription ||
-    page.subtitle ||
-    (page.content ? page.content.slice(0, 160) : "") ||
-    tenant.storefrontConfig?.subheadline ||
-    `${page.title} ศูนย์บริการ ${tenant.name}`;
-
-  return {
-    title,
-    description,
-  };
+  const isAuthorizedStaff = tenant ? await isAuthorizedStaffForTenant(tenant.id) : false;
+  return buildSubpageMetadata(tenant, shopSlug, pageSlug, isAuthorizedStaff);
 }
 
 export default async function TenantCustomSubpage({ params }: SubpageProps) {
@@ -114,12 +118,19 @@ export default async function TenantCustomSubpage({ params }: SubpageProps) {
   const fontConfig = FONT_FAMILY_CONFIG[config.fontFamily] || FONT_FAMILY_CONFIG.anuphan;
 
   // Safe parse navigation menu and custom pages
+  const isAuthorizedStaff = await isAuthorizedStaffForTenant(tenant.id);
   const parsedNavMenu = safeParseNavMenu(config.navigationMenu);
   const customPages = safeParseCustomPages(config.customPages);
 
-  const normalizedPageSlug = decodeURIComponent(pageSlug).trim().toLowerCase();
+  let normalizedPageSlug = "";
+  try {
+    normalizedPageSlug = decodeURIComponent(pageSlug).trim().toLowerCase();
+  } catch {
+    notFound();
+  }
+
   const customPage = customPages.find(
-    (p) => p.slug.toLowerCase() === normalizedPageSlug && p.published !== false
+    (p) => p.slug.toLowerCase() === normalizedPageSlug && (p.published !== false || isAuthorizedStaff)
   );
 
   // Dynamic selection color classes based on palette
@@ -138,11 +149,12 @@ export default async function TenantCustomSubpage({ params }: SubpageProps) {
 
   const mobilePadding = config.showMobileQuickBar ? "pb-20 sm:pb-0" : "";
 
-  // If subpage does not exist or is unpublished, invoke Next.js notFound() to emit true HTTP 404
+  // If subpage does not exist or is unpublished draft for unauthenticated / cross-tenant visitors, invoke Next.js notFound()
   if (!customPage) {
     notFound();
   }
 
+  const isDraft = customPage.published === false;
   const isBlankCanvas = customPage.template === "blank-canvas";
   const subpageSections = customPage.sections || [];
 
@@ -158,6 +170,14 @@ export default async function TenantCustomSubpage({ params }: SubpageProps) {
           rel="stylesheet"
           href={`https://fonts.googleapis.com/css2?family=${fontConfig.googleFont}&display=swap`}
         />
+
+        {/* Draft Notice for Staff Preview */}
+        {isDraft && (
+          <div className="bg-amber-500 text-slate-950 px-4 py-2.5 text-center text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-md">
+            <EyeOff className="w-4 h-4 shrink-0" />
+            <span>⚠️ โหมดพรีวิวหน้าฉบับร่าง (Draft Preview): หน้านี้ยังไม่ได้เผยแพร่สู่สาธารณะ เฉพาะทีมงานร้าน {shopName} เท่านั้นที่มองเห็น</span>
+          </div>
+        )}
 
         {/* Top Announcement Bar */}
         {config.announcementEnabled && config.announcementText && (
@@ -224,6 +244,14 @@ export default async function TenantCustomSubpage({ params }: SubpageProps) {
           enabled={config.announcementEnabled}
           themeColor={themeColor}
         />
+      )}
+
+      {/* Draft Notice for Staff Preview */}
+      {isDraft && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2.5 text-center text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-md">
+          <EyeOff className="w-4 h-4 shrink-0" />
+          <span>⚠️ โหมดพรีวิวหน้าฉบับร่าง (Draft Preview): หน้านี้ยังไม่ได้เผยแพร่สู่สาธารณะ เฉพาะทีมงานร้าน {shopName} เท่านั้นที่มองเห็น</span>
+        </div>
       )}
 
       {/* 2. Sticky Glassmorphism Header with Dynamic Navigation */}
@@ -404,6 +432,8 @@ export default async function TenantCustomSubpage({ params }: SubpageProps) {
         phone={config.phone}
         isSubpage={true}
         themeColor={themeColor}
+        customPages={customPages}
+        footerSocialLinks={safeParseSocialLinks(rawConfig?.footerSocialLinks)}
       />
 
       {/* 6. Mobile Sticky Action Bar */}

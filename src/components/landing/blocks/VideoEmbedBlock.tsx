@@ -19,7 +19,7 @@ import { VideoEmbedBlockProps } from "./types";
  * - https://www.youtube.com/shorts/dQw4w9WgXcQ
  */
 function extractYouTubeId(url: string): string | null {
-  if (!url) return null;
+  if (!url || typeof url !== "string") return null;
   const regExp =
     /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|\&v(?:i)?=))([^#\&\?]*).*/;
   const match = url.trim().match(regExp);
@@ -30,7 +30,7 @@ function extractYouTubeId(url: string): string | null {
  * Checks if a URL is an MP4 or web video file
  */
 function isDirectVideoUrl(url: string): boolean {
-  if (!url) return false;
+  if (!url || typeof url !== "string") return false;
   const cleanUrl = url.split("?")[0].toLowerCase();
   return (
     cleanUrl.endsWith(".mp4") ||
@@ -44,7 +44,7 @@ function isDirectVideoUrl(url: string): boolean {
  * Checks if a URL is a TikTok URL
  */
 function isTikTokUrl(url: string): boolean {
-  if (!url) return false;
+  if (!url || typeof url !== "string") return false;
   return url.includes("tiktok.com");
 }
 
@@ -65,9 +65,15 @@ export function VideoEmbedBlock({
     description ||
     data?.description ||
     "วิดีโอสาธิตการทำงานของทีมช่าง ตั้งแต่การตรวจเช็คอาการ เปลี่ยนอะไหล่แท้ จนถึงขั้นตอน QC ทดสอบก่อนส่งมอบ";
-  const resolvedUrl =
-    (videoUrl || data?.videoUrl || data?.url || "").trim() ||
-    "https://www.youtube.com/watch?v=dQw4w9WgXcQ"; // Fallback demo
+  const rawUrl =
+    typeof videoUrl === "string"
+      ? videoUrl
+      : typeof data?.videoUrl === "string"
+      ? data.videoUrl
+      : typeof data?.url === "string"
+      ? data.url
+      : "";
+  const resolvedUrl = rawUrl.trim() || "https://www.youtube.com/watch?v=dQw4w9WgXcQ"; // Fallback demo
   const resolvedPlatform = platform || videoType || data?.platform || data?.videoType || "auto";
 
   const palette = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
@@ -202,6 +208,7 @@ export function VideoEmbedBlock({
               src={videoDetails.embedUrl}
               title={resolvedTitle}
               allowFullScreen
+              sandbox="allow-scripts allow-popups allow-forms"
               className="w-full h-full border-0 rounded-2xl"
               loading="lazy"
             />

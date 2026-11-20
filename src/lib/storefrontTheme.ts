@@ -1,3 +1,5 @@
+import { sanitizeUrl, sanitizeCssClass, stripScriptTags } from "./storefrontSecurity";
+
 export type StorefrontThemeColor = "emerald" | "cyan" | "blue" | "purple" | "amber" | "rose";
 
 export interface ThemePalette {
@@ -280,9 +282,9 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     primary: "#f59e0b",
     gradient: "from-amber-400 via-yellow-300 to-orange-400",
     gradientText: "from-amber-400 via-yellow-300 to-orange-400",
-    button: "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20",
-    primaryButton: "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/20",
-    primaryButtonHover: "hover:bg-amber-500",
+    button: "bg-amber-700 hover:bg-amber-600 text-white shadow-amber-900/20",
+    primaryButton: "bg-amber-700 hover:bg-amber-600 text-white shadow-amber-900/20",
+    primaryButtonHover: "hover:bg-amber-600",
     badge: {
       bg: "bg-amber-950/80",
       text: "text-amber-300",
@@ -319,9 +321,9 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
     darkBorder: "border-amber-800",
     radarSweep: "via-amber-400",
     radarShadow: "#f59e0b",
-    activePill: "bg-amber-600 text-white border-amber-400 shadow-sm",
+    activePill: "bg-amber-700 text-white border-amber-500 shadow-sm",
     activeTile: "bg-amber-500 border-amber-300 text-slate-950 font-bold shadow-[0_0_8px_#f59e0b]",
-    navCta: "bg-amber-600 hover:bg-amber-700 text-white",
+    navCta: "bg-amber-700 hover:bg-amber-800 text-white",
     focusRing: "focus:ring-amber-600 focus:border-amber-600",
     focusVisibleRing: "focus-visible:ring-amber-600",
     lightAccentText: "text-amber-700",
@@ -736,9 +738,19 @@ export function safeParseSectionsOrder(raw: unknown): string[] {
     return [...DEFAULT_SECTIONS_ORDER];
   }
 
-  const list = parsed
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+  const seen = new Set<string>();
+  const list: string[] = [];
+
+  for (const item of parsed.slice(0, 50)) {
+    if (typeof item === "string") {
+      const clean = item.trim().slice(0, 100);
+      const lower = clean.toLowerCase();
+      if (clean && !seen.has(lower)) {
+        seen.add(lower);
+        list.push(clean);
+      }
+    }
+  }
 
   return list.length > 0 ? list : [...DEFAULT_SECTIONS_ORDER];
 }
@@ -748,22 +760,30 @@ export function safeParseCustomSections(raw: unknown): CustomBlock[] {
   if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
   return parsed
+    .slice(0, 50)
     .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
     .map((item, idx) => {
-      const id = String(item.id || `block-${idx + 1}-${Date.now()}`);
-      const type = String(item.type || "promo_banner").toLowerCase();
+      const id = String(item.id || `block-${idx + 1}-${Date.now()}`).slice(0, 100);
+      const type = String(item.type || "promo_banner").toLowerCase().slice(0, 50);
 
       let images: Array<string | { url: string; caption?: string }> | undefined;
       if (Array.isArray(item.images)) {
         images = item.images
+          .slice(0, 30)
           .filter(Boolean)
           .map((img: any) => {
-            if (typeof img === "string") return img.trim();
+            if (typeof img === "string") {
+              const safe = sanitizeUrl(img);
+              return safe || null;
+            }
             if (typeof img === "object" && img.url) {
-              return {
-                url: String(img.url).trim(),
-                caption: img.caption ? String(img.caption).trim() : undefined,
-              };
+              const safe = sanitizeUrl(img.url);
+              return safe
+                ? {
+                    url: safe,
+                    caption: img.caption ? String(img.caption).trim().slice(0, 200) : undefined,
+                  }
+                : null;
             }
             return null;
           })
@@ -773,11 +793,12 @@ export function safeParseCustomSections(raw: unknown): CustomBlock[] {
       let hours: Array<{ day: string; open: string; close: string; isClosed?: boolean }> | undefined;
       if (Array.isArray(item.hours)) {
         hours = item.hours
+          .slice(0, 7)
           .filter((h: any) => Boolean(h && typeof h === "object"))
           .map((h: any) => ({
-            day: String(h.day || ""),
-            open: String(h.open || "09:00"),
-            close: String(h.close || "19:00"),
+            day: String(h.day || "").slice(0, 50),
+            open: String(h.open || "09:00").slice(0, 10),
+            close: String(h.close || "19:00").slice(0, 10),
             isClosed: Boolean(h.isClosed),
           }));
       }
@@ -791,15 +812,16 @@ export function safeParseCustomSections(raw: unknown): CustomBlock[] {
         content: item.content ? String(item.content).slice(0, 50000) : undefined,
         badge: item.badge ? String(item.badge).slice(0, 100) : undefined,
         buttonText: item.buttonText ? String(item.buttonText).slice(0, 100) : undefined,
-        buttonUrl: item.buttonUrl ? String(item.buttonUrl).slice(0, 1000) : undefined,
-        imageUrl: item.imageUrl ? String(item.imageUrl).slice(0, 2000) : undefined,
+        buttonUrl: item.buttonUrl ? sanitizeUrl(item.buttonUrl).slice(0, 1000) : undefined,
+        imageUrl: item.imageUrl ? sanitizeUrl(item.imageUrl).slice(0, 2000) : undefined,
         images,
-        videoUrl: item.videoUrl ? String(item.videoUrl).slice(0, 1000) : undefined,
+        videoUrl: item.videoUrl ? sanitizeUrl(item.videoUrl).slice(0, 1000) : undefined,
         videoType: item.videoType ? String(item.videoType).slice(0, 50) : undefined,
-        html: item.html ? String(item.html).slice(0, 50000) : undefined,
+        html: item.html ? stripScriptTags(String(item.html)).slice(0, 50000) : undefined,
         columns: typeof item.columns === "number" ? Math.max(1, Math.min(6, item.columns)) : undefined,
         align: ["left", "center", "right"].includes(item.align) ? item.align : undefined,
         hours,
+        customCssClass: item.customCssClass ? sanitizeCssClass(item.customCssClass) : undefined,
         enabled: item.enabled !== undefined ? Boolean(item.enabled) : true,
         order: typeof item.order === "number" ? item.order : idx,
       };
@@ -811,18 +833,22 @@ export function safeParseCustomPages(raw: unknown): CustomPage[] {
   if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
   return parsed
+    .slice(0, 50)
     .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
     .map((item, idx) => {
-      const rawSlug = String(item.slug || `page-${idx + 1}`)
+      const cleanRawSlug = String(item.slug || `page-${idx + 1}`)
+        .normalize("NFKC")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, "-")
         .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "");
-      const slug = rawSlug || `page-${idx + 1}`;
+        .replace(/^-|-$/g, "")
+        .slice(0, 100);
+      const slug = cleanRawSlug || `page-${idx + 1}`;
 
       return {
-        id: String(item.id || `custom-page-${idx + 1}`),
+        id: String(item.id || `custom-page-${idx + 1}`).slice(0, 100),
         slug,
         title: String(item.title || "หน้าใหม่").slice(0, 200),
         subtitle: item.subtitle ? String(item.subtitle).slice(0, 500) : undefined,
@@ -831,7 +857,7 @@ export function safeParseCustomPages(raw: unknown): CustomPage[] {
         metaDescription: item.metaDescription ? String(item.metaDescription).slice(0, 300) : undefined,
         published: item.published !== undefined ? Boolean(item.published) : true,
         template: item.template === "blank-canvas" ? "blank-canvas" : "default",
-        updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
+        updatedAt: item.updatedAt ? String(item.updatedAt).slice(0, 50) : undefined,
       };
     });
 }
@@ -843,11 +869,12 @@ export function safeParseNavMenu(raw: unknown): NavigationMenuItem[] {
   }
 
   const items = parsed
+    .slice(0, 30)
     .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
     .map((item, idx) => ({
-      id: String(item.id || `nav-${idx + 1}`),
+      id: String(item.id || `nav-${idx + 1}`).slice(0, 50),
       label: String(item.label || item.title || "เมนู").slice(0, 100),
-      href: String(item.href || item.url || "#").slice(0, 500),
+      href: sanitizeUrl(item.href || item.url || "#", "#").slice(0, 500),
       isExternal: Boolean(item.isExternal),
       icon: item.icon ? String(item.icon).slice(0, 50) : undefined,
     }))

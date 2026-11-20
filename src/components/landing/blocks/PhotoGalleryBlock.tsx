@@ -11,6 +11,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { sanitizeUrl } from "@/lib/storefrontSecurity";
 import { PhotoGalleryBlockProps, GalleryImageItem } from "./types";
 
 const DEFAULT_GALLERY_IMAGES: GalleryImageItem[] = [
@@ -60,7 +61,8 @@ export function PhotoGalleryBlock({
     subtitle ||
     data?.subtitle ||
     "ชมผลงานการซ่อมจริง เครื่องมือมาตรฐานระดับสูง และบรรยากาศความพร้อมของศูนย์บริการ";
-  const resolvedColumns = Number(columns || data?.columns || 3) as 2 | 3 | 4;
+  const rawCol = Number(columns ?? data?.columns);
+  const resolvedColumns: 2 | 3 | 4 = rawCol === 2 || rawCol === 4 ? rawCol : 3;
 
   const rawImages = images || data?.images;
   const imageList: GalleryImageItem[] = React.useMemo(() => {
@@ -70,19 +72,18 @@ export function PhotoGalleryBlock({
     return rawImages
       .filter((item): item is string | GalleryImageItem => Boolean(item))
       .map((item, idx) => {
+        const fallbackUrl = DEFAULT_GALLERY_IMAGES[idx % DEFAULT_GALLERY_IMAGES.length].url;
         if (typeof item === "string") {
           return {
             id: `img-${idx}`,
-            url: item,
+            url: sanitizeUrl(item, fallbackUrl),
             caption: `ภาพผลงานที่ ${idx + 1}`,
             alt: `ภาพผลงานที่ ${idx + 1}`,
           };
         }
         return {
           id: (item as any).id || `img-${idx}`,
-          url:
-            (item as any).url ||
-            DEFAULT_GALLERY_IMAGES[idx % DEFAULT_GALLERY_IMAGES.length].url,
+          url: sanitizeUrl((item as any).url, fallbackUrl),
           caption: (item as any).caption || `ภาพผลงานที่ ${idx + 1}`,
           alt: (item as any).alt || (item as any).caption || `ภาพผลงานที่ ${idx + 1}`,
         };

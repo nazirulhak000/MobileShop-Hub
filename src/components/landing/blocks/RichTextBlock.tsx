@@ -10,13 +10,14 @@ import {
   UserCheck,
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { sanitizeUrl } from "@/lib/storefrontSecurity";
 import { RichTextBlockProps } from "./types";
 
 /**
  * Lightweight, safe parser for markdown-like text to formatted HTML elements
  */
 function renderMarkdownContent(content: string, themeColor: StorefrontThemeColor) {
-  if (!content) return null;
+  if (!content || typeof content !== "string") return null;
 
   const lines = content.split("\n");
   const elements: React.ReactNode[] = [];
@@ -192,7 +193,8 @@ export function RichTextBlock({
   const resolvedContent = content || data?.content || DEFAULT_RICH_TEXT;
   const resolvedAuthor = author || data?.author;
   const resolvedAuthorRole = authorRole || data?.authorRole;
-  const resolvedAuthorAvatar = authorAvatar || data?.authorAvatar;
+  const rawAuthorAvatar = authorAvatar || data?.authorAvatar;
+  const resolvedAuthorAvatar = rawAuthorAvatar ? sanitizeUrl(rawAuthorAvatar) : undefined;
   const resolvedBadge = badge || data?.badge || "มาตรฐานและการรับรอง";
   const resolvedAlign = align || data?.align || "left";
 

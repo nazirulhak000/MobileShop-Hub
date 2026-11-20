@@ -150,7 +150,7 @@ describe("Storefront Custom Blocks & DynamicBlockRenderer", () => {
     );
 
     assert.ok(html.includes("https://www.google.com/maps/embed?pb=!123"));
-    assert.ok(html.includes("sandbox=\"allow-scripts allow-same-origin allow-popups allow-forms\""));
+    assert.ok(html.includes("sandbox=\"allow-scripts allow-popups allow-forms\""));
     assert.ok(html.includes("500px"));
   });
 

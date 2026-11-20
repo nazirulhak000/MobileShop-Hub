@@ -8,21 +8,51 @@ export type ResolvedTenant = NonNullable<
 /**
  * Resolves a tenant by slug (case-insensitively, trimmed).
  * Handles:
- * - URL decoding (e.g. %20mobileshop%20)
+ * - Safe URL decoding with try/catch against URIError
+ * - Unicode NFKC normalization and zero-width/control character stripping (preventing spoofing)
  * - Leading and trailing whitespace trimming
+ * - Path traversal characters rejection (/ \ .. null-byte)
  * - Case insensitivity (e.g. MobileShop, MOBILESHOP, mobileshop)
- * - Defensive fallback query via LOWER(TRIM(slug)) for SQLite collation compatibility
+ * - Parameterized query fallback via LOWER(TRIM(slug)) for SQLite collation compatibility
  */
 export async function resolveTenantBySlug(rawSlug: string | null | undefined) {
-  if (!rawSlug) return null;
-  const decoded = decodeURIComponent(String(rawSlug)).trim();
-  if (!decoded) return null;
-  const normalized = decoded.toLowerCase();
+  if (!rawSlug || typeof rawSlug !== "string") return null;
 
-  // Fast-path: Query matching normalized lowercase or decoded input
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawSlug).trim();
+  } catch {
+    // Malformed URI encoding (e.g. %E0%A4%A)
+    return null;
+  }
+
+  if (!decoded) return null;
+
+  // Path traversal and null byte prevention
+  if (
+    decoded.includes("/") ||
+    decoded.includes("\\") ||
+    decoded.includes("..") ||
+    decoded.includes("\0")
+  ) {
+    return null;
+  }
+
+  // Unicode NFKC normalization and zero-width / control character stripping
+  const sanitized = decoded
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF\u0000-\u001F\u007F-\u009F]/g, "")
+    .trim()
+    .slice(0, 100);
+
+  if (!sanitized) return null;
+
+  const normalized = sanitized.toLowerCase();
+
+  // Fast-path: Query matching normalized lowercase or sanitized input
   const tenant = await prisma.tenant.findFirst({
     where: {
-      OR: [{ slug: normalized }, { slug: decoded }],
+      OR: [{ slug: normalized }, { slug: sanitized }],
       status: { in: ["ACTIVE", "TRIAL"] },
     },
     include: {
@@ -37,10 +67,9 @@ export async function resolveTenantBySlug(rawSlug: string | null | undefined) {
 
   // Fallback case-insensitive check with LOWER(TRIM(slug)) for SQLite collation compatibility
   try {
-    const rawMatches = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-      `SELECT id FROM Tenant WHERE LOWER(TRIM(slug)) = ? AND status IN ('ACTIVE', 'TRIAL') LIMIT 1`,
-      normalized
-    );
+    const rawMatches = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM Tenant WHERE LOWER(TRIM(slug)) = ${normalized} AND status IN ('ACTIVE', 'TRIAL') LIMIT 1
+    `;
 
     if (rawMatches && rawMatches.length > 0 && rawMatches[0]?.id) {
       return await prisma.tenant.findUnique({

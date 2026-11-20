@@ -11,7 +11,9 @@ import {
   HeroLayoutType,
   ALLOWED_FONT_FAMILIES,
   ALLOWED_HERO_LAYOUTS,
+  safeParseCustomPages,
 } from "@/lib/storefrontTheme";
+import { validateJsonPayloadBoundary } from "@/lib/storefrontSecurity";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +151,33 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Verify whether requester is authenticated staff for this tenant
+    const cookieStore = await cookies();
+    const token = staffTokens(cookieStore)[0];
+    let isAuthorizedStaff = false;
+    if (token) {
+      const session = await db.staffSession.findUnique({
+        where: { tokenHash: hashToken(token) },
+        select: { tenantId: true, expiresAt: true, revokedAt: true },
+      });
+      if (
+        session &&
+        !session.revokedAt &&
+        session.expiresAt > new Date() &&
+        session.tenantId === tenant.id
+      ) {
+        isAuthorizedStaff = true;
+      }
+    }
+
+    // Filter out draft custom pages for public/unauthenticated requests or cross-tenant requests
+    let sanitizedCustomPages = config.customPages;
+    if (!isAuthorizedStaff && config.customPages) {
+      const pages = safeParseCustomPages(config.customPages);
+      const publicPages = pages.filter((p) => p.published !== false);
+      sanitizedCustomPages = JSON.stringify(publicPages);
+    }
+
     // Return sanitized public storefront config
     const sanitizedConfig = {
       themeColor: config.themeColor,
@@ -175,7 +204,7 @@ export async function GET(req: NextRequest) {
       showMobileQuickBar: config.showMobileQuickBar,
       sectionsOrder: config.sectionsOrder,
       customSections: config.customSections,
-      customPages: config.customPages,
+      customPages: sanitizedCustomPages,
       navigationMenu: config.navigationMenu,
       footerSocialLinks: config.footerSocialLinks,
       customBeforeAfterCases: config.customBeforeAfterCases,
@@ -202,6 +231,14 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     checkOrigin(req);
+    const contentLength = req.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > 2 * 1024 * 1024) {
+      return NextResponse.json(
+        { success: false, error: "ขนาดข้อมูลคำขอใหญ่เกินขีดจำกัด (สูงสุด 2MB)" },
+        { status: 413 }
+      );
+    }
+
     const actor = await requireStaffSession(req);
     if (!["ADMIN", "MANAGER"].includes(actor.role)) {
       return NextResponse.json(
@@ -318,15 +355,38 @@ export async function PUT(req: NextRequest) {
     if (body.showFaqSection !== undefined) updateData.showFaqSection = Boolean(body.showFaqSection);
     if (body.showMobileQuickBar !== undefined) updateData.showMobileQuickBar = Boolean(body.showMobileQuickBar);
 
-    // 5. Custom JSON strings (capped at safe byte bounds)
-    if (body.customBeforeAfterCases !== undefined) updateData.customBeforeAfterCases = stringifyIfNeeded(body.customBeforeAfterCases)?.slice(0, 200000) ?? null;
-    if (body.customPricingRates !== undefined) updateData.customPricingRates = stringifyIfNeeded(body.customPricingRates)?.slice(0, 200000) ?? null;
-    if (body.customFaqs !== undefined) updateData.customFaqs = stringifyIfNeeded(body.customFaqs)?.slice(0, 200000) ?? null;
-    if (body.sectionsOrder !== undefined) updateData.sectionsOrder = stringifyIfNeeded(body.sectionsOrder)?.slice(0, 100000) ?? null;
-    if (body.customSections !== undefined) updateData.customSections = stringifyIfNeeded(body.customSections)?.slice(0, 500000) ?? null;
-    if (body.customPages !== undefined) updateData.customPages = stringifyIfNeeded(body.customPages)?.slice(0, 500000) ?? null;
-    if (body.navigationMenu !== undefined) updateData.navigationMenu = stringifyIfNeeded(body.navigationMenu)?.slice(0, 100000) ?? null;
-    if (body.footerSocialLinks !== undefined) updateData.footerSocialLinks = stringifyIfNeeded(body.footerSocialLinks)?.slice(0, 50000) ?? null;
+    // 5. Custom JSON strings (bounded safely at 500KB without naive slicing corruption)
+    try {
+      if (body.customBeforeAfterCases !== undefined) {
+        updateData.customBeforeAfterCases = validateJsonPayloadBoundary(body.customBeforeAfterCases, "customBeforeAfterCases", 200000);
+      }
+      if (body.customPricingRates !== undefined) {
+        updateData.customPricingRates = validateJsonPayloadBoundary(body.customPricingRates, "customPricingRates", 200000);
+      }
+      if (body.customFaqs !== undefined) {
+        updateData.customFaqs = validateJsonPayloadBoundary(body.customFaqs, "customFaqs", 200000);
+      }
+      if (body.sectionsOrder !== undefined) {
+        updateData.sectionsOrder = validateJsonPayloadBoundary(body.sectionsOrder, "sectionsOrder", 100000);
+      }
+      if (body.customSections !== undefined) {
+        updateData.customSections = validateJsonPayloadBoundary(body.customSections, "customSections", 512000);
+      }
+      if (body.customPages !== undefined) {
+        updateData.customPages = validateJsonPayloadBoundary(body.customPages, "customPages", 512000);
+      }
+      if (body.navigationMenu !== undefined) {
+        updateData.navigationMenu = validateJsonPayloadBoundary(body.navigationMenu, "navigationMenu", 100000);
+      }
+      if (body.footerSocialLinks !== undefined) {
+        updateData.footerSocialLinks = validateJsonPayloadBoundary(body.footerSocialLinks, "footerSocialLinks", 50000);
+      }
+    } catch (err: any) {
+      return NextResponse.json(
+        { success: false, error: err.message || "ขนาดข้อมูลเกินขีดจำกัดความปลอดภัย" },
+        { status: 400 }
+      );
+    }
 
     // Atomically upsert config for authorized tenant
     const config = await db.storefrontConfig.upsert({
@@ -386,6 +446,7 @@ export async function PUT(req: NextRequest) {
     if (updatedTenant?.slug) {
       try {
         revalidatePath(`/store/${updatedTenant.slug}`);
+        revalidatePath(`/store/${updatedTenant.slug}`, "layout");
         revalidatePath(`/store/${updatedTenant.slug}/[pageSlug]`, "page");
       } catch (err) {
         console.warn("revalidatePath error in storefront config PUT:", err);
