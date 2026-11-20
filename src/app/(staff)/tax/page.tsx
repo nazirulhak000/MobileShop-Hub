@@ -40,7 +40,8 @@ const daysUntil = (y: number, m: number, d: number) => {
 };
 
 type Summary = { totals: { salesRevenue: number; repairRevenue: number; netProfit: number; vatOutput: number } };
-type Vat = { outputVat: number; salesBase: number; netVatPayable: number };
+type Vat = { outputVat: number; inputVat: number; salesBase: number; netVatPayable: number; excessCredit: number };
+type Wht = { summary: { totalWht: number; totalBase: number; totalCount: number; pnd3Count: number; pnd53Count: number } };
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -59,6 +60,7 @@ export default function TaxOverviewPage() {
   const [ytd, setYtd] = useState<Summary | null>(null);
   const [vatPrev, setVatPrev] = useState<Vat | null>(null);
   const [vatNow, setVatNow] = useState<Vat | null>(null);
+  const [whtData, setWhtData] = useState<Wht | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,12 +70,18 @@ export default function TaxOverviewPage() {
       setLoading(true);
       setError(null);
       try {
-        const [s, vp, vn] = await Promise.all([
+        const [s, vp, vn, w] = await Promise.all([
           getJson<Summary>(`/api/reports/summary?from=${today.y}-01&to=${thisMonth}`),
           getJson<Vat>(`/api/tax/vat?month=${prevMonth}`),
           getJson<Vat>(`/api/tax/vat?month=${thisMonth}`),
+          getJson<Wht>(`/api/tax/wht?month=${prevMonth}`).catch(() => null),
         ]);
-        if (!cancelled) { setYtd(s); setVatPrev(vp); setVatNow(vn); }
+        if (!cancelled) {
+          setYtd(s);
+          setVatPrev(vp);
+          setVatNow(vn);
+          if (w) setWhtData(w);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ");
       } finally {
@@ -110,7 +118,7 @@ export default function TaxOverviewPage() {
       frequency: "รายเดือน",
       status: statusOf(whtDue),
       actionUrl: "/tax/wht",
-      description: `หัก ณ ที่จ่ายของเดือน ${THAI_MONTHS_SHORT[prev.m - 1]} ${prev.y + 543} (ระบบยังไม่บันทึกรายการ WHT)`,
+      description: `หัก ณ ที่จ่ายของเดือน ${THAI_MONTHS_SHORT[prev.m - 1]} ${prev.y + 543} ยื่นแบบนำส่งภายในวันที่ 15`,
     },
     {
       title: `ภ.ง.ด.94 (ภาษีเงินได้ครึ่งปี ${today.y + 543})`,
@@ -182,11 +190,13 @@ export default function TaxOverviewPage() {
         <Card className="hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">ภ.พ.30 เดือน {THAI_MONTHS_SHORT[prev.m - 1]} (ภาษีขาย)</span>
+              <span className="text-xs font-semibold text-slate-500">ภ.พ.30 เดือน {THAI_MONTHS_SHORT[prev.m - 1]} (ภาษีสุทธิ)</span>
               <Receipt className="h-4 w-4 text-emerald-600" />
             </div>
             <div className="mt-2 text-2xl font-bold text-emerald-700">{show(vatPrev?.netVatPayable)}</div>
-            <div className="mt-1 text-[11px] text-slate-400">ยังไม่หักภาษีซื้อ (ระบบไม่ได้บันทึก)</div>
+            <div className="mt-1 text-[11px] text-slate-400">
+              ภาษีขาย {show(vatPrev?.outputVat)} - ภาษีซื้อ {show(vatPrev?.inputVat)}
+            </div>
           </CardContent>
         </Card>
 
@@ -207,8 +217,10 @@ export default function TaxOverviewPage() {
               <span className="text-xs font-semibold text-slate-500">ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.3/53)</span>
               <Percent className="h-4 w-4 text-purple-600" />
             </div>
-            <div className="mt-2 text-base font-bold text-slate-400">ไม่ได้บันทึกในระบบ</div>
-            <div className="mt-1 text-[11px] text-slate-400">ใช้เครื่องคิดเลข WHT และเก็บสำเนา 50 ทวิ เอง</div>
+            <div className="mt-2 text-2xl font-bold text-purple-700">{show(whtData?.summary?.totalWht ?? 0)}</div>
+            <div className="mt-1 text-[11px] text-slate-400">
+              {whtData?.summary?.totalCount ?? 0} ฉบับ (ฐานเงินได้ {show(whtData?.summary?.totalBase ?? 0)})
+            </div>
           </CardContent>
         </Card>
       </div>

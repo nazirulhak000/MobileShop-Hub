@@ -58,9 +58,11 @@ export default function CorporateIncomeTaxPage() {
     }
   };
 
+  const qualifiesForSme = paidCapital <= 5000000 && revenue <= 30000000;
+
   const citResult = useMemo(() => {
-    return calculateCIT(revenue, expenses, isSme);
-  }, [revenue, expenses, isSme]);
+    return calculateCIT(revenue, expenses, isSme && qualifiesForSme);
+  }, [revenue, expenses, isSme, qualifiesForSme]);
 
   return (
     <div className="space-y-6 w-full pb-12">
@@ -180,24 +182,52 @@ export default function CorporateIncomeTaxPage() {
                 </span>
               </div>
 
-              {/* SME Toggle */}
+              {/* Capital & SME Toggle */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                  ทุนจดทะเบียนที่ชำระแล้ว (Paid-up Capital)
+                </label>
+                <Input
+                  type="number"
+                  value={paidCapital}
+                  onChange={(e) => setPaidCapital(Math.max(0, parseFloat(e.target.value) || 0))}
+                  className="font-mono text-xs"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  เกณฑ์ SME: ทุนชำระแล้ว ณ วันสิ้นรอบบัญชีต้องไม่เกิน 5,000,000 บาท
+                </span>
+              </div>
+
               <div className="pt-2 border-t border-slate-100">
-                <label className="flex items-center justify-between cursor-pointer p-2 rounded-lg border border-slate-200 bg-slate-50">
+                <label className="flex items-center justify-between cursor-pointer p-2.5 rounded-lg border border-slate-200 bg-slate-50">
                   <div>
-                    <span className="font-bold text-xs text-slate-900 block">
-                      ใช้อัตราภาษีผู้ประกอบการ SME (0% / 15% / 20%)
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs text-slate-900 block">
+                        ใช้อัตราภาษีผู้ประกอบการ SME (0% / 15% / 20%)
+                      </span>
+                      {qualifiesForSme ? (
+                        <Badge variant="success" className="text-[9px] py-0">เข้าเกณฑ์ SME</Badge>
+                      ) : (
+                        <Badge variant="danger" className="text-[9px] py-0">เกินเกณฑ์ SME</Badge>
+                      )}
+                    </div>
                     <span className="text-[10px] text-slate-500">
-                      ทุนชำระแล้ว &le; 5M และรายได้ &le; 30M
+                      ทุนชำระแล้ว &le; 5M (ปัจจุบัน: {formatTHB(paidCapital)}) และรายได้ &le; 30M (ปัจจุบัน: {formatTHB(revenue)})
                     </span>
                   </div>
                   <input
                     type="checkbox"
-                    checked={isSme}
+                    checked={isSme && qualifiesForSme}
                     onChange={(e) => setIsSme(e.target.checked)}
+                    disabled={!qualifiesForSme}
                     className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
                   />
                 </label>
+                {!qualifiesForSme && (
+                  <p className="mt-1 text-[11px] text-rose-600">
+                    * ไม่เข้าเงื่อนไข SME (รายได้เกิน 30 ล้าน หรือทุนเกิน 5 ล้าน) ระบบจะคิดอัตราภาษีมาตรฐาน 20%
+                  </p>
+                )}
               </div>
 
               {/* Profit Summary */}

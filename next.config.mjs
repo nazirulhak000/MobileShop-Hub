@@ -17,6 +17,14 @@ const nextConfig = {
   devIndicators: false,
   poweredByHeader: false,
   distDir: process.env.PORTAL_E2E === "true" ? ".local/next-e2e" : ".next",
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "./D:/Winona/Programmer/FixMe/node_modules/next/dist/client/next.js": "next/dist/client/next.js",
+      "./D:/Winona/Programmer/FixMe/node_modules/next/dist/client/app-next.js": "next/dist/client/app-next.js",
+    };
+    return config;
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

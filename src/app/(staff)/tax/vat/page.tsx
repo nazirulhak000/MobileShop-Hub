@@ -2,7 +2,21 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Printer, AlertCircle, ArrowDownRight, ArrowUpRight, Loader2, RefreshCw, Building2 } from "lucide-react";
+import {
+  ChevronRight,
+  Printer,
+  AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Loader2,
+  RefreshCw,
+  Building2,
+  Clock,
+  CheckCircle2,
+  Receipt,
+  ShoppingCart,
+  FileSpreadsheet,
+} from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -12,15 +26,42 @@ import { formatTHB } from "@/lib/tax";
 
 type VatData = {
   month: string;
+  branchId: string | null;
   salesCount: number;
   voidCount: number;
   grossSales: number;
   salesBase: number;
   outputVat: number;
+  purchasesCount: number;
+  grossPurchases: number;
+  purchasesBase: number;
   inputVat: number;
-  inputVatSource: "not-tracked";
+  inputVatSource: "purchase_orders";
   netVatPayable: number;
-  documents: { id: string; invoiceNo: string; date: string; customerName: string; branchCode: string; base: number; vat: number; total: number }[];
+  excessCredit: number;
+  filingDeadline: string;
+  filingStatus: "PENDING_FILING" | "DUE_SOON" | "OVERDUE";
+  daysRemaining: number;
+  documents: {
+    id: string;
+    invoiceNo: string;
+    date: string;
+    customerName: string;
+    branchCode: string;
+    base: number;
+    vat: number;
+    total: number;
+  }[];
+  purchaseDocuments: {
+    id: string;
+    poNumber: string;
+    date: string;
+    supplierName: string;
+    branchCode: string;
+    base: number;
+    vat: number;
+    total: number;
+  }[];
   documentsTruncated: boolean;
 };
 
@@ -44,14 +85,11 @@ export default function VatFilingPage() {
   // Default: previous month (the one being filed by the 23rd of this month)
   const [selectedMonth, setSelectedMonth] = useState(() => shiftMonth(bkkMonth(), -1));
   const [branch, setBranch] = useState("ALL");
-  const [customInputVat, setCustomInputVat] = useState("");
+  const [additionalInputVat, setAdditionalInputVat] = useState("");
+  const [activeTab, setActiveTab] = useState<"OUTPUT" | "INPUT">("OUTPUT");
   const [data, setData] = useState<VatData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const parsedInputVat = Math.max(0, parseFloat(customInputVat) || 0);
-  const netPayable = data ? Math.max(0, data.outputVat - parsedInputVat) : 0;
-  const taxCredit = data && parsedInputVat > data.outputVat ? parsedInputVat - data.outputVat : 0;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,7 +109,14 @@ export default function VatFilingPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const dueLabel = `ยื่นภายใน 23 ${monthName(shiftMonth(selectedMonth, 1))}`;
+  // Combined Input VAT (POs + optional manual/paper invoices)
+  const parsedManualInput = Math.max(0, parseFloat(additionalInputVat) || 0);
+  const totalInputVat = data ? Math.round((data.inputVat + parsedManualInput) * 100) / 100 : 0;
+  const netDiff = data ? Math.round((data.outputVat - totalInputVat) * 100) / 100 : 0;
+  const netPayable = netDiff > 0 ? netDiff : 0;
+  const taxCredit = netDiff < 0 ? Math.abs(netDiff) : 0;
+
+  const dueLabel = `ยื่น e-Filing ภายใน 23 ${monthName(shiftMonth(selectedMonth, 1))}`;
 
   return (
     <div className="space-y-6 w-full pb-12">
@@ -87,7 +132,9 @@ export default function VatFilingPage() {
             <span>สรุปภาษีมูลค่าเพิ่ม (ภ.พ.30)</span>
             <span className="rounded bg-emerald-100 text-emerald-800 font-mono text-xs px-2 py-0.5 font-bold">VAT 7%</span>
           </h1>
-          <p className="text-sm text-slate-500">สรุปภาษีขายจากบิล POS ที่สำเร็จในเดือนที่เลือก นำส่งกรมสรรพากรภายในวันที่ 23 ของเดือนถัดไป</p>
+          <p className="text-sm text-slate-500">
+            คำนวณภาษีขาย (Output Tax) ปะทะ ภาษีซื้อ (Input Tax จากใบสั่งซื้อ/รับสินค้า POs) พร้อมตรวจสอบยอดสุทธิและกำหนดส่งแบบ
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -112,18 +159,38 @@ export default function VatFilingPage() {
           </div>
           <Button size="sm" onClick={() => window.print()} className="bg-slate-900 hover:bg-slate-800 text-white text-xs gap-1.5">
             <Printer className="h-4 w-4" />
-            <span>พิมพ์สรุป</span>
+            <span>พิมพ์สรุป ภ.พ.30</span>
           </Button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2">
-        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-        <span>
-          ระบบยังไม่ได้บันทึกภาษีซื้อ (Input VAT) จากใบกำกับภาษีของผู้ขาย ภาษีซื้อจึงแสดงเป็น 0 และยอดชำระสุทธิด้านล่างคือภาษีขายทั้งหมด
-          กรุณานำภาษีซื้อจากใบกำกับภาษีจริงมาหักเองก่อนยื่น ภ.พ.30 และตรวจสอบกับนักบัญชี
-        </span>
-      </div>
+      {/* Filing Schedule & Status Banner */}
+      {data && (
+        <div className={`rounded-xl border p-3.5 text-xs flex items-center justify-between gap-3 ${
+          data.filingStatus === "OVERDUE"
+            ? "border-rose-300 bg-rose-50 text-rose-900"
+            : data.filingStatus === "DUE_SOON"
+            ? "border-amber-300 bg-amber-50 text-amber-900"
+            : "border-blue-200 bg-blue-50/70 text-blue-900"
+        }`}>
+          <div className="flex items-center gap-2.5">
+            <Clock className="h-4 w-4 shrink-0" />
+            <div>
+              <span className="font-bold">กำหนดเวลา e-Filing สรรพากร: </span>
+              <span>{dueLabel} ({data.filingDeadline})</span>
+            </div>
+          </div>
+          <div>
+            {data.filingStatus === "OVERDUE" ? (
+              <Badge variant="danger" className="text-[10px]">เลยกำหนดส่งแบบ ({Math.abs(data.daysRemaining)} วัน)</Badge>
+            ) : data.filingStatus === "DUE_SOON" ? (
+              <Badge variant="warning" className="text-[10px] animate-pulse">ใกล้ครบกำหนด (เหลือ {data.daysRemaining} วัน)</Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] border-blue-400 text-blue-700">รอบปกติ (เหลือ {data.daysRemaining} วัน)</Badge>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -131,112 +198,181 @@ export default function VatFilingPage() {
           <Button variant="outline" size="sm" onClick={() => void load()} className="gap-1.5"><RefreshCw className="h-3.5 w-3.5" />ลองใหม่</Button>
         </div>
       )}
-      {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />กำลังโหลดข้อมูล...</div>}
+      {loading && <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />กำลังคำนวณภาษี...</div>}
 
       {data && (
         <>
+          {/* 3 Core Tax Cards: Output Tax, Input Tax, Net Tax Payable / Tax Credit */}
           <div className={`grid grid-cols-1 sm:grid-cols-3 gap-4 ${loading ? "opacity-60" : ""}`}>
+            {/* Card 1: Output Tax */}
             <Card>
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-500">1. ภาษีขาย (Output VAT)</span>
                   <span className="rounded-full bg-emerald-100 p-1 text-emerald-700"><ArrowUpRight className="h-4 w-4" /></span>
                 </div>
-                <div className="text-2xl font-bold font-mono text-slate-900">{formatTHB(data.outputVat)}</div>
+                <div className="text-2xl font-bold font-mono text-emerald-700">{formatTHB(data.outputVat)}</div>
                 <div className="text-[11px] text-slate-500">
-                  มูลค่าขายก่อน VAT: <span className="font-mono font-semibold">{formatTHB(data.salesBase)}</span> · {data.salesCount} บิล
+                  ฐานภาษีขาย: <span className="font-mono font-semibold">{formatTHB(data.salesBase)}</span> · {data.salesCount} บิล
                   {data.voidCount > 0 && <> · ไม่รวมบิลยกเลิก {data.voidCount} ใบ</>}
                 </div>
               </CardContent>
             </Card>
+
+            {/* Card 2: Input Tax (from POs + manual) */}
             <Card>
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500">2. ภาษีซื้อ (Input VAT)</span>
+                  <span className="text-xs font-semibold text-slate-500">2. ภาษีซื้อรวม (Input VAT)</span>
                   <span className="rounded-full bg-blue-100 p-1 text-blue-700"><ArrowDownRight className="h-4 w-4" /></span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={customInputVat}
-                    onChange={(e) => setCustomInputVat(e.target.value)}
-                    className="h-8 text-base font-mono font-bold text-blue-700 bg-white"
-                  />
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {parsedInputVat > 0 ? (
-                    <span className="text-blue-700 font-medium">นำภาษีซื้อจากใบกำกับภาษีจริงมาหัก: {formatTHB(parsedInputVat)}</span>
-                  ) : (
-                    <span className="text-amber-700 font-semibold">กรอกภาษีซื้อจากใบกำกับภาษีของผู้ขายเพื่อคำนวณสุทธิ</span>
-                  )}
+                <div className="text-2xl font-bold font-mono text-blue-700">{formatTHB(totalInputVat)}</div>
+                <div className="text-[11px] text-slate-500 space-y-1">
+                  <div>จากระบบ POs: <span className="font-mono font-bold text-slate-800">{formatTHB(data.inputVat)}</span> ({data.purchasesCount} รายการ)</div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">+ ใบกำกับภาษีอื่น:</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={additionalInputVat}
+                      onChange={(e) => setAdditionalInputVat(e.target.value)}
+                      className="h-6 text-xs font-mono font-bold text-blue-800 bg-slate-50 w-24 px-1.5"
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>
-            <Card className="bg-emerald-900 text-white shadow-md">
+
+            {/* Card 3: Net VAT Payable or Tax Credit Refundable */}
+            <Card className="bg-slate-900 text-white shadow-md">
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-emerald-200">
-                    {taxCredit > 0 ? "3. ภาษีชำระเกินยกไป (Tax Credit)" : "3. ภาษีที่ต้องชำระสุทธิ (ภ.พ.30)"}
+                  <span className="text-xs text-slate-300">
+                    {taxCredit > 0 ? "3. ภาษีชำระเกินยกไป (Tax Credit)" : "3. ภาษีที่ต้องชำระสุทธิ (Net VAT Payable)"}
                   </span>
-                  <Badge variant="success" className="text-[10px] bg-emerald-800 text-emerald-100 border-emerald-700">{dueLabel}</Badge>
+                  <Badge variant={taxCredit > 0 ? "warning" : "success"} className="text-[10px]">
+                    {taxCredit > 0 ? "เครดิตภาษียกไป" : "นำส่งสรรพากร"}
+                  </Badge>
                 </div>
                 <div className={`text-3xl font-extrabold font-mono ${taxCredit > 0 ? "text-amber-300" : "text-emerald-400"}`}>
                   {formatTHB(taxCredit > 0 ? taxCredit : netPayable)}
                 </div>
-                <div className="text-[11px] text-emerald-200/80">
+                <div className="text-[11px] text-slate-300">
                   {taxCredit > 0
-                    ? `(ภาษีซื้อ ${formatTHB(parsedInputVat)} มากกว่าภาษีขาย ${formatTHB(data.outputVat)} นำไปเครดิตเดือนถัดไป)`
-                    : `(ภาษีขาย ${formatTHB(data.outputVat)} - ภาษีซื้อ ${formatTHB(parsedInputVat)})`}
+                    ? `ภาษีซื้อ (${formatTHB(totalInputVat)}) สูงกว่าภาษีขาย (${formatTHB(data.outputVat)}) ยกไปเป็นเครดิตเดือนถัดไป`
+                    : `ภาษีขาย (${formatTHB(data.outputVat)}) - ภาษีซื้อ (${formatTHB(totalInputVat)}) ชำระด้วยสตางค์แม่นยำ`}
                 </div>
               </CardContent>
             </Card>
           </div>
 
+          {/* Dual Report Tabs: Sales Tax vs Purchase Tax */}
           <Card>
-            <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
+            <CardHeader className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-sm">รายงานภาษีขาย {monthName(data.month)}</CardTitle>
-                <CardDescription>บิล POS สถานะสำเร็จ (ไม่รวมบิลยกเลิก)</CardDescription>
+                <CardTitle className="text-sm">เอกสารประกอบแบบ ภ.พ.30 ประจำเดือน {monthName(data.month)}</CardTitle>
+                <CardDescription>แสดงรายการภาษีขายจากระบบ POS และรายการภาษีซื้อจากใบสั่งซื้อ POs</CardDescription>
               </div>
-              <Badge variant="outline" className="text-[10px]">{data.documents.length} รายการ</Badge>
+
+              {/* Tab Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("OUTPUT")}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-bold transition-all ${
+                    activeTab === "OUTPUT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Receipt className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>รายงานภาษีขาย ({data.documents.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("INPUT")}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-bold transition-all ${
+                    activeTab === "INPUT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <ShoppingCart className="h-3.5 w-3.5 text-blue-600" />
+                  <span>รายงานภาษีซื้อ POs ({data.purchaseDocuments.length})</span>
+                </button>
+              </div>
             </CardHeader>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                  <tr>
-                    <th className="py-2 px-3 text-left">เลขที่บิล / วันที่</th>
-                    <th className="py-2 px-3 text-left">ลูกค้า</th>
-                    <th className="py-2 px-3 text-left">สาขา</th>
-                    <th className="py-2 px-3 text-right">ก่อน VAT</th>
-                    <th className="py-2 px-3 text-right">VAT 7%</th>
-                    <th className="py-2 px-3 text-right">รวม</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono">
-                  {data.documents.length === 0 && (
-                    <tr><td colSpan={6} className="py-4 text-center font-sans text-slate-500">ไม่มีบิลขายในเดือนนี้</td></tr>
-                  )}
-                  {data.documents.map((it) => (
-                    <tr key={it.id} className="hover:bg-slate-50">
-                      <td className="py-2 px-3">
-                        <div className="font-bold text-slate-900">{it.invoiceNo}</div>
-                        <div className="text-[10px] text-slate-400">{bkkDate.format(new Date(it.date))}</div>
-                      </td>
-                      <td className="py-2 px-3 font-sans text-slate-700">{it.customerName}</td>
-                      <td className="py-2 px-3 text-slate-500">{it.branchCode}</td>
-                      <td className="py-2 px-3 text-right text-slate-600">{formatTHB(it.base)}</td>
-                      <td className="py-2 px-3 text-right font-bold text-emerald-700">{formatTHB(it.vat)}</td>
-                      <td className="py-2 px-3 text-right text-slate-800">{formatTHB(it.total)}</td>
+
+            {activeTab === "OUTPUT" ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <tr>
+                      <th className="py-2.5 px-3 text-left">เลขที่บิล / วันที่</th>
+                      <th className="py-2.5 px-3 text-left">ลูกค้า</th>
+                      <th className="py-2.5 px-3 text-left">สาขา</th>
+                      <th className="py-2.5 px-3 text-right">มูลค่าก่อน VAT</th>
+                      <th className="py-2.5 px-3 text-right">ภาษีขาย (7%)</th>
+                      <th className="py-2.5 px-3 text-right">รวมเงิน</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {data.documents.length === 0 && (
+                      <tr><td colSpan={6} className="py-6 text-center font-sans text-slate-500">ไม่มีบิลขายในเดือนนี้</td></tr>
+                    )}
+                    {data.documents.map((it) => (
+                      <tr key={it.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3">
+                          <div className="font-bold text-slate-900">{it.invoiceNo}</div>
+                          <div className="text-[10px] text-slate-400">{bkkDate.format(new Date(it.date))}</div>
+                        </td>
+                        <td className="py-2 px-3 font-sans text-slate-700">{it.customerName}</td>
+                        <td className="py-2 px-3 text-slate-500">{it.branchCode}</td>
+                        <td className="py-2 px-3 text-right text-slate-600">{formatTHB(it.base)}</td>
+                        <td className="py-2 px-3 text-right font-bold text-emerald-700">{formatTHB(it.vat)}</td>
+                        <td className="py-2 px-3 text-right text-slate-800">{formatTHB(it.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <tr>
+                      <th className="py-2.5 px-3 text-left">เลขที่ PO / วันที่</th>
+                      <th className="py-2.5 px-3 text-left">ผู้ขาย (Supplier)</th>
+                      <th className="py-2.5 px-3 text-left">สาขา</th>
+                      <th className="py-2.5 px-3 text-right">มูลค่าก่อน VAT</th>
+                      <th className="py-2.5 px-3 text-right">ภาษีซื้อ (7%)</th>
+                      <th className="py-2.5 px-3 text-right">รวมเงิน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {data.purchaseDocuments.length === 0 && (
+                      <tr><td colSpan={6} className="py-6 text-center font-sans text-slate-500">ไม่มีใบสั่งซื้อ/รับสินค้าในเดือนนี้</td></tr>
+                    )}
+                    {data.purchaseDocuments.map((po) => (
+                      <tr key={po.id} className="hover:bg-slate-50">
+                        <td className="py-2 px-3">
+                          <div className="font-bold text-blue-700">{po.poNumber}</div>
+                          <div className="text-[10px] text-slate-400">{bkkDate.format(new Date(po.date))}</div>
+                        </td>
+                        <td className="py-2 px-3 font-sans text-slate-800">{po.supplierName}</td>
+                        <td className="py-2 px-3 text-slate-500">{po.branchCode}</td>
+                        <td className="py-2 px-3 text-right text-slate-600">{formatTHB(po.base)}</td>
+                        <td className="py-2 px-3 text-right font-bold text-blue-700">{formatTHB(po.vat)}</td>
+                        <td className="py-2 px-3 text-right text-slate-800">{formatTHB(po.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {data.documentsTruncated && (
-              <p className="p-3 text-[11px] text-slate-500 border-t border-slate-100">แสดงรายการบางส่วน ยอดรวมด้านบนคำนวณจากบิลทั้งหมดของเดือน</p>
+              <p className="p-3 text-[11px] text-slate-500 border-t border-slate-100">
+                แสดงรายการบางส่วน ยอดรวมด้านบนคำนวณจากเอกสารทั้งหมดในรอบเดือนภาษีนี้
+              </p>
             )}
           </Card>
         </>

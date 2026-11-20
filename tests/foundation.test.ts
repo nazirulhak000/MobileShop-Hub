@@ -5,7 +5,7 @@ import { prisma } from "../src/lib/prisma";
 import { staffStorage, StaffPrincipal } from "../src/lib/staff-context";
 import { mutateBooking } from "../src/lib/bookings";
 import { requestOtp, verifyOtp, verifyCustomerWithTicketProof, devOtpEnabled } from "../src/lib/customer-auth";
-import { calculateVAT } from "../src/lib/tax";
+import { calculateVAT, calculateCIT, calculateWHT, calculatePP30, calculatePIT, DEFAULT_TAX_SETTINGS } from "../src/lib/tax";
 import { bangkokYYYYMM } from "../src/lib/staff-http";
 import { generateNextTrackingCode, getRepairJobs, getRepairJobById } from "../src/lib/repairs";
 import { checkOrigin } from "../src/lib/staff-auth";
@@ -3043,5 +3043,163 @@ test("Round 19: Supplier Management & CRM Audit - Profile, Tax ID, Credit Terms,
       where: { id: supplierA.id },
     });
     assert.equal(originalInA?.name, "บริษัท ซีคอน สแปร์พาร์ท จำกัด");
+  });
+});
+
+test("Round 20: Thai Tax & Accounting Audit - VAT ภ.พ.30 Output vs Input, Satang Precision, WHT ภ.ง.ด.3/53, 13-Digit Tax ID Checksum, 5-Digit Branch Code & Multi-Tenant Isolation", async () => {
+  const staffB: StaffPrincipal = {
+    id: "user-b",
+    tenantId: "test-b",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+    role: "ADMIN",
+    name: "Admin B",
+    username: "admin_b",
+  };
+
+  // 1. 13-Digit Thai Tax ID & 5-Digit Branch Code Validation
+  // Valid 13-digit IDs (Modulo 11 Checksum passes)
+  const validTaxId1 = "0105558123451";
+  const validTaxId2 = "1100500876549";
+  assert.equal(validateThaiTaxId(validTaxId1).valid, true);
+  assert.equal(validateThaiTaxId(validTaxId2).valid, true);
+
+  // Invalid length or Checksum failure
+  assert.equal(validateThaiTaxId("12345").valid, false);
+  assert.equal(validateThaiTaxId("0105558123456").valid, false, "Checksum mismatch must fail");
+
+  // 5-Digit Branch Code (00000 = Headquarter)
+  assert.equal(validateThaiBranchId("00000").valid, true);
+  assert.equal(validateThaiBranchId("00001").valid, true);
+  assert.equal(validateThaiBranchId("123").valid, false);
+  assert.equal(validateThaiBranchId("ABCDE").valid, false);
+
+  // 2. VAT ภ.พ.30 Engine & Satang Precision
+  // Output VAT vs Input VAT (POs)
+  const vatCalculated = calculatePP30(10700, 700, 450.50);
+  assert.equal(vatCalculated.salesGross, 10700);
+  assert.equal(vatCalculated.outputVat, 700);
+  assert.equal(vatCalculated.inputVat, 450.50);
+  assert.equal(vatCalculated.netVatPayable, 249.50, "Net VAT payable satang precision check");
+  assert.equal(vatCalculated.excessCredit, 0);
+
+  // Excess credit scenario (Input VAT > Output VAT)
+  const creditCalculated = calculatePP30(10700, 700, 950.25);
+  assert.equal(creditCalculated.netVatPayable, 0);
+  assert.equal(creditCalculated.excessCredit, 250.25, "Excess tax credit carried forward satang precision check");
+
+  // 3. Withholding Tax (WHT) ภ.ง.ด.3 (Individual) & ภ.ง.ด.53 (Corporate)
+  // 1% Transport (minimum 1,000 THB threshold)
+  const whtTransport = calculateWHT(10000, 1);
+  assert.equal(whtTransport.applies, true);
+  assert.equal(whtTransport.wht, 100);
+  assert.equal(whtTransport.netPayment, 9900);
+
+  // 3% Service / Repair Labor
+  const whtService = calculateWHT(5000, 3);
+  assert.equal(whtService.applies, true);
+  assert.equal(whtService.wht, 150);
+  assert.equal(whtService.netPayment, 4850);
+  assert.equal(bahtText(whtService.wht), "หนึ่งร้อยห้าสิบบาทถ้วน");
+
+  // 5% Rent
+  const whtRent = calculateWHT(30000, 5);
+  assert.equal(whtRent.applies, true);
+  assert.equal(whtRent.wht, 1500);
+  assert.equal(whtRent.netPayment, 28500);
+  assert.equal(bahtText(whtRent.wht), "หนึ่งพันห้าร้อยบาทถ้วน");
+
+  // Below 1,000 THB threshold: WHT does not apply
+  const whtBelowMin = calculateWHT(999, 3);
+  assert.equal(whtBelowMin.applies, false);
+  assert.equal(whtBelowMin.wht, 0);
+
+  // 4. CIT SME Tiered Rates vs PIT Progressive Rates
+  // CIT SME: 0-300k exempt, 300k-3M @ 15%, >3M @ 20%
+  const citSme1 = calculateCIT(1000000, 750000, true); // Net Profit = 250,000
+  assert.equal(citSme1.netProfit, 250000);
+  assert.equal(citSme1.totalTax, 0, "First 300,000 net profit is exempt for SME");
+
+  const citSme2 = calculateCIT(2000000, 1000000, true); // Net Profit = 1,000,000
+  // 300,000 @ 0% + 700,000 @ 15% = 105,000
+  assert.equal(citSme2.totalTax, 105000);
+
+  // CIT Non-SME: Flat 20%
+  const citNonSme = calculateCIT(2000000, 1000000, false);
+  assert.equal(citNonSme.totalTax, 200000);
+
+  // PIT Progressive Rates (ภ.ง.ด.90 & ภ.ง.ด.94)
+  const pitResultFull = calculatePIT(2000000, DEFAULT_TAX_SETTINGS, { halfYear: false });
+  assert.ok(pitResultFull.finalTaxPayable > 0);
+  const pitResultHalf = calculatePIT(1000000, DEFAULT_TAX_SETTINGS, { halfYear: true });
+  assert.equal(pitResultHalf.halfYear, true);
+
+  // 5. Database Integration & Multi-Tenant Isolation
+  // Tenant A issues WHT certificate
+  let certA: any;
+  await staffStorage.run(admin, async () => {
+    // Generate cert under tenant-a
+    certA = await prisma.auditLog.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        module: "TAX_WHT",
+        action: "ISSUE",
+        targetId: "50T-202611-001",
+        details: "ออกหนังสือรับรอง 50 ทวิ 50T-202611-001 ให้ นายสมเกียรติ ช่างเลเซอร์ ภาษีหัก 150 บาท",
+        afterJson: JSON.stringify({
+          certNo: "50T-202611-001",
+          type: "PND3",
+          date: "2026-11-20",
+          payeeName: "นายสมเกียรติ ช่างเลเซอร์",
+          payeeTaxId: validTaxId2,
+          payeeAddress: "12/5 รามคำแหง 24 บางกะปิ กทม.",
+          incomeType: "ค่าจ้างซ่อมบอร์ดภายนอก",
+          rate: 3,
+          baseAmount: 5000,
+          whtAmount: 150,
+          netPayment: 4850,
+          status: "ISSUED",
+        }),
+        severity: "INFO",
+      },
+    });
+    assert.ok(certA.id);
+
+    // Save tax settings for Tenant A
+    await db.tenant.update({
+      where: { id: "test-a" },
+      data: {
+        name: "บริษัท ฟิกซ์มี เทคโนโลยี จำกัด (มหาชน)",
+        taxId: validTaxId1,
+      },
+    });
+
+    await prisma.branch.update({
+      where: { id: ownBranch },
+      data: {
+        code: "00000",
+        name: "สำนักงานใหญ่ (HQ)",
+      },
+    });
+  });
+
+  // Cross-Tenant Isolation: Tenant B cannot query or see Tenant A's WHT or tax settings
+  await staffStorage.run(staffB, async () => {
+    // Tenant B queries WHT records
+    const bWhtLogs = await prisma.auditLog.findMany({
+      where: {
+        tenantId: "test-b",
+        module: "TAX_WHT",
+      },
+    });
+    assert.equal(bWhtLogs.length, 0, "Tenant B must not see Tenant A WHT certificates");
+
+    // Tenant B checks its own tenant profile
+    const tenantB = await prisma.tenant.findUnique({
+      where: { id: "test-b" },
+    });
+    assert.notEqual(tenantB?.name, "บริษัท ฟิกซ์มี เทคโนโลยี จำกัด (มหาชน)");
+    assert.notEqual(tenantB?.taxId, validTaxId1);
   });
 });

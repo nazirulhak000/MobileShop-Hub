@@ -64,7 +64,10 @@ async function handleGET(req: NextRequest) {
   if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new AccessError(400, "รูปแบบเดือนไม่ถูกต้อง (YYYY-MM)");
   const { start, end } = bangkokMonthRange(month ?? undefined);
 
-  const where: Record<string, unknown> = { date: { gte: start, lt: end } };
+  const where: Record<string, unknown> = {
+    tenantId: actor.tenantId,
+    date: { gte: start, lt: end },
+  };
   const branch = optId(params.get("branch"), "branch");
   if (branch) {
     if (!actor.branchIds.includes(branch)) throw new AccessError(404, "ไม่พบสาขาที่มีสิทธิ์");
@@ -152,7 +155,10 @@ async function handleDELETE(req: NextRequest) {
   const id = reqId(new URL(req.url).searchParams.get("id"), "id");
 
   await prisma.$transaction(async tx => {
-    const existing = await tx.shopExpense.findFirst({ where: { id, branchId: { in: actor.branchIds } }, select: expenseSelect });
+    const existing = await tx.shopExpense.findFirst({
+      where: { id, tenantId: actor.tenantId, branchId: { in: actor.branchIds } },
+      select: expenseSelect,
+    });
     if (!existing) throw new AccessError(404, "ไม่พบรายการค่าใช้จ่าย");
     await tx.shopExpense.delete({ where: { id } });
     await tx.auditLog.create({

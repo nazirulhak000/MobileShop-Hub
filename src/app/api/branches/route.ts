@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { reqId, safeError, withStaff, readJson } from "@/lib/staff-http";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
@@ -29,7 +29,9 @@ function isPrismaError(error: unknown, code: string) {
 
 async function handleGET() {
   try {
+    const actor = staffContext();
     const branches = await prisma.branch.findMany({
+      where: { tenantId: actor.tenantId },
       include: {
         _count: {
           select: {
@@ -50,19 +52,25 @@ async function handleGET() {
 
 async function handlePOST(req: Request) {
   try {
+    const actor = staffContext();
     const body = await readJson<Record<string, any>>(req);
     if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const name = reqText(body.name, "name", 150);
     const code = reqCode(body.code);
 
-    // Plan limit (Tenant.maxBranches).
-    const tenant = await prisma.tenant.findFirst({ select: { maxBranches: true } });
-    if (tenant && (await prisma.branch.count()) >= tenant.maxBranches) {
+    // Plan limit (Tenant.maxBranches) scoped per tenant.
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: actor.tenantId },
+      select: { maxBranches: true },
+    });
+    const branchCount = await prisma.branch.count({ where: { tenantId: actor.tenantId } });
+    if (tenant && branchCount >= tenant.maxBranches) {
       throw new AccessError(409, "เกินจำนวนสาขาตามแพ็กเกจ");
     }
 
     const branch = await prisma.branch.create({
       data: {
+        tenantId: actor.tenantId,
         name,
         code,
         address: optText(body.address, "address", 500) ?? null,
@@ -79,9 +87,16 @@ async function handlePOST(req: Request) {
 
 async function handlePUT(req: Request) {
   try {
+    const actor = staffContext();
     const body = await readJson<Record<string, any>>(req);
     if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const id = reqId(body.id, "id");
+
+    const existing = await prisma.branch.findFirst({
+      where: { id, tenantId: actor.tenantId },
+      select: { id: true },
+    });
+    if (!existing) throw new AccessError(404, "ไม่พบสาขา");
 
     // Only update fields that are present in the request body.
     const data: Prisma.BranchUpdateInput = {};
@@ -93,9 +108,6 @@ async function handlePUT(req: Request) {
     if (phone !== undefined) data.phone = phone;
     const taxId = optText(body.taxId, "taxId", 20);
     if (taxId !== undefined) data.taxId = taxId;
-
-    const existing = await prisma.branch.findFirst({ where: { id }, select: { id: true } });
-    if (!existing) throw new AccessError(404, "ไม่พบสาขา");
 
     const branch = await prisma.branch.update({ where: { id }, data });
     return NextResponse.json(branch);
@@ -109,9 +121,13 @@ const IN_USE_MESSAGE = "ลบสาขาไม่ได้เพราะม�
 
 async function handleDELETE(req: Request) {
   try {
+    const actor = staffContext();
     const id = reqId(new URL(req.url).searchParams.get("id"), "id");
 
-    const branch = await prisma.branch.findFirst({ where: { id }, include: { _count: true } });
+    const branch = await prisma.branch.findFirst({
+      where: { id, tenantId: actor.tenantId },
+      include: { _count: true },
+    });
     if (!branch) throw new AccessError(404, "ไม่พบสาขา");
 
     // Pre-check FK relations plus tables that reference branchId without a Prisma relation.
