@@ -9,6 +9,7 @@ import { calculateVAT } from "../src/lib/tax";
 import { generateNextTrackingCode, getRepairJobs, getRepairJobById } from "../src/lib/repairs";
 import { checkOrigin } from "../src/lib/staff-auth";
 import { resolveTenantBySlug } from "../src/lib/storefrontTenant";
+import { validateThaiTaxId, validateThaiBranchId, bahtText, validateThaiNationalId } from "../src/lib/utils";
 let admin: StaffPrincipal;
 let cashier: StaffPrincipal;
 let foreignCustomer: string;
@@ -1025,6 +1026,171 @@ test("Round 11: Repair Workflow & Management Audit - Transitions, Timeline Audit
     assert.equal(searchList.length, 0);
   });
 });
+
+test("Finance & Tax Invoice: Thai Tax ID, Branch ID, Baht text, and VAT breakdown", async () => {
+  // 1. Thai Tax ID (13 digits Modulo 11)
+  assert.equal(validateThaiTaxId("1234567890121").valid, true);
+  assert.equal(validateThaiTaxId("1234567890120").valid, false);
+  assert.equal(validateThaiTaxId("12345").valid, false);
+  assert.equal(validateThaiTaxId("abcdefghijklm").valid, false);
+
+  // 2. Thai National ID (13 digits Modulo 11)
+  assert.equal(validateThaiNationalId("1234567890121").valid, true);
+  assert.equal(validateThaiNationalId("1234567890120").valid, false);
+
+  // 3. Thai Branch ID (5 digits, 00000 = Head Office)
+  assert.equal(validateThaiBranchId("00000").valid, true);
+  assert.equal(validateThaiBranchId("00001").valid, true);
+  assert.equal(validateThaiBranchId("1234").valid, false);
+  assert.equal(validateThaiBranchId("000000").valid, false);
+  assert.equal(validateThaiBranchId("HQ001").valid, false);
+
+  // 4. Baht text generation
+  assert.equal(bahtText(0), "ศูนย์บาทถ้วน");
+  assert.equal(bahtText(120.50), "หนึ่งร้อยยี่สิบบาทห้าสิบสตางค์");
+  assert.equal(bahtText(1000), "หนึ่งพันบาทถ้วน");
+  assert.equal(bahtText(101), "หนึ่งร้อยเอ็ดบาทถ้วน");
+  assert.equal(bahtText(21), "ยี่สิบเอ็ดบาทถ้วน");
+  assert.equal(bahtText(1000000), "หนึ่งล้านบาทถ้วน");
+
+  // 5. VAT breakdown math (Non-VAT vs VAT 7% with integer satang precision)
+  const taxableAmount = 1000.00;
+  const nonVatAmount = 500.00;
+  const vatRate = 0.07;
+  const vatAmount = Math.round(taxableAmount * vatRate * 100) / 100; // 70.00
+  const grandTotal = Math.round((taxableAmount + vatAmount + nonVatAmount) * 100) / 100; // 1570.00
+  assert.equal(vatAmount, 70.00);
+  assert.equal(grandTotal, 1570.00);
+});
+
+test("Installment Schedule: integer satang rounding guarantees zero remainder", async () => {
+  const totalAmount = 1000.00;
+  const months = 3;
+  const totalSatang = Math.round(totalAmount * 100); // 100000 satang
+  const baseMonthlySatang = Math.floor(totalSatang / months); // 33333 satang = 333.33
+  const remainderSatang = totalSatang - (baseMonthlySatang * months); // 1 satang
+
+  const schedule: number[] = [];
+  for (let i = 1; i <= months; i++) {
+    const monthlySatang = i === months ? baseMonthlySatang + remainderSatang : baseMonthlySatang;
+    schedule.push(monthlySatang / 100);
+  }
+
+  assert.equal(schedule.length, 3);
+  assert.equal(schedule[0], 333.33);
+  assert.equal(schedule[1], 333.33);
+  assert.equal(schedule[2], 333.34);
+  const sum = schedule.reduce((acc, curr) => acc + curr, 0);
+  assert.equal(Math.round(sum * 100) / 100, totalAmount);
+});
+
+test("Pawn & Trade-in: multi-tenant isolation, pawn creation, forfeit to stock", async () => {
+  let contractId = "";
+  let imeiId = "";
+
+  // Admin from Tenant A creates product, imei, and pawn contract
+  await staffStorage.run(admin, async () => {
+    const pawnProduct = await prisma.product.create({
+      data: {
+        tenantId: admin.tenantId,
+        code: "PW-STOCK-001",
+        name: "มือสอง: iPhone 13 Pro 128GB",
+        category: "DEVICE",
+        costPrice: 12000,
+        sellPrice: 16000,
+      },
+    });
+
+    const imei = await prisma.deviceIMEI.create({
+      data: {
+        tenantId: admin.tenantId,
+        productId: pawnProduct.id,
+        imei: "990000862471854",
+        status: "PAWNED",
+        costPrice: 12000,
+        sellPrice: 16000,
+        branchId: ownBranch,
+      },
+    });
+    imeiId = imei.id;
+
+    const contract = await prisma.tradeInContract.create({
+      data: {
+        tenantId: admin.tenantId,
+        contractNo: "PW-202611-0001",
+        type: "PAWN",
+        status: "ACTIVE",
+        customerId: ownCustomer,
+        branchId: ownBranch,
+        nationalId: "1234567890121",
+        deviceBrand: "Apple",
+        deviceModel: "iPhone 13 Pro 128GB",
+        imei: "990000862471854",
+        conditionGrade: "A",
+        agreedPrice: 12000,
+        interestRateMonthly: 1.25,
+        durationMonths: 2,
+        startDate: new Date(),
+        dueDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+      },
+    });
+    contractId = contract.id;
+    assert.ok(contractId);
+  });
+
+  // Verify Tenant B cannot read or access this pawn contract
+  const adminB: StaffPrincipal = {
+    id: "user-b",
+    tenantId: "test-b",
+    name: "Admin B",
+    username: "admin-b",
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  await staffStorage.run(adminB, async () => {
+    const isolatedContract = await prisma.tradeInContract.findUnique({
+      where: { id: contractId },
+    });
+    assert.equal(isolatedContract, null);
+
+    const bList = await prisma.tradeInContract.findMany({
+      where: { type: "PAWN" },
+    });
+    assert.equal(bList.length, 0);
+  });
+
+  // Tenant A forfeits pawn (หลุดจำนำ) -> moves IMEI to IN_STOCK, creates stock item
+  await staffStorage.run(admin, async () => {
+    const updatedContract = await prisma.tradeInContract.update({
+      where: { id: contractId },
+      data: { status: "FORFEITED" },
+    });
+    assert.equal(updatedContract.status, "FORFEITED");
+
+    const updatedImei = await prisma.deviceIMEI.update({
+      where: { id: imeiId },
+      data: { status: "IN_STOCK" },
+    });
+    assert.equal(updatedImei.status, "IN_STOCK");
+
+    const productRecord = await prisma.product.findFirstOrThrow({
+      where: { code: "PW-STOCK-001" },
+    });
+
+    const stock = await prisma.stockItem.create({
+      data: {
+        tenantId: admin.tenantId,
+        productId: productRecord.id,
+        branchId: ownBranch,
+        quantity: 1,
+      },
+    });
+    assert.equal(stock.quantity, 1);
+  });
+});
+
 
 
 

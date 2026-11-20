@@ -14,6 +14,8 @@ import {
 } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { validateThaiNationalId } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -48,14 +50,54 @@ function formatContract(c: ContractWithPayments) {
 
 async function handleGET(request: NextRequest) {
   try {
+    const actor = staffContext();
+    const { searchParams } = new URL(request.url);
+    const branchKey = searchParams.get("branch")?.trim() || "";
+    const status = searchParams.get("status")?.trim() || "";
+    const search = (searchParams.get("search") || "").trim().toLowerCase();
+    const take = takeParam(searchParams.get("take"), 200, 500);
+
+    const where: Prisma.InstallmentContractWhereInput = {
+      tenantId: actor.tenantId,
+      branchId: { in: actor.branchIds },
+    };
+
+    if (branchKey) {
+      const branch = await prisma.branch.findFirst({
+        where: {
+          tenantId: actor.tenantId,
+          id: { in: actor.branchIds },
+          OR: [{ code: branchKey }, { id: branchKey }],
+        },
+        select: { id: true },
+      });
+      if (branch) where.branchId = branch.id;
+    }
+
+    if (status && status !== "ALL") {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { contractNo: { contains: search } },
+        { customerName: { contains: search } },
+        { customerPhone: { contains: search } },
+        { imei: { contains: search } },
+        { deviceModel: { contains: search } },
+        { nationalId: { contains: search } },
+      ];
+    }
+
     const contracts = await prisma.installmentContract.findMany({
+      where,
       include: {
         payments: {
           orderBy: { monthNumber: "asc" },
         },
       },
       orderBy: { createdAt: "desc" },
-      take: takeParam(new URL(request.url).searchParams.get("take"), 200, 500),
+      take,
     });
 
     return NextResponse.json({ success: true, data: contracts.map(formatContract) });
@@ -76,7 +118,14 @@ async function handlePOST(request: NextRequest) {
     const customerName = reqText(body.customerName, "ชื่อลูกค้า");
     const customerPhone = reqText(body.customerPhone, "เบอร์โทรศัพท์");
     const deviceModel = reqText(body.deviceModel, "รุ่นอุปกรณ์");
-    const nationalId = typeof body.nationalId === "string" && body.nationalId.trim() ? body.nationalId.trim() : "-";
+    const rawNationalId = typeof body.nationalId === "string" && body.nationalId.trim() ? body.nationalId.trim() : "-";
+    const nationalId = rawNationalId !== "-" ? rawNationalId.replace(/[^0-9]/g, "") : "-";
+    if (nationalId !== "-") {
+      const idCheck = validateThaiNationalId(nationalId);
+      if (!idCheck.valid) {
+        throw new AccessError(400, idCheck.message || "เลขประจำตัวประชาชน 13 หลักไม่ถูกต้อง");
+      }
+    }
     const imei = typeof body.imei === "string" && body.imei.trim() ? body.imei.trim() : "-";
 
     const termMonths = reqInt(body.termMonths, "จำนวนงวด", 1, 36);
@@ -103,14 +152,17 @@ async function handlePOST(request: NextRequest) {
     const branchId = optId(body.branchId, "branchId") ?? actor.branchId;
     if (!actor.branchIds.includes(branchId)) throw new AccessError(404, "ไม่พบสาขาที่มีสิทธิ์");
 
-    // Transactional creation with atomic counter
+    // Transactional creation with atomic counter scoped to tenant
     const contract = await prisma.$transaction(async (tx) => {
       let finalCustId = optId(body.customerId, "customerId");
       if (!finalCustId) {
-        let existingCust = await tx.customer.findFirst({ where: { phone: customerPhone } });
+        let existingCust = await tx.customer.findFirst({
+          where: { tenantId: actor.tenantId, phone: customerPhone },
+        });
         if (!existingCust) {
           existingCust = await tx.customer.create({
             data: {
+              tenantId: actor.tenantId,
               name: customerName,
               phone: customerPhone,
               nationalId: nationalId !== "-" ? nationalId : null,
@@ -123,13 +175,14 @@ async function handlePOST(request: NextRequest) {
       const counter = await tx.sequenceCounter.upsert({
         where: { id: `INS-${yyyymm}` },
         update: { current: { increment: 1 } },
-        create: { id: `INS-${yyyymm}`, current: 1 },
+        create: { id: `INS-${yyyymm}`, current: 1, tenantId: actor.tenantId },
       });
-      const contractNo = `INS-${yyyymm}-${String(counter.current).padStart(3, "0")}`;
+      const contractNo = `INS-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
 
       const paymentsData = [];
       for (let m = 1; m <= termMonths; m++) {
         paymentsData.push({
+          tenantId: actor.tenantId,
           monthNumber: m,
           dueDate: addMonthsClamped(now, m),
           amount: (m === termMonths ? lastPeriodSatang : perPeriodSatang) / 100,
@@ -139,6 +192,7 @@ async function handlePOST(request: NextRequest) {
 
       const created = await tx.installmentContract.create({
         data: {
+          tenantId: actor.tenantId,
           contractNo,
           branchId,
           customerId: finalCustId,
@@ -200,7 +254,7 @@ async function handlePATCH(request: NextRequest) {
 
     const updated = await prisma.$transaction(async (tx) => {
       const contract = await tx.installmentContract.findFirst({
-        where: { id: contractId },
+        where: { id: contractId, tenantId: actor.tenantId },
         include: { payments: { orderBy: { monthNumber: "asc" } } },
       });
       if (!contract) throw new AccessError(404, "ไม่พบสัญญาผ่อนชำระ");
@@ -223,15 +277,15 @@ async function handlePATCH(request: NextRequest) {
       const now = new Date();
       // Conditional update: only an unpaid period can be marked paid (prevents double collection).
       const marked = await tx.installmentPayment.updateMany({
-        where: { contractId, monthNumber: month, status: { in: UNPAID } },
+        where: { contractId, tenantId: actor.tenantId, monthNumber: month, status: { in: UNPAID } },
         data: { status: "PAID", paidDate: now, paymentRef },
       });
       if (marked.count !== 1) throw new AccessError(409, "งวดนี้ชำระแล้วหรือไม่พบ");
 
-      const paidCount = await tx.installmentPayment.count({ where: { contractId, status: "PAID" } });
+      const paidCount = await tx.installmentPayment.count({ where: { contractId, tenantId: actor.tenantId, status: "PAID" } });
       // Earliest unpaid period of the contract (any month), not just after the one paid now.
       const nextPending = await tx.installmentPayment.findFirst({
-        where: { contractId, status: { in: UNPAID } },
+        where: { contractId, tenantId: actor.tenantId, status: { in: UNPAID } },
         orderBy: { monthNumber: "asc" },
       });
       const stillOverdue = nextPending ? nextPending.dueDate.getTime() < now.getTime() : false;

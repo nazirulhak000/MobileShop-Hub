@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
-import { formatTHB, formatDateThai } from "@/lib/utils";
+import { formatTHB, formatDateThai, validateThaiNationalId } from "@/lib/utils";
 
 export default function InstallmentsPage() {
   const [contracts, setContracts] = useState<any[]>([]);
@@ -103,6 +103,10 @@ export default function InstallmentsPage() {
     if (busy) return;
     setFormError("");
     // Client-side validation mirrors the server rules.
+    if (newCustId.trim()) {
+      const idCheck = validateThaiNationalId(newCustId);
+      if (!idCheck.valid) return setFormError(idCheck.message || "เลขบัตรประชาชน 13 หลักไม่ถูกต้อง");
+    }
     if (!Number.isFinite(newTotalPrice) || newTotalPrice <= 0) return setFormError("ราคาสินค้าต้องมากกว่า 0");
     if (!Number.isFinite(newDownPayment) || newDownPayment < 0) return setFormError("เงินดาวน์ต้องไม่ติดลบ");
     if (newDownPayment >= newTotalPrice) return setFormError("เงินดาวน์ต้องน้อยกว่าราคาสินค้า");
@@ -542,6 +546,23 @@ export default function InstallmentsPage() {
                     className="text-xs font-mono"
                   />
                 </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">เลขบัตรประจำตัวประชาชน 13 หลัก</label>
+                  {newCustId.trim() && (
+                    <span className={`text-[10px] font-bold ${validateThaiNationalId(newCustId).valid ? "text-emerald-600" : "text-rose-600"}`}>
+                      {validateThaiNationalId(newCustId).valid ? "✓ เลขบัตรถูกต้อง" : "✕ เลขบัตรไม่ถูกต้อง"}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  placeholder="X-XXXX-XXXXX-XX-X"
+                  value={newCustId}
+                  onChange={(e) => setNewCustId(e.target.value)}
+                  className="text-xs font-mono"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

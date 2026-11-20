@@ -32,7 +32,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table";
-import { formatTHB, formatDateThai } from "@/lib/utils";
+import { formatTHB, formatDateThai, validateThaiNationalId } from "@/lib/utils";
 
 interface TradeInContractItem {
   id: string;
@@ -132,7 +132,9 @@ export default function TradeInPage() {
   const fetchContracts = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/trade-in?branch=${currentBranch.code}`);
+      const branchParam = currentBranch?.code || currentBranch?.id || "";
+      const url = branchParam ? `/api/trade-in?branch=${encodeURIComponent(branchParam)}` : "/api/trade-in";
+      const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
         setContracts(data.contracts);
@@ -146,7 +148,7 @@ export default function TradeInPage() {
 
   useEffect(() => {
     fetchContracts();
-  }, [currentBranch.code]);
+  }, [currentBranch?.code, currentBranch?.id]);
 
   // Filtered List
   const filteredContracts = useMemo(() => {
@@ -200,8 +202,10 @@ export default function TradeInPage() {
       alert("ลูกค้าต้องยอมรับหนังสือยืนยันกรรมสิทธิ์ทางกฎหมาย");
       return;
     }
-    if (!/^\d{13}$/.test(custNationalId.replace(/[\s-]/g, ""))) {
-      alert("กรุณากรอกเลขบัตรประชาชน 13 หลักให้ถูกต้อง");
+    const cleanId = custNationalId.replace(/[^0-9]/g, "");
+    const idCheck = validateThaiNationalId(cleanId);
+    if (!idCheck.valid) {
+      alert(idCheck.message || "กรุณากรอกเลขบัตรประชาชน 13 หลักให้ถูกต้อง");
       return;
     }
     // Validate numbers instead of silently falling back to defaults.
