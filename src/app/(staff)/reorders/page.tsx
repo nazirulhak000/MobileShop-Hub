@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { DemoBanner } from "@/components/ui/DemoBanner";
+import Link from "next/link";
+import confetti from "canvas-confetti";
 import {
   ShoppingCart,
   AlertTriangle,
@@ -13,109 +14,208 @@ import {
   Building2,
   DollarSign,
   Truck,
+  RefreshCw,
+  FileText,
+  ArrowRight,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
-import { formatTHB, formatDateThai } from "@/lib/utils";
+import { formatTHB } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
 
 export default function AutomaticReordersPage() {
   const { currentBranch } = useApp();
-  const [products, setProducts] = useState<any[]>([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [orderQtys, setOrderQtys] = useState<Record<string, number>>({});
-  const [generatedPo, setGeneratedPo] = useState<any | null>(null);
+  const [converting, setConverting] = useState(false);
+  const [successPo, setSuccessPo] = useState<any | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const fetchInventory = async () => {
+  const fetchReorderData = async () => {
     try {
-      const res = await fetch(`/api/inventory?branch=${currentBranch.code}`);
-      const json = await res.json();
-      if (json.success) {
-        setProducts(json.products || []);
-        // Initialize reorder quantities to (minStock * 2 - currentStock)
+      setLoading(true);
+      setErrorMsg("");
+
+      // 1. Fetch low-stock reorder suggestions
+      const branchCode = currentBranch.code || currentBranch.id;
+      const res = await fetch(`/api/reorders?branch=${encodeURIComponent(branchCode)}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setItems(data.items || []);
         const initQtys: Record<string, number> = {};
-        (json.products || []).forEach((p: any) => {
-          const suggested = Math.max(1, p.minStock * 2 - p.currentStock);
-          initQtys[p.id] = suggested;
+        (data.items || []).forEach((item: any) => {
+          initQtys[item.id] = item.suggestedQuantity;
         });
         setOrderQtys(initQtys);
+      } else {
+        setErrorMsg(data.error || "โหลดข้อมูลรายการสั่งซื้อไม่สำเร็จ");
+      }
+
+      // 2. Fetch suppliers
+      const supRes = await fetch("/api/suppliers");
+      const supData = await supRes.json();
+      if (supRes.ok && supData.success) {
+        setSuppliers(supData.suppliers || []);
+        if (supData.suppliers?.length > 0 && !selectedSupplierId) {
+          setSelectedSupplierId(supData.suppliers[0].id);
+        }
       }
     } catch (err) {
       console.error(err);
+      setErrorMsg("เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchInventory();
-  }, [currentBranch.code]);
+    fetchReorderData();
+  }, [currentBranch.code, currentBranch.id]);
 
-  const lowStockItems = useMemo(() => {
-    return products.filter((p: any) => {
-      if (!p.isLowStock) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        return (
-          p.name.toLowerCase().includes(q) ||
-          p.code.toLowerCase().includes(q) ||
-          (p.brand || "").toLowerCase().includes(q)
-        );
+  const filteredItems = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter(
+      (item) =>
+        item.name.toLowerCase().includes(q) ||
+        item.code.toLowerCase().includes(q) ||
+        (item.brand || "").toLowerCase().includes(q) ||
+        (item.model || "").toLowerCase().includes(q)
+    );
+  }, [items, search]);
+
+  const totalReorderEstimate = useMemo(() => {
+    return filteredItems.reduce((sum, item) => {
+      const q = orderQtys[item.id] ?? item.suggestedQuantity ?? 1;
+      return sum + q * item.costPrice;
+    }, 0);
+  }, [filteredItems, orderQtys]);
+
+  // 1-Click convert low-stock suggestions into real PO draft
+  const handleConvertToPoDraft = async () => {
+    if (converting) return;
+    if (filteredItems.length === 0) {
+      alert("ไม่มีรายการสินค้าที่ต้องสั่งซื้อ");
+      return;
+    }
+
+    setConverting(true);
+    setErrorMsg("");
+    setSuccessPo(null);
+
+    try {
+      const selectedSup = suppliers.find((s) => s.id === selectedSupplierId);
+
+      const itemsPayload = filteredItems.map((item) => ({
+        productId: item.productId || item.id,
+        quantity: orderQtys[item.id] ?? item.suggestedQuantity ?? 1,
+        unitCost: item.costPrice,
+        code: item.code,
+        name: item.name,
+        category: item.category,
+      }));
+
+      const payload = {
+        branchId: currentBranch.id || currentBranch.code,
+        supplierId: selectedSupplierId || null,
+        supplierName: selectedSup?.name || "ซัพพลายเออร์ทั่วไป",
+        includeVat: true,
+        taxRate: 7,
+        items: itemsPayload,
+      };
+
+      const res = await fetch("/api/reorders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || "สร้างร่างใบสั่งซื้อไม่สำเร็จ");
+        return;
       }
-      return true;
-    });
-  }, [products, search]);
 
-  const handleGeneratePo = (selectedSupplier: string) => {
-    const itemsToOrder = lowStockItems.map((p: any) => ({
-      name: p.name,
-      code: p.code,
-      quantity: orderQtys[p.id] || 5,
-      unitCost: p.costPrice,
-      total: (orderQtys[p.id] || 5) * p.costPrice,
-    }));
-
-    const poTotal = itemsToOrder.reduce((sum: number, i: any) => sum + i.total, 0);
-
-    const po = {
-      poNumber: `DRAFT-${Date.now().toString().slice(-6)}`,
-      date: new Date().toISOString(),
-      branchName: currentBranch.name,
-      supplierName: selectedSupplier,
-      items: itemsToOrder,
-      totalAmount: poTotal,
-    };
-
-    setGeneratedPo(po);
+      confetti({ particleCount: 100, spread: 70 });
+      setSuccessPo(data.purchaseOrder);
+      // Refresh items after conversion
+      fetchReorderData();
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("ไม่สามารถเชื่อมต่อเพื่อบันทึกใบสั่งซื้อได้");
+    } finally {
+      setConverting(false);
+    }
   };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
-      <DemoBanner message="รายการแนะนำสั่งซื้อคำนวณจากสต็อกจริง แต่ใบสั่งซื้อ (PO) ยังไม่ถูกบันทึกในระบบ ใช้พิมพ์เป็นร่างเท่านั้น" />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
             <ShoppingCart className="w-6 h-6 text-blue-600" />
-            <span>สั่งซื้ออะไหล่ & สินค้าอัตโนมัติ (Automated Reorders)</span>
+            <span>แจ้งเตือนสั่งซื้อซ้ำอัตโนมัติ (Automated Reorder Alerts)</span>
           </h1>
           <p className="text-sm text-slate-500">
-            ระบบคำนวณยอดสั่งซื้ออัตโนมัติจากจุดเตือนสต็อกต่ำ (Min Stock) เพื่อออกใบสั่งซื้อ (PO) ส่งซัพพลายเออร์
+            ระบบคำนวณยอดสั่งซื้ออัตโนมัติจากจุดเตือนสต็อกต่ำ (Min Stock) พร้อมแปลงเป็นร่างใบสั่งซื้อ (PO) ภายใน 1 คลิก
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <Link href="/purchase-history">
+            <Button variant="outline" size="sm" className="text-xs gap-1.5 font-semibold text-slate-700">
+              <FileText className="w-3.5 h-3.5 text-slate-600" />
+              <span>ประวัติใบสั่งซื้อ</span>
+            </Button>
+          </Link>
           <Button
-            onClick={() => handleGeneratePo("ซีคอน พาร์ท โฮลเซลล์")}
-            className="bg-blue-600 hover:bg-blue-700 text-white gap-2 text-xs shadow-sm font-semibold"
+            onClick={handleConvertToPoDraft}
+            disabled={converting || filteredItems.length === 0}
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-2 text-xs shadow-sm font-semibold h-9"
           >
-            <Printer className="w-4 h-4" />
-            <span>ออกใบสั่งซื้อ PO ({lowStockItems.length} รายการ)</span>
+            <PackageCheck className="w-4 h-4" />
+            <span>
+              {converting ? "กำลังสร้างใบสั่งซื้อ..." : `1-Click สร้าง PO Draft (${filteredItems.length} รายการ)`}
+            </span>
           </Button>
         </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {successPo && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div>
+              <span className="font-bold">สร้างร่างใบสั่งซื้อสำเร็จ!</span> เลขที่ PO:{" "}
+              <strong className="font-mono text-emerald-800">{successPo.poNumber}</strong> (
+              {successPo.items?.length || filteredItems.length} รายการ, มูลค่า {formatTHB(successPo.totalAmount)})
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/purchase-history">
+              <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 font-semibold">
+                <span>ดูในประวัติการสั่งซื้อ</span>
+                <ArrowRight className="w-3 h-3" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {errorMsg && (
+        <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
@@ -123,7 +223,7 @@ export default function AutomaticReordersPage() {
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <div className="text-xs font-medium text-slate-500">รายการที่ต้องสั่งซื้อด่วน</div>
-              <div className="text-2xl font-bold text-rose-600 mt-0.5">{lowStockItems.length}</div>
+              <div className="text-2xl font-bold text-rose-600 mt-0.5">{filteredItems.length}</div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5" />
@@ -134,9 +234,9 @@ export default function AutomaticReordersPage() {
         <Card className="bg-white border-slate-200">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-medium text-slate-500">สาขาปัจจุบัน</div>
+              <div className="text-xs font-medium text-slate-500">สาขาเป้าหมาย</div>
               <div className="text-sm font-bold text-slate-900 mt-1 truncate max-w-[140px]">
-                {currentBranch.name}
+                {currentBranch.name || "สำนักงานใหญ่"}
               </div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -150,12 +250,7 @@ export default function AutomaticReordersPage() {
             <div>
               <div className="text-xs font-medium text-slate-500">มูลค่าสั่งซื้อประเมิน</div>
               <div className="text-2xl font-bold text-blue-700 mt-0.5 font-mono">
-                {formatTHB(
-                  lowStockItems.reduce(
-                    (sum: number, p: any) => sum + (orderQtys[p.id] || 5) * p.costPrice,
-                    0
-                  )
-                )}
+                {formatTHB(totalReorderEstimate)}
               </div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -165,30 +260,43 @@ export default function AutomaticReordersPage() {
         </Card>
 
         <Card className="bg-white border-slate-200">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-medium text-slate-500">ซัพพลายเออร์หลัก</div>
-              <div className="text-sm font-bold text-slate-900 mt-1">ซีคอน & เสือป่า</div>
-            </div>
-            <div className="h-9 w-9 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-              <Truck className="w-5 h-5" />
-            </div>
+          <CardContent className="p-3 space-y-1">
+            <div className="text-xs font-medium text-slate-500">เลือกซัพพลายเออร์</div>
+            <select
+              value={selectedSupplierId}
+              onChange={(e) => setSelectedSupplierId(e.target.value)}
+              className="w-full text-xs rounded border border-slate-300 p-1.5 bg-white font-semibold truncate"
+            >
+              {suppliers.length === 0 ? (
+                <option value="">ซัพพลายเออร์ทั่วไป</option>
+              ) : (
+                suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))
+              )}
+            </select>
           </CardContent>
         </Card>
       </div>
 
       {/* Search Filter Bar */}
       <Card className="border-slate-200">
-        <CardContent className="p-3">
-          <div className="relative">
+        <CardContent className="p-3 flex items-center gap-3">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="ค้นหาสินค้าที่ใกล้หมด (รหัส, ชื่อสินค้า, แบรนด์)..."
+              placeholder="ค้นหาสินค้าที่ใกล้หมด (รหัส, ชื่อสินค้า, แบรนด์, รุ่น)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
             />
           </div>
+          <Button variant="ghost" size="sm" onClick={fetchReorderData} className="h-9 px-3 text-xs gap-1 text-slate-600">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>รีเฟรช</span>
+          </Button>
         </CardContent>
       </Card>
 
@@ -202,9 +310,9 @@ export default function AutomaticReordersPage() {
                 <th className="py-3 px-4">ชื่อสินค้า & อะไหล่</th>
                 <th className="py-3 px-4 text-center">คงเหลือปัจจุบัน</th>
                 <th className="py-3 px-4 text-center">เกณฑ์ขั้นต่ำ (Min)</th>
-                <th className="py-3 px-4 text-center">จำนวนที่แนะนำสั่งซื้อ</th>
+                <th className="py-3 px-4 text-center">จำนวนสั่งซื้อ (ปรับได้)</th>
                 <th className="py-3 px-4 text-right">ต้นทุนต่อหน่วย</th>
-                <th className="py-3 px-4 text-right">ยอดเงินสั่งซื้อรวม</th>
+                <th className="py-3 px-4 text-right">ยอดสั่งซื้อรวม</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -214,16 +322,16 @@ export default function AutomaticReordersPage() {
                     กำลังตรวจสอบสต็อกสินค้า...
                   </td>
                 </tr>
-              ) : lowStockItems.length === 0 ? (
+              ) : filteredItems.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-12 text-slate-400">
                     สต็อกสินค้าทุกรายการอยู่ในเกณฑ์ปกติ ไม่มียอดที่ต้องสั่งซื้อด่วน
                   </td>
                 </tr>
               ) : (
-                lowStockItems.map((item: any) => {
-                  const qty = orderQtys[item.id] || 5;
-                  const totalEst = qty * item.costPrice;
+                filteredItems.map((item: any) => {
+                  const qty = orderQtys[item.id] ?? item.suggestedQuantity ?? 1;
+                  const lineTotal = qty * item.costPrice;
 
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
@@ -234,11 +342,13 @@ export default function AutomaticReordersPage() {
 
                       <td className="py-3 px-4 max-w-sm">
                         <div className="font-semibold text-slate-900">{item.name}</div>
-                        {item.brand && <div className="text-[10px] text-slate-400">แบรนด์: {item.brand}</div>}
+                        {item.brand && item.brand !== "-" && (
+                          <div className="text-[10px] text-slate-400">แบรนด์: {item.brand}</div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <span className="font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded text-xs">
+                        <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full text-xs">
                           {item.currentStock} ชิ้น
                         </span>
                       </td>
@@ -259,7 +369,7 @@ export default function AutomaticReordersPage() {
                               [item.id]: isNaN(val) ? 1 : Math.max(1, val),
                             }));
                           }}
-                          className="w-16 text-center font-bold text-xs p-1 rounded border border-blue-300 font-mono bg-white"
+                          className="w-18 text-center font-bold text-xs p-1.5 rounded border border-blue-300 font-mono bg-white shadow-xs focus:ring-1 focus:ring-blue-500"
                         />
                       </td>
 
@@ -268,7 +378,7 @@ export default function AutomaticReordersPage() {
                       </td>
 
                       <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-bold text-blue-700">
-                        {formatTHB(totalEst)}
+                        {formatTHB(lineTotal)}
                       </td>
                     </tr>
                   );
@@ -278,91 +388,6 @@ export default function AutomaticReordersPage() {
           </table>
         </div>
       </Card>
-
-      {/* PO Preview Modal */}
-      {generatedPo && (
-        <Dialog open={!!generatedPo} onOpenChange={() => setGeneratedPo(null)}>
-          <DialogContent className="max-w-2xl p-0">
-            <DialogHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
-              <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Printer className="w-4 h-4 text-blue-600" />
-                <span>ร่างใบสั่งซื้อ (ยังไม่บันทึกในระบบ)</span>
-              </DialogTitle>
-              <Button size="sm" onClick={() => window.print()} className="h-7 text-xs bg-blue-600 text-white">
-                พิมพ์ PO (A4)
-              </Button>
-            </DialogHeader>
-
-            <div className="p-6 bg-slate-100 flex justify-center">
-              <div
-                id="po-document"
-                className="w-[580px] bg-white text-slate-900 p-6 rounded border border-slate-300 shadow-sm font-sans text-xs space-y-4"
-              >
-                <div className="flex justify-between items-start pb-3 border-b-2 border-slate-800">
-                  <div>
-                    <h2 className="text-sm font-bold">MobileShop-Hub Service</h2>
-                    <div className="text-[11px] text-slate-600">สาขา: {generatedPo.branchName}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-xs uppercase bg-slate-900 text-white px-2 py-0.5 rounded">
-                      PURCHASE ORDER
-                    </div>
-                    <div className="font-mono text-xs font-bold mt-1">{generatedPo.poNumber}</div>
-                    <div className="text-[10px] text-slate-500">{formatDateThai(generatedPo.date)}</div>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-slate-50 rounded border text-xs">
-                  <div>สั่งซื้อถึง: <span className="font-semibold">{generatedPo.supplierName}</span></div>
-                  <div>เงื่อนไขชำระเงิน: เครดิต 30 วัน / วางบิลปลายเดือน</div>
-                </div>
-
-                <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border border-slate-200">
-                  <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-700">
-                    <tr>
-                      <th className="p-2">รายการ</th>
-                      <th className="p-2 text-center w-16">จำนวน</th>
-                      <th className="p-2 text-right w-24">ราคา/หน่วย</th>
-                      <th className="p-2 text-right w-24">รวมเงิน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {generatedPo.items.map((it: any, idx: number) => (
-                      <tr key={idx}>
-                        <td className="p-2 font-medium">{it.name}</td>
-                        <td className="p-2 text-center font-bold">{it.quantity}</td>
-                        <td className="p-2 text-right font-mono">{formatTHB(it.unitCost)}</td>
-                        <td className="p-2 text-right font-mono font-bold">{formatTHB(it.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-50 font-bold">
-                      <td colSpan={3} className="p-2 text-right">ยอดรวมทั้งสิ้น:</td>
-                      <td className="p-2 text-right text-blue-700 font-mono text-sm">
-                        {formatTHB(generatedPo.totalAmount)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-                </div>
-
-                <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs">
-                  <div>
-                    <div className="h-10 border-b border-slate-400"></div>
-                    <div className="mt-1">ผู้สั่งซื้อ (Authorized By)</div>
-                  </div>
-                  <div>
-                    <div className="h-10 border-b border-slate-400"></div>
-                    <div className="mt-1">ผู้รับคำสั่งซื้อ (Supplier Sign)</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
   );
 }

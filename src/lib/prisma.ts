@@ -58,7 +58,8 @@ async function validateData(model: string, data: Args, actor: StaffPrincipal, cr
     if (field.kind !== "object") continue;
     const nested = data[field.name];
     if (nested !== undefined) {
-      if (model !== "InstallmentContract" || field.name !== "payments" || !nested.create || Object.keys(nested).some(k => k !== "create")) throw new AccessError(400, "ไม่รองรับการแก้ไขความสัมพันธ์รูปแบบนี้");
+      const isAllowedNested = (model === "InstallmentContract" && field.name === "payments") || (model === "PurchaseOrder" && field.name === "items");
+      if (!isAllowedNested || !nested.create || Object.keys(nested).some(k => k !== "create")) throw new AccessError(400, "ไม่รองรับการแก้ไขความสัมพันธ์รูปแบบนี้");
       for (const row of Array.isArray(nested.create) ? nested.create : [nested.create]) await validateData(field.type, row, actor, true);
     }
     for (const fk of field.relationFromFields ?? []) {
