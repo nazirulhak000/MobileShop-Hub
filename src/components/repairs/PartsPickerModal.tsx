@@ -174,11 +174,13 @@ export function PartsPickerModal({
 
                     <div className="flex items-center gap-3 text-xs pt-0.5">
                       <span className="font-semibold text-blue-700">
-                        ราคาขาย: {formatTHB(p.sellPrice)}
+                        ราคาขาย: {formatTHB(p.sellPrice || 0)}
                       </span>
-                      <span className="text-slate-400 text-[11px]">
-                        (ต้นทุน: {formatTHB(p.costPrice)})
-                      </span>
+                      {p.costPrice !== undefined && (
+                        <span className="text-slate-400 text-[11px]">
+                          (ต้นทุน: {formatTHB(p.costPrice)})
+                        </span>
+                      )}
                     </div>
                   </div>
 

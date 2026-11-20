@@ -220,8 +220,31 @@ async function handlePATCH(
         for (const usage of usages) {
           await tx.stockItem.upsert({
             where: { productId_branchId: { productId: usage.productId, branchId: existing.branchId } },
-            create: { productId: usage.productId, branchId: existing.branchId, quantity: usage.quantity },
+            create: {
+              tenantId: actor.tenantId,
+              productId: usage.productId,
+              branchId: existing.branchId,
+              quantity: usage.quantity,
+            },
             update: { quantity: { increment: usage.quantity } },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              tenantId: actor.tenantId,
+              userId: actor.id,
+              module: "INVENTORY",
+              action: "STOCK_RETURN",
+              targetId: usage.productId,
+              details: JSON.stringify({
+                reason: `คืนอะไหล่เข้าสต็อกเนื่องจากยกเลิกงานซ่อม ${existing.trackingCode}`,
+                repairJobId: existing.id,
+                productId: usage.productId,
+                branchId: existing.branchId,
+                quantity: usage.quantity,
+              }),
+              severity: "WARNING",
+            },
           });
         }
         if (usages.length > 0) {

@@ -34,7 +34,14 @@ export function WarrantyDeliveryPrint({
           return QRCode.toDataURL(`${origin}/track/${token}`, { width: 140, margin: 1 });
         })
         .then((url) => { if (!cancelled) setQrCodeDataUrl(url); })
-        .catch(console.error);
+        .catch((err) => {
+          console.error(err);
+          if (!cancelled && job.trackingCode) {
+            QRCode.toDataURL(`${origin}/track/${job.trackingCode}`, { width: 140, margin: 1 })
+              .then((url) => { if (!cancelled) setQrCodeDataUrl(url); })
+              .catch(console.error);
+          }
+        });
       return () => { cancelled = true; };
     }
   }, [job?.id, isOpen]);
@@ -316,8 +323,11 @@ export function WarrantyDeliveryPrint({
             <div
               id="print-document"
               className={`${
-                printFormat === "58mm" ? "thermal-58mm" : "thermal-80mm"
-              } w-[300px] bg-white text-black p-4 font-mono text-[11px] leading-tight shadow-md border border-slate-300 rounded-sm`}
+                printFormat === "58mm" ? "w-[230px] text-[10px]" : "w-[300px] text-[11px]"
+              } bg-white text-black p-3.5 shadow-md border border-slate-300 rounded-sm leading-normal`}
+              style={{
+                fontFamily: "'Sarabun', 'Noto Sans Thai', 'Segoe UI', Tahoma, sans-serif",
+              }}
             >
               <div className="text-center pb-2 border-b border-dashed border-black">
                 <h2 className="text-sm font-bold">
@@ -388,20 +398,29 @@ export function WarrantyDeliveryPrint({
 
       <style jsx global>{`
         @media print {
+          @page {
+            size: ${printFormat === "A4" ? "A4 portrait" : printFormat === "58mm" ? "58mm auto" : "80mm auto"};
+            margin: ${printFormat === "A4" ? "8mm" : "0"};
+          }
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
           }
           #print-document,
           #print-document * {
-            visibility: visible;
+            visibility: visible !important;
           }
           #print-document {
-            position: absolute;
-            left: 0;
-            top: 0;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: ${printFormat === "A4" ? "100%" : printFormat === "58mm" ? "58mm" : "80mm"} !important;
+            max-width: ${printFormat === "A4" ? "210mm" : printFormat === "58mm" ? "58mm" : "80mm"} !important;
+            padding: ${printFormat === "A4" ? "0" : printFormat === "58mm" ? "2.5mm" : "4mm"} !important;
             box-shadow: none !important;
             border: none !important;
             margin: 0 !important;
+            background: white !important;
+            color: black !important;
           }
         }
       `}</style>

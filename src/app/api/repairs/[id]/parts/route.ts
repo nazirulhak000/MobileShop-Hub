@@ -45,24 +45,25 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
   const quantity = reqInt(body?.quantity, "quantity", 1, 100);
 
   const { updatedJob, productName } = await prisma.$transaction(async (tx) => {
-    const job = await tx.repairJob.findFirst({ where: { id: jobId } });
+    const job = await tx.repairJob.findFirst({ where: { id: jobId, tenantId: actor.tenantId } });
     if (!job) throw new AccessError(404, "ไม่พบข้อมูลใบงานซ่อม");
     if (LOCKED_STATUSES.includes(job.status)) {
       throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถเบิกอะไหล่เพิ่มได้");
     }
 
-    const product = await tx.product.findFirst({ where: { id: productId } });
+    const product = await tx.product.findFirst({ where: { id: productId, tenantId: actor.tenantId } });
     if (!product) throw new AccessError(404, "ไม่พบข้อมูลสินค้าอะไหล่");
 
     // Atomic guarded decrement: fails if another request consumed the stock first.
     const { count } = await tx.stockItem.updateMany({
-      where: { productId, branchId: job.branchId, quantity: { gte: quantity } },
+      where: { productId, branchId: job.branchId, quantity: { gte: quantity }, tenantId: actor.tenantId },
       data: { quantity: { decrement: quantity } },
     });
     if (count !== 1) throw new AccessError(409, "อะไหล่ในสต็อกไม่พอ");
 
     const usage = await tx.repairPartUsage.create({
       data: {
+        tenantId: actor.tenantId,
         repairJobId: job.id,
         productId,
         quantity,
@@ -87,6 +88,24 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
       },
     });
 
+    await tx.auditLog.create({
+      data: {
+        tenantId: actor.tenantId,
+        userId: actor.id,
+        module: "INVENTORY",
+        action: "STOCK_DEDUCT",
+        targetId: product.id,
+        details: JSON.stringify({
+          reason: `เบิกใช้อะไหล่ในใบงานซ่อม ${job.trackingCode}`,
+          repairJobId: job.id,
+          productId,
+          branchId: job.branchId,
+          quantity,
+        }),
+        severity: "INFO",
+      },
+    });
+
     return { updatedJob: updated, productName: product.name };
   });
 
@@ -99,19 +118,23 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
 
 async function handleDELETE(request: NextRequest, { params }: { params: { id: string } }) {
   const actor = staffContext();
-  requireRole(actor.role, ["ADMIN", "MANAGER"]);
+  requireRole(actor.role, ["ADMIN", "MANAGER", "TECHNICIAN"]);
   const jobId = reqId(params?.id, "id");
   const { searchParams } = new URL(request.url);
   const usageId = reqId(searchParams.get("usageId"), "usageId");
 
   const updatedJob = await prisma.$transaction(async (tx) => {
     const usage = await tx.repairPartUsage.findFirst({
-      where: { id: usageId },
+      where: { id: usageId, repairJob: { tenantId: actor.tenantId } },
       include: { repairJob: true },
     });
     if (!usage || usage.repairJobId !== jobId) throw new AccessError(404, "ไม่พบรายการเบิกอะไหล่นี้");
     if (LOCKED_STATUSES.includes(usage.repairJob.status)) {
       throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถคืนอะไหล่ได้");
+    }
+
+    if (actor.role === "TECHNICIAN" && usage.repairJob.technicianId && usage.repairJob.technicianId !== actor.id) {
+      throw new AccessError(403, "ไม่มีสิทธิ์คืนอะไหล่ของงานช่างท่านอื่น");
     }
 
     // Delete first (deleteMany guards against a concurrent double-return).
@@ -123,6 +146,7 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
         productId_branchId: { productId: usage.productId, branchId: usage.repairJob.branchId },
       },
       create: {
+        tenantId: actor.tenantId,
         productId: usage.productId,
         branchId: usage.repairJob.branchId,
         quantity: usage.quantity,
@@ -146,6 +170,25 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
       },
     });
 
+    await tx.auditLog.create({
+      data: {
+        tenantId: actor.tenantId,
+        userId: actor.id,
+        module: "INVENTORY",
+        action: "STOCK_RETURN",
+        targetId: usage.productId,
+        details: JSON.stringify({
+          reason: `คืนอะไหล่เข้าสต็อกจากใบงานซ่อม ${usage.repairJob.trackingCode}`,
+          repairJobId: jobId,
+          usageId,
+          productId: usage.productId,
+          branchId: usage.repairJob.branchId,
+          quantity: usage.quantity,
+        }),
+        severity: "INFO",
+      },
+    });
+
     return updated;
   });
 
@@ -158,4 +201,4 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
 
 export const POST = withStaff(handlePOST, ["ADMIN", "MANAGER", "CASHIER", "TECHNICIAN"]);
 
-export const DELETE = withStaff(handleDELETE, ["ADMIN", "MANAGER"]);
+export const DELETE = withStaff(handleDELETE, ["ADMIN", "MANAGER", "TECHNICIAN"]);
