@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   ChevronRight,
   Info,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/Button";
@@ -44,7 +46,7 @@ interface DeviceIMEIItem {
   imei: string;
   serialNo?: string | null;
   conditionGrade: "A" | "B" | "C";
-  status: "IN_STOCK" | "SOLD" | "IN_REPAIR" | "PAWNED" | "RETURNED";
+  status: "IN_STOCK" | "SOLD" | "IN_REPAIR" | "PAWNED" | "RETURNED" | "DEFECTIVE";
   costPrice: number;
   sellPrice: number;
   branch?: { name: string; code: string };
@@ -55,7 +57,7 @@ interface ProductItem {
   id: string;
   code: string;
   name: string;
-  category: "ACCESSORY" | "SPARE_PART" | "DEVICE";
+  category: "ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE";
   brand: string;
   model: string;
   compatibleModels: string[];
@@ -73,7 +75,7 @@ export default function InventoryPage() {
   const { currentBranch } = useApp();
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"ALL" | "ACCESSORY" | "SPARE_PART" | "DEVICE">("ALL");
+  const [activeTab, setActiveTab] = useState<"ALL" | "ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [onlyLowStock, setOnlyLowStock] = useState(false);
 
@@ -99,7 +101,7 @@ export default function InventoryPage() {
   const [newProductModalOpen, setNewProductModalOpen] = useState(false);
   const [npCode, setNpCode] = useState("");
   const [npName, setNpName] = useState("");
-  const [npCategory, setNpCategory] = useState<"ACCESSORY" | "SPARE_PART" | "DEVICE">("ACCESSORY");
+  const [npCategory, setNpCategory] = useState<"ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE">("ACCESSORY");
   const [npBrand, setNpBrand] = useState("");
   const [npModel, setNpModel] = useState("");
   const [npCompatibles, setNpCompatibles] = useState("");
@@ -108,6 +110,20 @@ export default function InventoryPage() {
   const [npMinStock, setNpMinStock] = useState("5");
   const [npInitialStock, setNpInitialStock] = useState("10");
   const [creatingProduct, setCreatingProduct] = useState(false);
+
+  // Edit Product Modal
+  const [editProductModalOpen, setEditProductModalOpen] = useState(false);
+  const [editProductId, setEditProductId] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState<"ACCESSORY" | "SPARE_PART" | "DEVICE" | "SERVICE">("ACCESSORY");
+  const [editBrand, setEditBrand] = useState("");
+  const [editModel, setEditModel] = useState("");
+  const [editCompatibles, setEditCompatibles] = useState("");
+  const [editCost, setEditCost] = useState("");
+  const [editSell, setEditSell] = useState("");
+  const [editMinStock, setEditMinStock] = useState("5");
+  const [editingProduct, setEditingProduct] = useState(false);
 
   // Toast feedback message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -161,14 +177,90 @@ export default function InventoryPage() {
     const accessoryCount = products.filter((p) => p.category === "ACCESSORY").length;
     const sparePartsCount = products.filter((p) => p.category === "SPARE_PART").length;
     const deviceCount = products.filter((p) => p.category === "DEVICE").length;
+    const serviceCount = products.filter((p) => p.category === "SERVICE").length;
     const lowStockTotal = products.filter((p) => p.isLowStock).length;
     const inStockIMEIs = products
       .filter((p) => p.category === "DEVICE")
       .reduce((acc, p) => acc + p.imeis.filter((i) => i.status === "IN_STOCK").length, 0);
     const totalInventoryValue = products.reduce((acc, p) => acc + p.currentStock * p.sellPrice, 0);
 
-    return { totalSKUs, accessoryCount, sparePartsCount, deviceCount, lowStockTotal, inStockIMEIs, totalInventoryValue };
+    return { totalSKUs, accessoryCount, sparePartsCount, deviceCount, serviceCount, lowStockTotal, inStockIMEIs, totalInventoryValue };
   }, [products]);
+
+  // Handle Open Edit Product Modal
+  const handleOpenEditProduct = (p: ProductItem) => {
+    setEditProductId(p.id);
+    setEditCode(p.code);
+    setEditName(p.name);
+    setEditCategory(p.category);
+    setEditBrand(p.brand || "");
+    setEditModel(p.model || "");
+    setEditCompatibles(p.compatibleModels ? p.compatibleModels.join(", ") : "");
+    setEditCost(String(p.costPrice || ""));
+    setEditSell(String(p.sellPrice || ""));
+    setEditMinStock(String(p.minStock || 5));
+    setEditProductModalOpen(true);
+  };
+
+  // Handle Save Edit Product
+  const handleSaveEditProduct = async () => {
+    if (!editProductId || !editName.trim()) {
+      alert("กรุณาระบุชื่อสินค้า");
+      return;
+    }
+    try {
+      setEditingProduct(true);
+      const compatList = editCompatibles
+        ? editCompatibles.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
+      const res = await fetch("/api/inventory", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editProductId,
+          name: editName.trim(),
+          category: editCategory,
+          brand: editBrand.trim(),
+          model: editModel.trim(),
+          compatibleModels: compatList,
+          costPrice: Number(editCost) || 0,
+          sellPrice: Number(editSell) || 0,
+          minStock: Number(editMinStock) || 5,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`แก้ไขข้อมูลสินค้า ${editName} สำเร็จ`);
+        setEditProductModalOpen(false);
+        fetchProducts();
+      } else {
+        alert(data.error || "เกิดข้อผิดพลาดในการแก้ไขสินค้า");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setEditingProduct(false);
+    }
+  };
+
+  // Handle Delete Product
+  const handleDeleteProduct = async (p: ProductItem) => {
+    if (!confirm(`คุณต้องการลบสินค้า "${p.name}" (${p.code}) ใช่หรือไม่?`)) return;
+    try {
+      const res = await fetch(`/api/inventory?id=${p.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || `ลบสินค้า ${p.name} สำเร็จ`);
+        fetchProducts();
+      } else {
+        alert(data.error || "ไม่สามารถลบสินค้าได้");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+  };
 
   // Handle Stock Adjustment
   const handleAdjustStock = async () => {
@@ -392,6 +484,8 @@ export default function InventoryPage() {
               <span>อะไหล่ {stats.sparePartsCount}</span>
               <span>•</span>
               <span>เครื่อง {stats.deviceCount}</span>
+              <span>•</span>
+              <span>บริการ {stats.serviceCount}</span>
             </div>
           </CardContent>
         </Card>
@@ -500,6 +594,17 @@ export default function InventoryPage() {
             >
               <Smartphone className="h-3.5 w-3.5" />
               <span>เครื่องมือหนึ่ง / มือสอง & IMEI ({stats.deviceCount})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("SERVICE")}
+              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-all ${
+                activeTab === "SERVICE"
+                  ? "bg-white text-slate-900 shadow-xs font-semibold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+              }`}
+            >
+              <Tag className="h-3.5 w-3.5" />
+              <span>บริการ & ค่าแรง ({stats.serviceCount})</span>
             </button>
           </div>
 
@@ -747,6 +852,26 @@ export default function InventoryPage() {
                               <span>ปรับสต็อก</span>
                             </Button>
                           )}
+
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenEditProduct(product)}
+                            className="h-7 w-7 p-0 text-slate-500 hover:text-blue-600 hover:bg-blue-50"
+                            title="แก้ไขสินค้า"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteProduct(product)}
+                            className="h-7 w-7 p-0 text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+                            title="ลบสินค้า"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1026,6 +1151,8 @@ export default function InventoryPage() {
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                               : im.status === "SOLD"
                               ? "bg-slate-100 text-slate-600 border-slate-200"
+                              : im.status === "DEFECTIVE"
+                              ? "bg-rose-50 text-rose-700 border-rose-200"
                               : im.status === "PAWNED"
                               ? "bg-amber-50 text-amber-700 border-amber-200"
                               : "bg-purple-50 text-purple-700 border-purple-200";
@@ -1039,6 +1166,9 @@ export default function InventoryPage() {
                                     SN: {im.serialNo}
                                   </div>
                                 )}
+                                <div className="text-[10px] text-blue-600 font-medium">
+                                  สาขา: {im.branch?.name || currentBranch.name}
+                                </div>
                               </td>
 
                               <td className="py-2.5 px-3 text-center">
@@ -1061,6 +1191,8 @@ export default function InventoryPage() {
                                     ? "พร้อมขาย"
                                     : im.status === "SOLD"
                                     ? "ขายแล้ว"
+                                    : im.status === "DEFECTIVE"
+                                    ? "ชำรุด/มีตำหนิ"
                                     : im.status === "PAWNED"
                                     ? "อยู่ระหว่างจำนำ"
                                     : im.status === "IN_REPAIR"
@@ -1086,6 +1218,7 @@ export default function InventoryPage() {
                                 >
                                   <option value="IN_STOCK">พร้อมขาย</option>
                                   <option value="SOLD">ขายแล้ว</option>
+                                  <option value="DEFECTIVE">ชำรุด/มีตำหนิ</option>
                                   <option value="IN_REPAIR">ส่งซ่อม</option>
                                   <option value="PAWNED">จำนำ</option>
                                   <option value="RETURNED">ส่งคืน</option>
@@ -1124,7 +1257,7 @@ export default function InventoryPage() {
             <label className="text-xs font-semibold text-slate-700 mb-1 block">
               หมวดหมู่สินค้า *
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => setNpCategory("ACCESSORY")}
@@ -1157,6 +1290,17 @@ export default function InventoryPage() {
                 }`}
               >
                 โทรศัพท์มือถือ
+              </button>
+              <button
+                type="button"
+                onClick={() => setNpCategory("SERVICE")}
+                className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                  npCategory === "SERVICE"
+                    ? "border-amber-600 bg-amber-50 text-amber-700 ring-2 ring-amber-200"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                บริการ / ค่าแรง
               </button>
             </div>
           </div>
@@ -1286,6 +1430,181 @@ export default function InventoryPage() {
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {creatingProduct ? "กำลังบันทึก..." : "เพิ่มสินค้าใหม่"}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* ================= MODAL 4: Edit Product Modal ================= */}
+      <Dialog open={editProductModalOpen} onOpenChange={setEditProductModalOpen}>
+        <DialogHeader>
+          <DialogTitle onClose={() => setEditProductModalOpen(false)}>
+            แก้ไขข้อมูลสินค้า (Edit Product: {editCode})
+          </DialogTitle>
+        </DialogHeader>
+
+        <DialogContent className="space-y-3 max-h-[80vh] overflow-y-auto">
+          {/* Category */}
+          <div>
+            <label className="text-xs font-semibold text-slate-700 mb-1 block">
+              หมวดหมู่สินค้า *
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setEditCategory("ACCESSORY")}
+                className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                  editCategory === "ACCESSORY"
+                    ? "border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-200"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                อุปกรณ์เสริม
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditCategory("SPARE_PART")}
+                className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                  editCategory === "SPARE_PART"
+                    ? "border-purple-600 bg-purple-50 text-purple-700 ring-2 ring-purple-200"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                อะไหล่ซ่อมมือถือ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditCategory("DEVICE")}
+                className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                  editCategory === "DEVICE"
+                    ? "border-indigo-600 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-200"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                โทรศัพท์มือถือ
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditCategory("SERVICE")}
+                className={`p-2 rounded-lg border text-xs font-semibold transition-all ${
+                  editCategory === "SERVICE"
+                    ? "border-amber-600 bg-amber-50 text-amber-700 ring-2 ring-amber-200"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                บริการ / ค่าแรง
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                รหัสสินค้า (SKU Code)
+              </label>
+              <Input
+                disabled
+                value={editCode}
+                className="font-mono text-xs bg-slate-100 text-slate-500 cursor-not-allowed"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                แบรนด์ (Brand)
+              </label>
+              <Input
+                placeholder="เช่น Apple, Samsung, Anker"
+                value={editBrand}
+                onChange={(e) => setEditBrand(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 mb-1 block">
+              ชื่อสินค้า / ชิ้นส่วนอะไหล่ *
+            </label>
+            <Input
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="text-xs"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 mb-1 block">
+              รุ่นหลัก (Model)
+            </label>
+            <Input
+              placeholder="เช่น iPhone 15, Galaxy S24"
+              value={editModel}
+              onChange={(e) => setEditModel(e.target.value)}
+              className="text-xs"
+            />
+          </div>
+
+          {editCategory === "SPARE_PART" && (
+            <div>
+              <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                รุ่นโทรศัพท์ที่ใส่ด้วยกันได้ (Compatible Models คั่นด้วยจุลภาค)
+              </label>
+              <Input
+                placeholder="เช่น iPhone 13, iPhone 13 Pro, iPhone 14"
+                value={editCompatibles}
+                onChange={(e) => setEditCompatibles(e.target.value)}
+                className="text-xs"
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 mb-1 block">
+                ราคาทุน (บาท)
+              </label>
+              <Input
+                type="number"
+                value={editCost}
+                onChange={(e) => setEditCost(e.target.value)}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 mb-1 block">
+                ราคาขาย (บาท)
+              </label>
+              <Input
+                type="number"
+                value={editSell}
+                onChange={(e) => setEditSell(e.target.value)}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 mb-1 block">
+                เกณฑ์แจ้งเตือนสต็อกต่ำ (Min)
+              </label>
+              <Input
+                type="number"
+                value={editMinStock}
+                onChange={(e) => setEditMinStock(e.target.value)}
+                className="font-mono text-xs"
+              />
+            </div>
+          </div>
+        </DialogContent>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setEditProductModalOpen(false)}>
+            ยกเลิก
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSaveEditProduct}
+            disabled={editingProduct}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {editingProduct ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
           </Button>
         </DialogFooter>
       </Dialog>
