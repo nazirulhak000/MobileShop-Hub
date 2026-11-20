@@ -2654,6 +2654,8 @@ test("Round 17: Customer Management & CRM Audit - Normalization, Duplicate Preve
   const staffB: StaffPrincipal = {
     id: "user-b",
     tenantId: "test-b",
+    name: "Admin B",
+    branchId: foreignBranch,
     branchIds: [foreignBranch],
     role: "ADMIN",
     username: "admin_b",
