@@ -46,6 +46,12 @@ export function SignaturePad({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if pointer capture fails
+    }
+
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
@@ -80,8 +86,15 @@ export function SignaturePad({
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
     if (readonly || !isDrawing) return;
+    if (e) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // Ignore
+      }
+    }
     setIsDrawing(false);
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -96,6 +109,7 @@ export function SignaturePad({
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
     setHasDrawn(false);
     onChange?.("");
   };

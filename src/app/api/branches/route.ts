@@ -1,5 +1,5 @@
 import { AccessError } from "@/lib/staff-context";
-import { reqId, safeError, withStaff } from "@/lib/staff-http";
+import { reqId, safeError, withStaff, readJson } from "@/lib/staff-http";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -50,7 +50,8 @@ async function handleGET() {
 
 async function handlePOST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await readJson<Record<string, any>>(req);
+    if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const name = reqText(body.name, "name", 150);
     const code = reqCode(body.code);
 
@@ -78,7 +79,8 @@ async function handlePOST(req: Request) {
 
 async function handlePUT(req: Request) {
   try {
-    const body = await req.json();
+    const body = await readJson<Record<string, any>>(req);
+    if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const id = reqId(body.id, "id");
 
     // Only update fields that are present in the request body.

@@ -138,9 +138,15 @@ export function PartsPickerModal({
             </div>
           ) : (
             parts.map((p) => {
-              const compatible = p.compatibleModels
-                ? JSON.parse(p.compatibleModels)
-                : [];
+              let compatible: string[] = [];
+              if (p.compatibleModels) {
+                try {
+                  const parsed = JSON.parse(p.compatibleModels);
+                  compatible = Array.isArray(parsed) ? parsed : [String(parsed)];
+                } catch {
+                  compatible = p.compatibleModels.split(",").map((s) => s.trim()).filter(Boolean);
+                }
+              }
 
               return (
                 <div

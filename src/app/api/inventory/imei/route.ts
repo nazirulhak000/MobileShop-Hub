@@ -76,8 +76,12 @@ async function handlePOST(request: NextRequest) {
   const body = await readJson(request);
   const productId = reqId(body?.productId, "productId");
   const branchCode = reqId(body?.branchCode, "branchCode");
-  const imei = reqId(body?.imei, "imei");
-  const serialNo = typeof body?.serialNo === "string" && body.serialNo.trim() ? body.serialNo.trim() : null;
+  const rawImei = reqId(body?.imei, "imei");
+  const imei = rawImei.replace(/\s+/g, "");
+  if (imei.length < 8 || imei.length > 30) {
+    throw new AccessError(400, "หมายเลข IMEI หรือ Serial Number ต้องมีความยาว 8-30 ตัวอักษร");
+  }
+  const serialNo = typeof body?.serialNo === "string" && body.serialNo.trim() ? body.serialNo.trim().replace(/\s+/g, "") : null;
   const conditionGrade =
     body?.conditionGrade === undefined || body?.conditionGrade === null || body?.conditionGrade === ""
       ? "A"
@@ -90,6 +94,7 @@ async function handlePOST(request: NextRequest) {
       where: { OR: [{ code: branchCode }, { id: branchCode }] },
     });
     if (!branch) throw new AccessError(404, "ไม่พบสาขา");
+    if (!actor.branchIds.includes(branch.id)) throw new AccessError(403, "ไม่มีสิทธิ์จัดการ IMEI ในสาขานี้");
 
     // Duplicate check inside the tx; the @@unique([tenantId, imei]) index is the final guard.
     const existing = await tx.deviceIMEI.findFirst({ where: { imei } });
@@ -97,6 +102,7 @@ async function handlePOST(request: NextRequest) {
 
     const created = await tx.deviceIMEI.create({
       data: {
+        tenantId: actor.tenantId ?? branch.tenantId,
         productId,
         branchId: branch.id,
         imei,
@@ -112,7 +118,7 @@ async function handlePOST(request: NextRequest) {
     await tx.stockItem.upsert({
       where: { productId_branchId: { productId, branchId: branch.id } },
       update: { quantity: { increment: 1 } },
-      create: { productId, branchId: branch.id, quantity: 1 },
+      create: { tenantId: actor.tenantId ?? branch.tenantId, productId, branchId: branch.id, quantity: 1 },
     });
 
     await tx.auditLog.create({

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { db } from "./db";
-import { AccessError, StaffPrincipal, StaffRole } from "./staff-context";
+import { AccessError, StaffPrincipal, StaffRole, staffStorage } from "./staff-context";
 
 // Production uses the `__Host-` prefix (browser enforces Secure, Path=/, no Domain → cannot be set by a
 // sibling subdomain). The legacy name is still READ during the transition so existing sessions survive,
@@ -23,8 +23,21 @@ export function clearStaffCookies(store: { set(name: string, value: string, opti
   store.set(LEGACY_STAFF_COOKIE, "", { ...cookieOptions, maxAge: 0 });
   if (process.env.NODE_ENV === "production") store.set(SECURE_STAFF_COOKIE, "", { ...cookieOptions, secure: true, maxAge: 0 });
 }
-export async function requireStaffSession(): Promise<StaffPrincipal> {
-  const token = staffTokens(await cookies())[0];
+export async function requireStaffSession(req?: any): Promise<StaffPrincipal> {
+  const current = staffStorage.getStore();
+  if (current) return current;
+
+  let store: any;
+  try {
+    store = await cookies();
+  } catch {
+    if (req && "cookies" in req && req.cookies) {
+      store = req.cookies;
+    } else {
+      throw new AccessError(401, "กรุณาเข้าสู่ระบบของร้านก่อน");
+    }
+  }
+  const token = staffTokens(store)[0];
   if (!token) throw new AccessError(401, "กรุณาเข้าสู่ระบบของร้านก่อน");
   const session = await db.staffSession.findUnique({ where: { tokenHash: hashToken(token) } });
   if (!session || session.revokedAt || session.expiresAt <= new Date()) throw new AccessError(401, "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง");

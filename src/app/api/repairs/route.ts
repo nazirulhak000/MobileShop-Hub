@@ -1,6 +1,5 @@
-import { AccessError } from "@/lib/staff-context";
-import { safeError } from "@/lib/staff-http";
-import { withStaff } from "@/lib/staff-http";
+import { AccessError, staffContext } from "@/lib/staff-context";
+import { readJson, safeError, withStaff } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { generateNextTrackingCode, getRepairJobs, redactDeviceLock, staffUserSelect } from "@/lib/repairs";
@@ -17,19 +16,15 @@ async function handleGET(request: NextRequest) {
 
     const jobs = await getRepairJobs({ status, branchId, technicianId, search });
     return NextResponse.json({ success: true, data: jobs });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("Error fetching repair jobs:");
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch repairs" },
-      { status: 500 }
-    );
+  } catch (error) {
+    return safeError(error);
   }
 }
 
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const actor = staffContext();
+    const body = await readJson(request);
     const {
       customerId,
       customerName,
@@ -62,38 +57,7 @@ async function handlePOST(request: NextRequest) {
       );
     }
 
-    // Resolve Customer
-    let finalCustomerId = customerId;
-    if (!finalCustomerId) {
-      if (!customerPhone || !customerName) {
-        return NextResponse.json(
-          { success: false, error: "กรุณาระบุชื่อและเบอร์โทรศัพท์ลูกค้า" },
-          { status: 400 }
-        );
-      }
-
-      // Check if customer exists by phone
-      let existingCustomer = await prisma.customer.findFirst({
-        where: { phone: customerPhone.trim() },
-      });
-
-      if (!existingCustomer) {
-        existingCustomer = await prisma.customer.create({
-          data: {
-            name: customerName.trim(),
-            phone: customerPhone.trim(),
-            lineId: customerLineId ? customerLineId.trim() : null,
-            address: customerAddress ? customerAddress.trim() : null,
-            nationalId: customerNationalId ? customerNationalId.trim() : null,
-          },
-        });
-      }
-      finalCustomerId = existingCustomer.id;
-    }
-
-    // Resolve Branch
-    const targetBranchId = branchId;
-    if (!targetBranchId) {
+    if (!branchId) {
       return NextResponse.json({ success: false, error: "กรุณาเลือกสาขารับเครื่อง" }, { status: 400 });
     }
 
@@ -112,47 +76,100 @@ async function handlePOST(request: NextRequest) {
       finalPatternLock = source.patternLock;
     }
 
-    // Generate tracking code
-    const trackingCode = await generateNextTrackingCode();
+    const parsedLaborFee = Math.max(0, Number(laborFee) || 0);
+    const parsedEstimatedCost = Math.max(0, Number(estimatedCost) || parsedLaborFee);
+    const parsedFinish = estimatedFinish && !isNaN(new Date(estimatedFinish).getTime()) ? new Date(estimatedFinish) : null;
 
-    const newJob = await prisma.repairJob.create({
-      data: {
-        trackingCode,
-        branchId: targetBranchId,
-        customerId: finalCustomerId,
-        technicianId: technicianId || null,
-        deviceBrand,
-        deviceModel,
-        deviceColor: deviceColor || null,
-        serialIMEI: serialIMEI || null,
-        passcode: finalPasscode,
-        patternLock: finalPatternLock,
-        preCheckData: preCheckData ? JSON.stringify(preCheckData) : null,
-        issueDescription,
-        customerSignature: customerSignature || null,
-        status: "PENDING",
-        laborFee: Number(laborFee) || 0,
-        estimatedCost: Number(estimatedCost) || Number(laborFee) || 0,
-        totalCost: Number(estimatedCost) || Number(laborFee) || 0,
-        customerApproved: true,
-        estimatedFinish: estimatedFinish ? new Date(estimatedFinish) : null,
-        notes: notes || null,
-      },
-      include: {
-        customer: true,
-        branch: true,
-        technician: { select: staffUserSelect },
-      },
+    const newJob = await prisma.$transaction(async (tx) => {
+      // Resolve Customer
+      let finalCustomerId = customerId;
+      if (!finalCustomerId) {
+        if (!customerPhone || !customerName) {
+          throw new AccessError(400, "กรุณาระบุชื่อและเบอร์โทรศัพท์ลูกค้า");
+        }
+
+        let existingCustomer = await tx.customer.findFirst({
+          where: { phone: customerPhone.trim() },
+        });
+
+        if (!existingCustomer) {
+          existingCustomer = await tx.customer.create({
+            data: {
+              name: customerName.trim(),
+              phone: customerPhone.trim(),
+              lineId: customerLineId ? customerLineId.trim() : null,
+              address: customerAddress ? customerAddress.trim() : null,
+              nationalId: customerNationalId ? customerNationalId.trim() : null,
+            },
+          });
+        }
+        finalCustomerId = existingCustomer.id;
+      }
+
+      // Generate tracking code atomically inside transaction
+      const trackingCode = await generateNextTrackingCode(tx);
+
+      const job = await tx.repairJob.create({
+        data: {
+          trackingCode,
+          branchId,
+          customerId: finalCustomerId,
+          technicianId: technicianId || null,
+          deviceBrand,
+          deviceModel,
+          deviceColor: deviceColor || null,
+          serialIMEI: serialIMEI || null,
+          passcode: finalPasscode,
+          patternLock: finalPatternLock,
+          preCheckData: preCheckData ? (typeof preCheckData === "string" ? preCheckData : JSON.stringify(preCheckData)) : null,
+          issueDescription,
+          customerSignature: customerSignature || null,
+          status: "PENDING",
+          laborFee: parsedLaborFee,
+          estimatedCost: parsedEstimatedCost,
+          totalCost: parsedEstimatedCost,
+          customerApproved: true,
+          estimatedFinish: parsedFinish,
+          notes: notes || null,
+        },
+        include: {
+          customer: {
+            select: { id: true, name: true, phone: true, lineId: true, address: true },
+          },
+          branch: true,
+          technician: { select: staffUserSelect },
+        },
+      });
+
+      // Record initial intake timeline event
+      await tx.repairStatusEvent.create({
+        data: {
+          tenantId: actor.tenantId,
+          repairJobId: job.id,
+          status: "PENDING",
+          customerMessage: "รับเครื่องเข้าระบบแล้ว รอช่างตรวจเช็ก",
+          actorId: actor.id,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: actor.tenantId,
+          userId: actor.id,
+          module: "REPAIRS",
+          action: "CREATE",
+          targetId: job.id,
+          details: `รับเครื่องซ่อม ${trackingCode} (${deviceBrand} ${deviceModel})`,
+          severity: "INFO",
+        },
+      });
+
+      return job;
     });
 
     return NextResponse.json({ success: true, data: redactDeviceLock(newJob) }, { status: 201 });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("Error creating repair job:");
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to create repair job" },
-      { status: 500 }
-    );
+  } catch (error) {
+    return safeError(error);
   }
 }
 

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
@@ -15,7 +15,12 @@ import {
   Sliders,
 } from "lucide-react";
 
-import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import {
+  StorefrontThemeColor,
+  THEME_PALETTES,
+  DEFAULT_BEFORE_IMAGE,
+  DEFAULT_AFTER_IMAGE,
+} from "@/lib/storefrontTheme";
 
 export interface CalloutPin {
   id: string;
@@ -199,6 +204,26 @@ const REVIEWS: ReviewItem[] = [
   },
 ];
 
+export const DEFAULT_CASE: BeforeAfterCase = {
+  id: "case-default",
+  device: "สมาร์ตโฟน (เครื่องตรวจเช็คสาธิต)",
+  issue: "อาการตรวจเช็คแรกเข้า",
+  repairSolution: "ดำเนินการเปลี่ยนอะไหล่แท้มาตรฐานโรงงาน",
+  repairTime: "30 นาที",
+  warranty: "รับประกัน 90 วัน",
+  beforeImg: DEFAULT_BEFORE_IMAGE,
+  beforeDesc: "สภาพก่อนเข้ารับบริการซ่อม",
+  afterImg: DEFAULT_AFTER_IMAGE,
+  afterDesc: "สภาพหลังการซ่อมแซมและผ่าน QC 100%",
+  pins: [],
+};
+
+function getAvatarInitial(name?: string | null): string {
+  if (!name || typeof name !== "string") return "U";
+  const clean = name.trim().replace(/^คุณ\s*/, "").trim();
+  return clean.charAt(0) || name.charAt(0) || "U";
+}
+
 export interface CustomerReviewsProps {
   showSlider?: boolean;
   showReviews?: boolean;
@@ -212,7 +237,12 @@ export function CustomerReviews({
   customCases,
   themeColor = "emerald",
 }: CustomerReviewsProps = {}) {
-  const cases = customCases && customCases.length > 0 ? customCases : BEFORE_AFTER_CASES;
+  const cases =
+    customCases && Array.isArray(customCases) && customCases.length > 0
+      ? customCases.filter((c) => Boolean(c && typeof c === "object"))
+      : BEFORE_AFTER_CASES;
+
+  const safeCases = cases.length > 0 ? cases : [DEFAULT_CASE];
   const [selectedCaseIdx, setSelectedCaseIdx] = useState(0);
   const [activeFilter, setActiveFilter] = useState<"all" | "screen" | "battery" | "board">("all");
 
@@ -222,7 +252,14 @@ export function CustomerReviews({
   const [activePin, setActivePin] = useState<CalloutPin | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const currentCase = cases[selectedCaseIdx] || cases[0];
+  const safeIdx = selectedCaseIdx < safeCases.length ? selectedCaseIdx : 0;
+  const currentCase = safeCases[safeIdx] || safeCases[0] || DEFAULT_CASE;
+
+  useEffect(() => {
+    if (selectedCaseIdx >= safeCases.length) {
+      setSelectedCaseIdx(0);
+    }
+  }, [safeCases.length, selectedCaseIdx]);
 
   const filteredReviews = REVIEWS.filter(
     (r) => activeFilter === "all" || r.category === activeFilter
@@ -232,6 +269,7 @@ export function CustomerReviews({
   const handleMove = useCallback((clientX: number) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const x = clientX - rect.left;
     const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
     setSliderPosition(percentage);
@@ -240,7 +278,11 @@ export function CustomerReviews({
   const handlePointerDown = (e: React.PointerEvent) => {
     setIsDragging(true);
     handleMove(e.clientX);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (containerRef.current) {
+      try {
+        containerRef.current.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -250,17 +292,42 @@ export function CustomerReviews({
 
   const handlePointerUp = (e: React.PointerEvent) => {
     setIsDragging(false);
-    try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch (_) {}
+    if (containerRef.current) {
+      try {
+        containerRef.current.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    }
   };
 
-  // Keyboard navigation for accessible slider
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    setIsDragging(false);
+    if (containerRef.current) {
+      try {
+        containerRef.current.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    }
+  };
+
+  // Keyboard navigation for accessible slider (ArrowLeft, ArrowRight, Home, End, PageUp, PageDown)
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowLeft") {
-      setSliderPosition((prev) => Math.max(0, prev - 5));
+      e.preventDefault();
+      setSliderPosition((prev) => Math.max(0, Math.round(prev - 5)));
     } else if (e.key === "ArrowRight") {
-      setSliderPosition((prev) => Math.min(100, prev + 5));
+      e.preventDefault();
+      setSliderPosition((prev) => Math.min(100, Math.round(prev + 5)));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setSliderPosition(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setSliderPosition(100);
+    } else if (e.key === "PageDown") {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.max(0, Math.round(prev - 20)));
+    } else if (e.key === "PageUp") {
+      e.preventDefault();
+      setSliderPosition((prev) => Math.min(100, Math.round(prev + 20)));
     }
   };
 
@@ -300,7 +367,7 @@ export function CustomerReviews({
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-6 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-medium bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
+                <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-medium ${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder} flex items-center gap-1`}>
                   <Sliders className="h-3 w-3" /> Draggable Split Slider
                 </span>
                 <span className="text-xs text-slate-400">ลากแถบเพื่อเปรียบเทียบแบบ Real-time</span>
@@ -319,24 +386,24 @@ export function CustomerReviews({
               role="tablist"
               aria-label="เลือกเคสตัวอย่าง"
             >
-              {cases.map((c, idx) => (
+              {safeCases.map((c, idx) => (
                 <button
-                  key={c.id}
+                  key={c.id || idx}
                   type="button"
                   role="tab"
-                  aria-selected={selectedCaseIdx === idx}
+                  aria-selected={safeIdx === idx}
                   onClick={() => {
                     setSelectedCaseIdx(idx);
                     setSliderPosition(50);
                     setActivePin(null);
                   }}
-                  className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium transition-colors duration-150 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    selectedCaseIdx === idx
-                      ? "bg-emerald-600 text-white shadow-sm"
+                  className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium transition-colors duration-150 shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing} ${
+                    safeIdx === idx
+                      ? theme.activePill
                       : "bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800"
                   }`}
                 >
-                  {c.device.split(" ")[0]} {c.device.split(" ")[1]}
+                  {(c.device || "เคสตัวอย่าง").split(" ")[0]} {(c.device || "").split(" ")[1] || ""}
                 </button>
               ))}
             </div>
@@ -351,6 +418,7 @@ export function CustomerReviews({
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
                 onKeyDown={handleKeyDown}
                 tabIndex={0}
                 role="slider"
@@ -358,14 +426,21 @@ export function CustomerReviews({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.round(sliderPosition)}
-                className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-slate-900 border border-slate-700/80 cursor-ew-resize select-none touch-none focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xl group"
+                className={`relative rounded-2xl overflow-hidden aspect-[16/10] bg-slate-900 border border-slate-700/80 cursor-ew-resize select-none touch-none focus:outline-none focus:ring-2 ${theme.accentRing} shadow-2xl group`}
               >
                 {/* 1. Base Layer: After Image (Full width background) */}
                 <img
-                  src={currentCase.afterImg}
-                  alt={currentCase.afterDesc}
+                  src={currentCase.afterImg || DEFAULT_AFTER_IMAGE}
+                  alt={currentCase.afterDesc || "After repair"}
                   className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                   loading="lazy"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (!target.dataset.fallbackApplied) {
+                      target.dataset.fallbackApplied = "true";
+                      target.src = DEFAULT_AFTER_IMAGE;
+                    }
+                  }}
                 />
 
                 {/* 2. Top Layer: Before Image (Clipped dynamically by slider position) */}
@@ -376,11 +451,18 @@ export function CustomerReviews({
                   }}
                 >
                   <img
-                    src={currentCase.beforeImg}
-                    alt={currentCase.beforeDesc}
+                    src={currentCase.beforeImg || DEFAULT_BEFORE_IMAGE}
+                    alt={currentCase.beforeDesc || "Before repair"}
                     className="absolute inset-0 w-full h-full object-cover max-w-none"
                     style={{ width: containerRef.current?.clientWidth || "100%" }}
                     loading="lazy"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (!target.dataset.fallbackApplied) {
+                        target.dataset.fallbackApplied = "true";
+                        target.src = DEFAULT_BEFORE_IMAGE;
+                      }
+                    }}
                   />
                   {/* Shattered glass visual texture hint on before layer */}
                   <div className="absolute inset-0 bg-red-950/20 backdrop-contrast-125" />
@@ -394,38 +476,49 @@ export function CustomerReviews({
                 </div>
 
                 <div className="absolute top-4 right-4 z-10 pointer-events-none">
-                  <span className="px-3 py-1 rounded-full text-xs font-mono font-medium bg-slate-900/90 text-emerald-300 border border-emerald-500/40 backdrop-blur-md shadow-md flex items-center gap-1.5">
-                    <Sparkles className="h-3 w-3 text-emerald-400" /> หลังซ่อมเสร็จ (Restored 100%)
+                  <span className={`px-3 py-1 rounded-full text-xs font-mono font-medium ${theme.darkBg}/90 ${theme.badge.text} border ${theme.accentBorder} backdrop-blur-md shadow-md flex items-center gap-1.5`}>
+                    <Sparkles className={`h-3 w-3 ${theme.iconColor}`} /> หลังซ่อมเสร็จ (Restored 100%)
                   </span>
                 </div>
 
-                {/* Interactive Technical Callout Pins on Image */}
-                {currentCase.pins.map((pin) => (
-                  <button
-                    key={pin.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActivePin(pin);
-                    }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 z-20 group/pin transition-transform duration-200 focus:outline-none ${
-                      activePin?.id === pin.id ? "scale-125 ring-2 ring-white" : "hover:scale-110"
-                    }`}
-                    style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-                    aria-label={`หมุดเทคนิค: ${pin.title}`}
-                  >
-                    <span className="relative flex items-center justify-center">
-                      <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-emerald-400 opacity-70" />
-                      <span className="h-7 w-7 rounded-full bg-emerald-500 text-slate-950 font-bold text-xs flex items-center justify-center shadow-lg border-2 border-white">
-                        <Info className="h-3.5 w-3.5" />
+                {/* Interactive Technical Callout Pins on Image (>= 44px minimum touch targets) */}
+                {(currentCase.pins || []).map((pin, pIdx) => {
+                  const pinId = pin?.id || `pin-${pIdx}`;
+                  const pinX = typeof pin?.x === "number" && !isNaN(pin.x) ? Math.max(0, Math.min(100, pin.x)) : 50;
+                  const pinY = typeof pin?.y === "number" && !isNaN(pin.y) ? Math.max(0, Math.min(100, pin.y)) : 50;
+                  const pinTitle = pin?.title || "จุดตรวจสอบวิศวกรรม";
+                  const isSelectedPin = activePin?.id === pinId;
+
+                  return (
+                    <button
+                      key={pinId}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActivePin(isSelectedPin ? null : pin);
+                      }}
+                      className={`absolute -translate-x-1/2 -translate-y-1/2 z-20 min-h-[44px] min-w-[44px] flex items-center justify-center p-2 group/pin transition-transform duration-200 focus:outline-none ${
+                        isSelectedPin ? "scale-125 ring-2 ring-white rounded-full" : "hover:scale-110"
+                      }`}
+                      style={{ left: `${pinX}%`, top: `${pinY}%` }}
+                      aria-label={`หมุดเทคนิค: ${pinTitle}`}
+                    >
+                      <span className="relative flex items-center justify-center pointer-events-none">
+                        <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full opacity-70" style={{ backgroundColor: theme.hex }} />
+                        <span
+                          className="h-7 w-7 rounded-full text-slate-950 font-bold text-xs flex items-center justify-center shadow-lg border-2 border-white"
+                          style={{ backgroundColor: theme.hex }}
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                        </span>
                       </span>
-                    </span>
-                    {/* Tooltip on hover */}
-                    <span className="hidden group-hover/pin:flex absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 rounded-lg bg-slate-900/95 text-white text-[11px] font-mono whitespace-nowrap shadow-lg border border-slate-700 pointer-events-none">
-                      {pin.title}
-                    </span>
-                  </button>
-                ))}
+                      {/* Tooltip on hover */}
+                      <span className="hidden group-hover/pin:flex absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 rounded-lg bg-slate-900/95 text-white text-[11px] font-mono whitespace-nowrap shadow-lg border border-slate-700 pointer-events-none">
+                        {pinTitle}
+                      </span>
+                    </button>
+                  );
+                })}
 
                 {/* Draggable Vertical Divider Line */}
                 <div
@@ -433,7 +526,10 @@ export function CustomerReviews({
                   style={{ left: `${sliderPosition}%` }}
                 >
                   {/* Center Drag Handle Pill */}
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-10 h-10 rounded-full bg-white text-slate-950 shadow-2xl flex items-center justify-center border-2 border-emerald-500 ring-4 ring-slate-950/60 transition-transform group-hover:scale-110">
+                  <div
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-10 h-10 rounded-full bg-white text-slate-950 shadow-2xl flex items-center justify-center border-2 ring-4 ring-slate-950/60 transition-transform group-hover:scale-110 cursor-ew-resize"
+                    style={{ borderColor: theme.hex }}
+                  >
                     <MoveHorizontal className="h-5 w-5 text-slate-900" />
                   </div>
                 </div>
@@ -443,36 +539,48 @@ export function CustomerReviews({
                   <span className="truncate pr-4">
                     {sliderPosition < 50 ? currentCase.beforeDesc : currentCase.afterDesc}
                   </span>
-                  <span className="text-[11px] font-mono text-emerald-400 shrink-0">
+                  <span className={`text-[11px] font-mono ${theme.accentText} shrink-0`}>
                     Split {Math.round(sliderPosition)}%
                   </span>
                 </div>
               </div>
 
-              {/* Slider Quick Presets & Control Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
-                <span className="text-slate-400 pl-2">ทางลัดมุมมอง:</span>
-                <div className="flex gap-1.5">
+              {/* Slider Quick Presets & Control Bar (>= 44px touch targets) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
+                <span className="text-slate-400 pl-2 font-medium">ทางลัดมุมมอง:</span>
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={() => setSliderPosition(0)}
-                    className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors font-mono"
+                    className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono font-medium transition-colors border ${
+                      sliderPosition === 0
+                        ? `${theme.darkBg} ${theme.badge.text} ${theme.darkBorder}`
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+                    }`}
                   >
-                    ดูหลังซ่อม 100%
+                    ดูหลังซ่อม (0%)
                   </button>
                   <button
                     type="button"
                     onClick={() => setSliderPosition(50)}
-                    className="min-h-[36px] px-3 py-1.5 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800 hover:bg-emerald-900 transition-colors font-mono"
+                    className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono font-medium transition-colors border ${
+                      Math.round(sliderPosition) === 50
+                        ? `${theme.darkBg} ${theme.badge.text} ${theme.darkBorder}`
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+                    }`}
                   >
-                    ผ่าครึ่ง 50/50
+                    ผ่าครึ่ง (50/50)
                   </button>
                   <button
                     type="button"
                     onClick={() => setSliderPosition(100)}
-                    className="min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors font-mono"
+                    className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono font-medium transition-colors border ${
+                      sliderPosition === 100
+                        ? `${theme.darkBg} ${theme.badge.text} ${theme.darkBorder}`
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+                    }`}
                   >
-                    ดูก่อนซ่อม 100%
+                    ดูก่อนซ่อม (100%)
                   </button>
                 </div>
               </div>
@@ -482,15 +590,16 @@ export function CustomerReviews({
             <div className="lg:col-span-4 space-y-4">
               {/* Active Pin Detailed Tooltip / Drawer */}
               {activePin ? (
-                <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/50 space-y-2 animate-fade-in shadow-md">
+                <div className={`p-4 rounded-2xl ${theme.darkBg}/40 border ${theme.accentBorder} space-y-2 animate-fade-in shadow-md`}>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-emerald-300 font-semibold uppercase flex items-center gap-1.5">
+                    <span className={`text-xs font-mono ${theme.badge.text} font-semibold uppercase flex items-center gap-1.5`}>
                       <Info className="h-3.5 w-3.5" /> บันทึกวิศวกรรมช่าง
                     </span>
                     <button
                       type="button"
                       onClick={() => setActivePin(null)}
-                      className="text-slate-400 hover:text-white text-xs"
+                      className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-slate-400 hover:text-white text-xs font-medium rounded-lg hover:bg-white/10 transition-colors"
+                      aria-label="ปิดกล่องข้อมูล"
                     >
                       ปิด
                     </button>
@@ -502,14 +611,14 @@ export function CustomerReviews({
                 </div>
               ) : (
                 <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-                  <Info className="h-4 w-4 text-emerald-400 shrink-0" />
-                  <span>แตะที่หมุดสีเขียวบนภาพเพื่อดูเทคนิคการซ่อมเฉพาะจุด</span>
+                  <Info className={`h-4 w-4 ${theme.iconColor} shrink-0`} />
+                  <span>แตะที่หมุดสีไฮไลท์บนภาพเพื่อดูเทคนิคการซ่อมเฉพาะจุด</span>
                 </div>
               )}
 
               {/* Solution Card */}
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
-                <div className="text-xs font-mono text-emerald-400 uppercase font-medium">
+                <div className={`text-xs font-mono ${theme.accentText} uppercase font-medium`}>
                   วิธีแก้ปัญหาและอะไหล่ที่ใช้
                 </div>
                 <div className="text-sm font-medium text-white leading-relaxed">
@@ -527,7 +636,7 @@ export function CustomerReviews({
                 </div>
                 <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
                   <div className="text-slate-400 text-[11px]">การรับประกัน:</div>
-                  <div className="font-semibold text-emerald-400 text-sm mt-1 font-mono tabular-nums">
+                  <div className={`font-semibold ${theme.accentText} text-sm mt-1 font-mono tabular-nums`}>
                     {currentCase.warranty}
                   </div>
                 </div>
@@ -535,7 +644,7 @@ export function CustomerReviews({
 
               {/* QC Verification checklist */}
               <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 flex items-center gap-2.5">
-                <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                <CheckCircle2 className={`h-5 w-5 ${theme.iconColor} shrink-0`} />
                 <span>ผ่านการทดสอบมาตรฐาน 10 จุด ครบถ้วนทุกฟังก์ชันก่อนส่งมอบ</span>
               </div>
             </div>
@@ -591,50 +700,59 @@ export function CustomerReviews({
 
         {/* 3. Verified Reviews Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredReviews.map((rev) => (
-            <div
-              key={rev.id}
-              className="p-6 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-4 shadow-xs"
-            >
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`h-10 w-10 rounded-xl ${rev.avatarColor} text-white flex items-center justify-center font-medium text-sm`}
-                    >
-                      {rev.name.charAt(3)}
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-slate-900 flex items-center gap-2">
-                        <span>{rev.name}</span>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          ตัวอย่างรีวิว
-                        </span>
+          {filteredReviews.map((rev) => {
+            const rawRating = Number(rev?.rating);
+            const safeRating = !isNaN(rawRating) ? Math.max(1, Math.min(5, Math.floor(rawRating))) : 5;
+            const revName = rev?.name || "ลูกค้าผู้รับบริการ";
+            const revDevice = rev?.device || "สมาร์ตโฟน";
+            const revComment = rev?.comment || "บริการประทับใจ มาตรฐานแล็บรวดเร็ว";
+            const revDate = rev?.date || "เร็วๆ นี้";
+            const avatarBg = rev?.avatarColor || "bg-slate-900";
+            return (
+              <div
+                key={rev?.id || revName}
+                className="p-6 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between space-y-4 shadow-xs"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`h-10 w-10 rounded-xl ${avatarBg} text-white flex items-center justify-center font-medium text-sm`}
+                      >
+                        {getAvatarInitial(revName)}
                       </div>
-                      <div className="text-xs text-slate-500">{rev.device}</div>
+                      <div>
+                        <div className="text-xs font-semibold text-slate-900 flex items-center gap-2">
+                          <span>{revName}</span>
+                          <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            ตัวอย่างรีวิว
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500">{revDevice}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-0.5 text-amber-500">
+                      {[...Array(safeRating)].map((_, i) => (
+                        <Star key={i} className="h-3.5 w-3.5 fill-amber-400" />
+                      ))}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-0.5 text-amber-500">
-                    {[...Array(rev.rating)].map((_, i) => (
-                      <Star key={i} className="h-3.5 w-3.5 fill-amber-400" />
-                    ))}
-                  </div>
+                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                    &quot;{revComment}&quot;
+                  </p>
                 </div>
 
-                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                  "{rev.comment}"
-                </p>
+                <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
+                  <span className="tabular-nums font-mono">{revDate}</span>
+                  <span className="text-emerald-800 font-medium flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> ตัวอย่างรีวิว
+                  </span>
+                </div>
               </div>
-
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
-                <span className="tabular-nums font-mono">{rev.date}</span>
-                <span className="text-emerald-800 font-medium flex items-center gap-1.5">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> ตัวอย่างรีวิว
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         </>
         )}

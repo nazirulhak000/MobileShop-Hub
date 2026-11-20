@@ -83,11 +83,20 @@ export default function StockCountSessionPage() {
     }
   };
 
+  const handleResetSession = () => {
+    if (Object.keys(counts).length === 0) return;
+    if (confirm("ต้องการล้างผลการตรวจนับทั้งหมดในรอบนี้หรือไม่?")) {
+      setCounts({});
+      setApplied(false);
+      setApplyError(null);
+    }
+  };
+
   const handleApplyReconciliation = async () => {
     if (submitting) return;
     if (!confirm("ยืนยันการปรับยอดสต็อกของรายการที่ตรวจนับแล้วให้ตรงตามผลการตรวจนับจริง?")) return;
 
-    const toApply = products.filter(
+    const toApply = filtered.filter(
       (p) => counts[p.id] !== undefined && counts[p.id] !== p.currentStock
     );
     const reason = `ปรับยอดตรวจนับจริง (รอบ ${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Bangkok" })})`;
@@ -274,6 +283,40 @@ export default function StockCountSessionPage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Filter and Reset Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+          {[
+            { id: "ALL", label: "ทั้งหมด" },
+            { id: "ACCESSORY", label: "อุปกรณ์เสริม" },
+            { id: "SPARE_PART", label: "อะไหล่ซ่อม" },
+            { id: "DEVICE", label: "ตัวเครื่องมือถือ" },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setCategory(cat.id)}
+              className={`px-3 py-1 rounded-md transition-all ${
+                category === cat.id ? "bg-white text-blue-700 shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleResetSession}
+          disabled={Object.keys(counts).length === 0 || submitting}
+          className="text-xs gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-50"
+        >
+          <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+          <span>ล้างผลการตรวจนับ</span>
+        </Button>
+      </div>
 
       {/* Table */}
       <Card className="border-slate-200 overflow-hidden">

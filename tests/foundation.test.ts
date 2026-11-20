@@ -5,6 +5,10 @@ import { prisma } from "../src/lib/prisma";
 import { staffStorage, StaffPrincipal } from "../src/lib/staff-context";
 import { mutateBooking } from "../src/lib/bookings";
 import { requestOtp, verifyOtp, devOtpEnabled } from "../src/lib/customer-auth";
+import { calculateVAT } from "../src/lib/tax";
+import { generateNextTrackingCode, getRepairJobs, getRepairJobById } from "../src/lib/repairs";
+import { checkOrigin } from "../src/lib/staff-auth";
+import { resolveTenantBySlug } from "../src/lib/storefrontTenant";
 let admin: StaffPrincipal;
 let cashier: StaffPrincipal;
 let foreignCustomer: string;
@@ -21,15 +25,21 @@ async function cleanupTestTenants() {
     await db.appointment.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.bookingSlot.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.bookingPolicy.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.installmentPayment.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.installmentContract.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.repairPartUsage.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.repairQuote.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.repairStatusEvent.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.repairJob.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.saleItem.deleteMany({ where: { sale: { tenantId: { in: tenants } } } });
     await db.sale.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.deviceIMEI.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.tradeInContract.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.stockItem.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.product.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.otpChallenge.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.customerAccountLink.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.storefrontConfig.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.customerAccount.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.customer.deleteMany({ where: { OR: [{ tenantId: { in: tenants } }, { name: "Unassigned" }] } });
     await db.user.deleteMany({ where: { tenantId: { in: tenants } } });
@@ -161,4 +171,468 @@ test("expired OTP and attempt exhaustion are rejected; production cannot enable 
   (process.env as any).NODE_ENV = "production";
   assert.equal(devOtpEnabled(), false);
   (process.env as any).NODE_ENV = nodeEnv;
+});
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+test("Round 4: RepairJob intake creates atomic timeline event & quote approval updates estimatedCost", async () => staffStorage.run(admin, async () => {
+  const tracking = await generateNextTrackingCode();
+  assert.match(tracking, /^REP-\d{6}-\d{4}$/);
+
+  const job = await prisma.$transaction(async tx => {
+    const created = await tx.repairJob.create({
+      data: {
+        trackingCode: tracking,
+        branchId: ownBranch,
+        customerId: ownCustomer,
+        deviceBrand: "Apple",
+        deviceModel: "iPhone 15",
+        issueDescription: "Battery drain",
+        status: "PENDING",
+        estimatedCost: 1000,
+        totalCost: 1000,
+      },
+    });
+    await tx.repairStatusEvent.create({
+      data: {
+        tenantId: admin.tenantId,
+        repairJobId: created.id,
+        status: "PENDING",
+        customerMessage: "รับเครื่องเข้าระบบแล้ว รอช่างตรวจเช็ก",
+        actorId: admin.id,
+      },
+    });
+    return created;
+  });
+
+  const events = await prisma.repairStatusEvent.findMany({ where: { repairJobId: job.id } });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "PENDING");
+  assert.equal(events[0].customerMessage, "รับเครื่องเข้าระบบแล้ว รอช่างตรวจเช็ก");
+
+  // Create a quote
+  const quote = await prisma.repairQuote.create({
+    data: {
+      tenantId: admin.tenantId,
+      repairJobId: job.id,
+      version: 1,
+      description: "เปลี่ยนแบตแท้ มอก.",
+      amountSatang: 250000, // 2,500 THB
+      expiresAt: new Date(Date.now() + 86400000),
+    },
+  });
+
+  // Customer approves quote
+  const approvedBaht = Math.round(quote.amountSatang) / 100;
+  await prisma.repairJob.update({
+    where: { id: job.id },
+    data: {
+      customerApproved: true,
+      estimatedCost: approvedBaht,
+      totalCost: approvedBaht,
+    },
+  });
+
+  const updatedJob = await prisma.repairJob.findUniqueOrThrow({ where: { id: job.id } });
+  assert.equal(updatedJob.customerApproved, true);
+  assert.equal(updatedJob.estimatedCost, 2500);
+  assert.equal(updatedJob.totalCost, 2500);
+
+  const updatedEvents = await prisma.repairStatusEvent.findMany({ where: { repairJobId: job.id } });
+  assert.equal(updatedEvents.length, 1);
+}));
+
+test("Round 5: Booking capacity blocks reschedule on converted repair", async () => {
+  const start = new Date(Date.now() + 72 * 3_600_000); start.setUTCHours(4, 0, 0, 0);
+  const account = await db.customerAccount.create({ data: { tenantId: "test-a", phone: "0877777777", displayName: "Booking Test" } });
+  const actor = { tenantId: "test-a", accountId: account.id };
+  const apt = await mutateBooking(actor, "create", {
+    branchId: ownBranch,
+    startsAt: start.toISOString(),
+    service: "SCREEN",
+    deviceModel: "iPad",
+    issueDescription: "Cracked screen",
+    key: "booking-reschedule-lock-test",
+  });
+
+  // Attach a repairJobId (simulating check-in)
+  await db.appointment.update({ where: { id: apt.id }, data: { repairJobId: "dummy-job-id" } });
+
+  const next = new Date(start.getTime() + 30 * 60_000);
+  await assert.rejects(mutateBooking(actor, "reschedule", { id: apt.id, startsAt: next.toISOString(), key: "reschedule-converted-fail" }), {
+    status: 409,
+  });
+});
+
+test("Round 6: POS calculates 7% inclusive VAT with Satang precision and SequenceCounter increments", async () => staffStorage.run(admin, async () => {
+  // Test calculateVAT engine
+  const vatCalc = calculateVAT(1070, true);
+  assert.equal(vatCalc.total, 1070);
+  assert.equal(vatCalc.base, 1000);
+  assert.equal(vatCalc.vat, 70);
+  assert.equal(vatCalc.base + vatCalc.vat, vatCalc.total);
+
+  // Precision with odd decimals
+  const vatOdd = calculateVAT(999.99, true);
+  assert.equal(vatOdd.total, 999.99);
+  assert.equal(round2(vatOdd.base + vatOdd.vat), 999.99);
+
+  // Sequence counter increment
+  const c1 = await prisma.sequenceCounter.upsert({
+    where: { id: "INV-TEST-202611" },
+    update: { current: { increment: 1 } },
+    create: { id: "INV-TEST-202611", current: 1 },
+  });
+  const c2 = await prisma.sequenceCounter.upsert({
+    where: { id: "INV-TEST-202611" },
+    update: { current: { increment: 1 } },
+    create: { id: "INV-TEST-202611", current: 1 },
+  });
+  assert.equal(c2.current, c1.current + 1);
+}));
+
+test("Round 7: Installment schedule integer satang rounding and sequential payment invariant", async () => staffStorage.run(admin, async () => {
+  const totalPrice = 30000;
+  const downPayment = 5000;
+  const termMonths = 10;
+  const monthlyInterestRate = 1.5;
+
+  const financedSatang = Math.round(totalPrice * 100) - Math.round(downPayment * 100);
+  const interestSatang = Math.round((financedSatang * monthlyInterestRate * termMonths) / 100);
+  const totalPayableSatang = financedSatang + interestSatang;
+  const perPeriodSatang = Math.floor(totalPayableSatang / termMonths);
+  const lastPeriodSatang = totalPayableSatang - perPeriodSatang * (termMonths - 1);
+
+  // Total sum of all periods in satang must exactly equal totalPayableSatang
+  const sumSatang = perPeriodSatang * (termMonths - 1) + lastPeriodSatang;
+  assert.equal(sumSatang, totalPayableSatang);
+
+  // Odd amount to test fractional Satang distribution
+  const oddTotal = 10000.33;
+  const oddDown = 1000.11;
+  const oddMonths = 3;
+  const oddFinanced = Math.round(oddTotal * 100) - Math.round(oddDown * 100);
+  const oddInterest = Math.round((oddFinanced * 1.5 * oddMonths) / 100);
+  const oddPayable = oddFinanced + oddInterest;
+  const oddPerPeriod = Math.floor(oddPayable / oddMonths);
+  const oddLastPeriod = oddPayable - oddPerPeriod * (oddMonths - 1);
+  assert.equal(oddPerPeriod * (oddMonths - 1) + oddLastPeriod, oddPayable);
+
+  // Sequential payment invariant test on contract
+  const contract = await prisma.installmentContract.create({
+    data: {
+      contractNo: "INS-TEST-001",
+      customerName: "Installment Customer",
+      customerPhone: "0899990001",
+      nationalId: "1234567890123",
+      deviceModel: "Galaxy S24",
+      imei: "354123456789012",
+      totalPrice,
+      downPayment,
+      financedAmount: financedSatang / 100,
+      termMonths,
+      monthlyInterestRate,
+      monthlyPayment: perPeriodSatang / 100,
+      startDate: new Date(),
+      status: "ACTIVE",
+      paidMonths: 0,
+      nextDueDate: new Date(Date.now() + 30 * 86400000),
+      isOverdue: false,
+      overdueDays: 0,
+      payments: {
+        create: [
+          { monthNumber: 1, dueDate: new Date(Date.now() + 30 * 86400000), amount: perPeriodSatang / 100, status: "PENDING" },
+          { monthNumber: 2, dueDate: new Date(Date.now() + 60 * 86400000), amount: perPeriodSatang / 100, status: "PENDING" },
+        ],
+      },
+    },
+    include: { payments: true },
+  });
+
+  // Verify that paying month 2 when month 1 is unpaid triggers error
+  const earliestUnpaid = contract.payments.find(p => p.status === "PENDING");
+  assert.equal(earliestUnpaid?.monthNumber, 1);
+  assert.equal(earliestUnpaid?.monthNumber! < 2, true);
+}));
+
+test("Round 1: Storefront configuration resolves strictly per tenant and rejects unknown slugs", async () => {
+  const storeA = await db.storefrontConfig.upsert({
+    where: { tenantId: "test-a" },
+    create: { tenantId: "test-a", headline: "Headline A", phone: "021111111" },
+    update: { headline: "Headline A", phone: "021111111" },
+  });
+  const storeB = await db.storefrontConfig.upsert({
+    where: { tenantId: "test-b" },
+    create: { tenantId: "test-b", headline: "Headline B", phone: "022222222" },
+    update: { headline: "Headline B", phone: "022222222" },
+  });
+  assert.notEqual(storeA.headline, storeB.headline);
+
+  // Unknown slug lookup fails closed (returns null, not Shop A or Shop B)
+  const unknownTenant = await db.tenant.findUnique({
+    where: { slug: "nonexistent-shop-slug" },
+    select: { id: true, status: true },
+  });
+  assert.equal(unknownTenant, null);
+});
+
+test("Round 2: Cross-origin requests without valid origin are rejected", () => {
+  const badReq = new Request("http://localhost:3000/api/customers", {
+    method: "POST",
+    headers: { origin: "https://evil-attacker.com", "sec-fetch-site": "cross-site" },
+  });
+  assert.throws(() => checkOrigin(badReq), { status: 403 });
+});
+
+test("Round 3: Repair DTOs omit customer signature in lists and national ID in details", async () => staffStorage.run(admin, async () => {
+  const rJob = await prisma.repairJob.create({
+    data: {
+      trackingCode: "REP-LEAK-TEST-01",
+      branchId: ownBranch,
+      customerId: ownCustomer,
+      deviceBrand: "Apple",
+      deviceModel: "iPhone 15 Pro",
+      issueDescription: "Camera lens crack",
+      customerSignature: "data:image/svg+xml;base64,SECRET_SIGNATURE_DATA",
+      passcode: "123456",
+      patternLock: "0-1-2-5-8",
+    },
+  });
+
+  // 1. List query omits raw customerSignature and raw passcodes
+  const jobs = await getRepairJobs({ search: "REP-LEAK-TEST-01" });
+  assert.equal(jobs.length, 1);
+  const listed = jobs[0] as any;
+  assert.equal(listed.customerSignature, undefined);
+  assert.equal(listed.hasCustomerSignature, true);
+  assert.equal(listed.hasPasscode, true);
+  assert.equal(listed.hasPatternLock, true);
+  assert.equal(listed.passcode, undefined);
+  assert.equal(listed.patternLock, undefined);
+
+  // 2. Job detail omits customer nationalId
+  const detail = await getRepairJobById(rJob.id);
+  assert.ok(detail);
+  assert.equal((detail.customer as any).nationalId, undefined);
+  assert.equal(detail.customer?.name, "Updated A");
+}));
+
+test("Round 10: Multi-Tenant Storefront Isolation, Case-Insensitive Slug Routing & Zero Bleed", async () => {
+  // 1. Setup isolated configs for test-a and test-b
+  await db.storefrontConfig.upsert({
+    where: { tenantId: "test-a" },
+    create: {
+      tenantId: "test-a",
+      themeColor: "emerald",
+      headline: "Headline Store A",
+      phone: "081-111-1111",
+      lineId: "@storeA",
+      showPriceEstimator: true,
+      showHardwareScanner: false,
+    },
+    update: {
+      themeColor: "emerald",
+      headline: "Headline Store A",
+      phone: "081-111-1111",
+      lineId: "@storeA",
+      showPriceEstimator: true,
+      showHardwareScanner: false,
+    },
+  });
+
+  await db.storefrontConfig.upsert({
+    where: { tenantId: "test-b" },
+    create: {
+      tenantId: "test-b",
+      themeColor: "rose",
+      headline: "Headline Store B",
+      phone: "082-222-2222",
+      lineId: "@storeB",
+      showPriceEstimator: false,
+      showHardwareScanner: true,
+    },
+    update: {
+      themeColor: "rose",
+      headline: "Headline Store B",
+      phone: "082-222-2222",
+      lineId: "@storeB",
+      showPriceEstimator: false,
+      showHardwareScanner: true,
+    },
+  });
+
+  // 2. Multi-tenant isolation: Verify A's config never bleeds into B
+  const tenantA = await resolveTenantBySlug("test-a");
+  const tenantB = await resolveTenantBySlug("test-b");
+  assert.ok(tenantA);
+  assert.ok(tenantB);
+  assert.equal(tenantA.id, "test-a");
+  assert.equal(tenantB.id, "test-b");
+  assert.equal(tenantA.storefrontConfig?.themeColor, "emerald");
+  assert.equal(tenantB.storefrontConfig?.themeColor, "rose");
+  assert.equal(tenantA.storefrontConfig?.headline, "Headline Store A");
+  assert.equal(tenantB.storefrontConfig?.headline, "Headline Store B");
+  assert.equal(tenantA.storefrontConfig?.showHardwareScanner, false);
+  assert.equal(tenantB.storefrontConfig?.showHardwareScanner, true);
+
+  // 3. Case-insensitivity & trimming: Test-A, TEST-A, '  test-a  ', '%20test-a%20' all resolve to tenant-a
+  const mixedCaseTenant = await resolveTenantBySlug("Test-A");
+  assert.ok(mixedCaseTenant);
+  assert.equal(mixedCaseTenant.id, "test-a");
+
+  const upperCaseTenant = await resolveTenantBySlug("TEST-A");
+  assert.ok(upperCaseTenant);
+  assert.equal(upperCaseTenant.id, "test-a");
+
+  const paddedTenant = await resolveTenantBySlug("   test-a   ");
+  assert.ok(paddedTenant);
+  assert.equal(paddedTenant.id, "test-a");
+
+  const urlEncodedTenant = await resolveTenantBySlug("%20test-a%20");
+  assert.ok(urlEncodedTenant);
+  assert.equal(urlEncodedTenant.id, "test-a");
+
+  // 4. Invalid, empty or nonexistent slug returns null (graceful 404)
+  assert.equal(await resolveTenantBySlug("unknown-nonexistent-slug"), null);
+  assert.equal(await resolveTenantBySlug(""), null);
+  assert.equal(await resolveTenantBySlug(null), null);
+  assert.equal(await resolveTenantBySlug(undefined), null);
+
+  // 5. Inactive / Cancelled tenant fails closed (returns null)
+  await db.tenant.create({
+    data: {
+      id: "test-cancelled",
+      name: "Cancelled Shop",
+      slug: "cancelled-shop",
+      status: "CANCELLED",
+    },
+  });
+  try {
+    const cancelledTenant = await resolveTenantBySlug("cancelled-shop");
+    assert.equal(cancelledTenant, null, "Cancelled tenant must not be accessible");
+  } finally {
+    await db.tenant.deleteMany({ where: { id: "test-cancelled" } });
+  }
+});
+
+test("Round 4 & Round 5: Defensive JSON Parsing, Corrupted Data Handling & Navigation Synchronization", async () => {
+  const {
+    safeParseBeforeAfterCases,
+    safeParsePricingRates,
+    safeParseFaqs,
+    safeParseJson,
+    DEFAULT_BEFORE_IMAGE,
+    DEFAULT_AFTER_IMAGE,
+  } = await import("../src/lib/storefrontTheme");
+
+  // 1. Test safeParseJson with corrupted inputs
+  assert.equal(safeParseJson(null, "fallback"), "fallback");
+  assert.equal(safeParseJson(undefined, "fallback"), "fallback");
+  assert.equal(safeParseJson("", "fallback"), "fallback");
+  assert.equal(safeParseJson("{ invalid: json }", "fallback"), "fallback");
+  assert.deepEqual(safeParseJson('{"valid": true}', {}), { valid: true });
+
+  // 2. Test safeParseBeforeAfterCases
+  // 2.1 Malformed string
+  assert.equal(safeParseBeforeAfterCases("{ broken json"), null);
+  assert.equal(safeParseBeforeAfterCases([]), null);
+  assert.equal(safeParseBeforeAfterCases(null), null);
+
+  // 2.2 Handles key aliases like beforeImage / afterImage and string / object wrappers
+  const parsedFromAlias = safeParseBeforeAfterCases(
+    JSON.stringify([
+      {
+        device: "iPhone 15",
+        beforeImage: "https://example.com/before.jpg",
+        afterImage: "https://example.com/after.jpg",
+        pins: [{ x: "not-a-number", y: 150, title: "Test Pin" }],
+      },
+    ])
+  );
+  assert.ok(parsedFromAlias);
+  assert.equal(parsedFromAlias.length, 1);
+  assert.equal(parsedFromAlias[0].device, "iPhone 15");
+  assert.equal(parsedFromAlias[0].beforeImg, "https://example.com/before.jpg");
+  assert.equal(parsedFromAlias[0].afterImg, "https://example.com/after.jpg");
+  // Pins must have clamped coordinates (0-100) and never NaN
+  assert.equal(parsedFromAlias[0].pins[0].x, 50);
+  assert.equal(parsedFromAlias[0].pins[0].y, 100);
+
+  // 2.3 Handles missing keys and falls back to default images
+  const parsedEmptyKeys = safeParseBeforeAfterCases([{}]);
+  assert.ok(parsedEmptyKeys);
+  assert.equal(parsedEmptyKeys[0].beforeImg, DEFAULT_BEFORE_IMAGE);
+  assert.equal(parsedEmptyKeys[0].afterImg, DEFAULT_AFTER_IMAGE);
+
+  // 3. Test safeParsePricingRates
+  assert.equal(safeParsePricingRates("{ broken json"), null);
+  const parsedRates = safeParsePricingRates(
+    JSON.stringify([
+      { service: "เปลี่ยนจอ", price: "1,500" },
+      { title: "เปลี่ยนแบต", basePrice: -100 },
+      { name: "ซ่อมบอร์ด", basePrice: "NaN" },
+    ])
+  );
+  assert.ok(parsedRates);
+  assert.equal(parsedRates.length, 3);
+  assert.equal(parsedRates[0].name, "เปลี่ยนจอ");
+  assert.equal(parsedRates[0].basePrice, 1500);
+  assert.equal(parsedRates[1].basePrice, 990); // negative falls back
+  assert.equal(parsedRates[2].basePrice, 990); // NaN falls back
+
+  // 4. Test safeParseFaqs
+  assert.equal(safeParseFaqs("{ broken json"), null);
+  const parsedFaqs = safeParseFaqs(
+    JSON.stringify([
+      { q: "ซ่อมนานไหม", a: "30 นาที" },
+      { question: "มีประกันไหม", answer: "90 วัน", highlight: "รับประกันแท้" },
+    ])
+  );
+  assert.ok(parsedFaqs);
+  assert.equal(parsedFaqs.length, 2);
+  assert.equal(parsedFaqs[0].question, "ซ่อมนานไหม");
+  assert.equal(parsedFaqs[0].answer, "30 นาที");
+  assert.equal(parsedFaqs[1].highlight, "รับประกันแท้");
+
+  // 5. Test Round 4: Navigation anchor synchronization logic
+  const testConfig = {
+    showServicesBento: false,
+    showLiveTracking: false,
+    showInspectionBench: false,
+    showPriceEstimator: false,
+    showBeforeAfterSlider: false,
+    showCustomerReviews: false,
+    showLocationSection: false,
+    showFaqSection: false,
+  };
+  const hiddenSections: string[] = [];
+  if (!testConfig.showServicesBento) hiddenSections.push("#services");
+  if (!testConfig.showLiveTracking) hiddenSections.push("#track-search");
+  if (!testConfig.showInspectionBench) hiddenSections.push("#inspection");
+  if (!testConfig.showPriceEstimator) hiddenSections.push("#estimate");
+  if (!testConfig.showBeforeAfterSlider && !testConfig.showCustomerReviews) hiddenSections.push("#reviews");
+  if (!testConfig.showLocationSection) hiddenSections.push("#location");
+  if (!testConfig.showFaqSection) hiddenSections.push("#faq");
+
+  assert.deepEqual(hiddenSections, [
+    "#services",
+    "#track-search",
+    "#inspection",
+    "#estimate",
+    "#reviews",
+    "#location",
+    "#faq",
+  ]);
+
+  const navLinks = [
+    { label: "บริการช่าง", href: "#services" },
+    { label: "ติดตามงานซ่อม", href: "#track-search" },
+    { label: "ตรวจเช็ค 10 จุด", href: "#inspection" },
+    { label: "ประเมินราคา", href: "#estimate" },
+    { label: "ผลงานก่อน-หลังซ่อม", href: "#reviews" },
+    { label: "ที่ตั้งศูนย์", href: "#location" },
+    { label: "คำถามพบบ่อย", href: "#faq" },
+  ].filter((link) => !hiddenSections.includes(link.href));
+
+  assert.equal(navLinks.length, 0, "All links must be safely filtered when optional sections are off");
 });

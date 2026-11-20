@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useRef } from "react";
 import Link from "next/link";
@@ -146,9 +146,18 @@ interface ServicesBentoProps {
   lineId?: string | null;
   /** Show links to the #estimate section (hide when the page doesn't render it). */
   showEstimate?: boolean;
+  /** Show link to the #track-search section. */
+  showLiveTracking?: boolean;
+  /** Show links to the #location section. */
+  showLocation?: boolean;
 }
 
-export function ServicesBento({ lineId, showEstimate = true }: ServicesBentoProps = {}) {
+export function ServicesBento({
+  lineId,
+  showEstimate = true,
+  showLiveTracking = true,
+  showLocation = true,
+}: ServicesBentoProps = {}) {
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
   // Spotlight glow coordinates
@@ -380,13 +389,15 @@ export function ServicesBento({ lineId, showEstimate = true }: ServicesBentoProp
                 {expandedCard === "tracking" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
 
-              <a
-                href="#track-search"
-                className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
-              >
-                <span>ทดลองตรวจสอบสถานะ</span>
-                <ArrowRight className="h-4 w-4" />
-              </a>
+              {showLiveTracking && (
+                <a
+                  href="#track-search"
+                  className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                >
+                  <span>ทดลองตรวจสอบสถานะ</span>
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              )}
             </div>
           </div>
 
@@ -453,13 +464,15 @@ export function ServicesBento({ lineId, showEstimate = true }: ServicesBentoProp
                 {expandedCard === "tradein" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
 
-              <a
-                href="#location"
-                className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-slate-900 transition-colors"
-              >
-                <span>ประเมินราคาเทิร์น</span>
-                <ArrowRight className="h-4 w-4" />
-              </a>
+              {showLocation && (
+                <a
+                  href="#location"
+                  className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-slate-900 transition-colors"
+                >
+                  <span>ประเมินราคาเทิร์น</span>
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              )}
             </div>
           </div>
 
@@ -526,13 +539,15 @@ export function ServicesBento({ lineId, showEstimate = true }: ServicesBentoProp
                 {expandedCard === "installment" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
 
-              <a
-                href="#location"
-                className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-slate-900 transition-colors"
-              >
-                <span>เงื่อนไขการผ่อน</span>
-                <ArrowRight className="h-4 w-4" />
-              </a>
+              {showLocation && (
+                <a
+                  href="#location"
+                  className="min-h-[44px] inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-slate-900 transition-colors"
+                >
+                  <span>เงื่อนไขการผ่อน</span>
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              )}
             </div>
           </div>
 

@@ -45,10 +45,17 @@ type MonthRow = {
   netProfit: number;
 };
 
-async function summarizeMonth(month: string, branchFilter: { branchId?: string }): Promise<MonthRow> {
+async function summarizeMonth(month: string, branchFilter: { branchId?: string | { in: string[] } }): Promise<MonthRow> {
   const { start, end } = bangkokMonthRange(month);
   const saleWhere = { ...branchFilter, status: "COMPLETED", createdAt: { gte: start, lt: end } };
-  const repairWhere = { ...branchFilter, status: "COMPLETED", completedAt: { gte: start, lt: end } };
+  const repairWhere = {
+    ...branchFilter,
+    status: "COMPLETED",
+    OR: [
+      { completedAt: { gte: start, lt: end } },
+      { completedAt: null, updatedAt: { gte: start, lt: end } },
+    ],
+  };
   const [sales, cogsGroups, repairs, partGroups, expenses, payroll, buyback] = await Promise.all([
     prisma.sale.aggregate({ where: saleWhere, _sum: { netAmount: true, vatAmount: true }, _count: { _all: true } }),
     prisma.saleItem.groupBy({ by: ["costPrice"], where: { sale: saleWhere }, _sum: { quantity: true } }),
@@ -116,7 +123,7 @@ export const GET = withStaff(async (request: NextRequest) => {
   const branchParam = params.get("branch");
   const branchId = branchParam && branchParam !== "ALL" ? branchParam : undefined;
   if (branchId && !actor.branchIds.includes(branchId)) throw new AccessError(404, "ไม่พบสาขาที่มีสิทธิ์");
-  const branchFilter = branchId ? { branchId } : {};
+  const branchFilter = branchId ? { branchId } : { branchId: { in: actor.branchIds } };
 
   const rows = await Promise.all(months.map((m) => summarizeMonth(m, branchFilter)));
   const totals = Object.fromEntries(SUM_KEYS.map((k) => [k, round2(rows.reduce((acc, r) => acc + r[k], 0))])) as Record<(typeof SUM_KEYS)[number], number>;
@@ -124,7 +131,14 @@ export const GET = withStaff(async (request: NextRequest) => {
   // Whole-range rankings and branch breakdown
   const range = { start: bangkokMonthRange(months[0]).start, end: bangkokMonthRange(months[months.length - 1]).end };
   const saleWhere = { ...branchFilter, status: "COMPLETED", createdAt: { gte: range.start, lt: range.end } };
-  const repairWhere = { ...branchFilter, status: "COMPLETED", completedAt: { gte: range.start, lt: range.end } };
+  const repairWhere = {
+    ...branchFilter,
+    status: "COMPLETED",
+    OR: [
+      { completedAt: { gte: range.start, lt: range.end } },
+      { completedAt: null, updatedAt: { gte: range.start, lt: range.end } },
+    ],
+  };
   const [productGroups, repairGroups, salesByBranch, repairsByBranch, expensesByBranch, branches] = await Promise.all([
     prisma.saleItem.groupBy({
       by: ["productId"],

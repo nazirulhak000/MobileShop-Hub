@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { hashToken, staffTokens } from "@/lib/staff-auth";
-import { db } from "@/lib/db";
+import { checkOrigin, requireStaffSession } from "@/lib/staff-auth";
+import { safeError } from "@/lib/staff-http";
 import { writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -9,50 +8,77 @@ import { randomBytes } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 
-// Maximum 5MB file upload limit
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+// Strict 2MB file upload limit
+const MAX_FILE_SIZE = 2 * 1024 * 1024;
+
+// Strictly allowed MIME types
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
-  "image/svg+xml",
-  "image/gif",
 ]);
 
 const EXTENSION_MAP: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/webp": "webp",
-  "image/svg+xml": "svg",
-  "image/gif": "gif",
 };
+
+/**
+ * Validate buffer against magic bytes signature to prevent MIME spoofing / executable masquerading
+ */
+function verifyMagicBytes(buffer: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (buffer.length < 12) return null;
+
+  // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+
+  // JPEG magic bytes: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  // WebP magic bytes: RIFF....WEBP
+  if (
+    buffer[0] === 0x52 && // R
+    buffer[1] === 0x49 && // I
+    buffer[2] === 0x46 && // F
+    buffer[3] === 0x46 && // F
+    buffer[8] === 0x57 && // W
+    buffer[9] === 0x45 && // E
+    buffer[10] === 0x42 && // B
+    buffer[11] === 0x50 // P
+  ) {
+    return "image/webp";
+  }
+
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    // Check staff session authentication
-    const cookieStore = await cookies();
-    const token = staffTokens(cookieStore)[0];
-    if (!token) {
+    checkOrigin(req);
+    const actor = await requireStaffSession(req);
+    if (!["ADMIN", "MANAGER"].includes(actor.role)) {
       return NextResponse.json(
-        { success: false, error: "กรุณาเข้าสู่ระบบก่อนทำการอัปโหลดไฟล์" },
-        { status: 401 }
-      );
-    }
-
-    const session = await db.staffSession.findUnique({
-      where: { tokenHash: hashToken(token) },
-      select: { tenantId: true, expiresAt: true, revokedAt: true },
-    });
-
-    if (!session || session.revokedAt || session.expiresAt <= new Date()) {
-      return NextResponse.json(
-        { success: false, error: "เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง" },
-        { status: 401 }
+        { success: false, error: "ไม่มีสิทธิ์อัปโหลดไฟล์ (เฉพาะ ADMIN หรือ MANAGER)" },
+        { status: 403 }
       );
     }
 
     const contentType = req.headers.get("content-type") || "";
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "storefront");
+    const uploadDir = path.resolve(process.cwd(), "public", "uploads", "storefront");
 
     if (!existsSync(uploadDir)) {
       await mkdir(uploadDir, { recursive: true });
@@ -72,25 +98,57 @@ export async function POST(req: NextRequest) {
 
       if (file.size > MAX_FILE_SIZE) {
         return NextResponse.json(
-          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 5 MB" },
+          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 2 MB" },
           { status: 400 }
         );
       }
 
-      const mimeType = file.type || "image/png";
+      const mimeType = (file.type || "image/png").toLowerCase();
       if (!ALLOWED_MIME_TYPES.has(mimeType)) {
         return NextResponse.json(
-          { success: false, error: "ประเภทรองรับเฉพาะ JPG, PNG, WEBP, SVG, GIF เท่านั้น" },
+          { success: false, error: "ประเภทรองรับเฉพาะ JPG, PNG, WEBP เท่านั้น" },
           { status: 400 }
         );
       }
-
-      const ext = EXTENSION_MAP[mimeType] || "png";
-      const filename = `${Date.now()}-${randomBytes(8).toString("hex")}.${ext}`;
-      const filePath = path.join(uploadDir, filename);
 
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
+
+      if (buffer.length === 0 || buffer.length > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 2 MB" },
+          { status: 400 }
+        );
+      }
+
+      // Verify actual magic bytes
+      const detectedMime = verifyMagicBytes(buffer);
+      if (!detectedMime || !ALLOWED_MIME_TYPES.has(detectedMime)) {
+        return NextResponse.json(
+          { success: false, error: "ไฟล์ไม่ใช่รูปภาพ JPG, PNG หรือ WEBP ที่ถูกต้อง" },
+          { status: 400 }
+        );
+      }
+
+      const ext = EXTENSION_MAP[detectedMime] || "png";
+      const filename = `${Date.now()}-${randomBytes(12).toString("hex")}.${ext}`;
+
+      // Strictly guard against directory traversal
+      if (!/^[a-zA-Z0-9_\-]+\.(jpg|png|webp)$/.test(filename) || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+        return NextResponse.json(
+          { success: false, error: "ตรวจพบชื่อไฟล์ที่ไม่ปลอดภัย" },
+          { status: 400 }
+        );
+      }
+
+      const filePath = path.resolve(uploadDir, filename);
+      if (!filePath.startsWith(uploadDir + path.sep)) {
+        return NextResponse.json(
+          { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
+          { status: 400 }
+        );
+      }
+
       await writeFile(filePath, buffer);
 
       const publicUrl = `/uploads/storefront/${filename}`;
@@ -98,14 +156,20 @@ export async function POST(req: NextRequest) {
         success: true,
         url: publicUrl,
         filename,
-        size: file.size,
-        mimeType,
+        size: buffer.length,
+        mimeType: detectedMime,
       });
     }
 
     // 2. Handle JSON payload (base64 Data URL or raw base64 string)
     if (contentType.includes("application/json")) {
-      const body = await req.json();
+      const body = await req.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return NextResponse.json(
+          { success: false, error: "รูปแบบข้อมูล JSON ไม่ถูกต้อง" },
+          { status: 400 }
+        );
+      }
       const rawData = body.dataUrl || body.image || body.base64;
 
       if (!rawData || typeof rawData !== "string") {
@@ -115,34 +179,74 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Memory DoS guard: 2MB binary payload is ~2.8MB base64
+      if (rawData.length > 4 * 1024 * 1024) {
+        return NextResponse.json(
+          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 2 MB" },
+          { status: 400 }
+        );
+      }
+
       // Format: data:image/png;base64,iVBORw0KGgo...
       const matches = rawData.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
-      let mimeType = "image/png";
-      let base64String = rawData;
+      let claimedMimeType = "image/png";
+      let base64String = rawData.trim();
 
       if (matches) {
-        mimeType = matches[1];
-        base64String = matches[2];
+        claimedMimeType = matches[1].toLowerCase();
+        base64String = matches[2].trim();
       }
 
-      if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+      if (!ALLOWED_MIME_TYPES.has(claimedMimeType)) {
         return NextResponse.json(
-          { success: false, error: "ประเภทรองรับเฉพาะ JPG, PNG, WEBP, SVG, GIF เท่านั้น" },
+          { success: false, error: "ประเภทรองรับเฉพาะ JPG, PNG, WEBP เท่านั้น" },
           { status: 400 }
         );
       }
 
-      const buffer = Buffer.from(base64String, "base64");
-      if (buffer.length > MAX_FILE_SIZE) {
+      const cleanBase64 = base64String.replace(/\s+/g, "");
+      if (!/^[A-Za-z0-9+/=]+$/.test(cleanBase64)) {
         return NextResponse.json(
-          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 5 MB" },
+          { success: false, error: "รูปแบบ base64 ไม่ถูกต้อง" },
           { status: 400 }
         );
       }
 
-      const ext = EXTENSION_MAP[mimeType] || "png";
-      const filename = `${Date.now()}-${randomBytes(8).toString("hex")}.${ext}`;
-      const filePath = path.join(uploadDir, filename);
+      const buffer = Buffer.from(cleanBase64, "base64");
+      if (buffer.length === 0 || buffer.length > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { success: false, error: "ขนาดไฟล์ต้องไม่เกิน 2 MB" },
+          { status: 400 }
+        );
+      }
+
+      // Verify actual magic bytes
+      const detectedMime = verifyMagicBytes(buffer);
+      if (!detectedMime || !ALLOWED_MIME_TYPES.has(detectedMime)) {
+        return NextResponse.json(
+          { success: false, error: "ไฟล์ไม่ใช่รูปภาพ JPG, PNG หรือ WEBP ที่ถูกต้อง" },
+          { status: 400 }
+        );
+      }
+
+      const ext = EXTENSION_MAP[detectedMime] || "png";
+      const filename = `${Date.now()}-${randomBytes(12).toString("hex")}.${ext}`;
+
+      // Strictly guard against directory traversal
+      if (!/^[a-zA-Z0-9_\-]+\.(jpg|png|webp)$/.test(filename) || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+        return NextResponse.json(
+          { success: false, error: "ตรวจพบชื่อไฟล์ที่ไม่ปลอดภัย" },
+          { status: 400 }
+        );
+      }
+
+      const filePath = path.resolve(uploadDir, filename);
+      if (!filePath.startsWith(uploadDir + path.sep)) {
+        return NextResponse.json(
+          { success: false, error: "ตรวจพบพาธที่ไม่ปลอดภัย (Path Traversal Detected)" },
+          { status: 400 }
+        );
+      }
 
       await writeFile(filePath, buffer);
 
@@ -150,10 +254,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         url: publicUrl,
-        dataUrl: rawData.startsWith("data:") ? rawData : `data:${mimeType};base64,${base64String}`,
         filename,
         size: buffer.length,
-        mimeType,
+        mimeType: detectedMime,
       });
     }
 
@@ -162,10 +265,6 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   } catch (error) {
-    console.error("POST /api/storefront/upload error:", error);
-    return NextResponse.json(
-      { success: false, error: "เกิดข้อผิดพลาดในการอัปโหลดไฟล์" },
-      { status: 500 }
-    );
+    return safeError(error);
   }
 }

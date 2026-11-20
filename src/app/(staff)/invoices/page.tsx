@@ -840,7 +840,7 @@ export default function InvoicesPage() {
               </div>
 
               {/* Items Table with True A4 Desktop Column Spacing */}
-              <div className="border border-slate-300 rounded-lg overflow-hidden">
+              <div className="border border-slate-300 rounded-lg overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-100 font-extrabold text-slate-800 border-b border-slate-300">
                     <tr>

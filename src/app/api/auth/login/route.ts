@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { checkOrigin, createStaffSession, resetThrottle, throttle } from "@/lib/staff-auth";
 import { AccessError } from "@/lib/staff-context";
-import { safeError } from "@/lib/staff-http";
+import { readJson, safeError } from "@/lib/staff-http";
 import { clientIp, isKnownIp } from "@/lib/client-ip";
 
 export const dynamic = "force-dynamic";
@@ -20,8 +20,8 @@ const LIMITS = { ipUser: 10, ip: 50, user: 50, shop: 1000 };
 export async function POST(request: NextRequest) {
   try {
     checkOrigin(request);
-    const body = await request.json();
-    if (typeof body.shopSlug !== "string" || typeof body.username !== "string" || typeof body.password !== "string" || !body.username.trim() || body.password.length > 256 || body.username.length > 100 || body.shopSlug.length > 100) throw new AccessError(400, "กรุณาระบุร้าน ชื่อผู้ใช้ และรหัสผ่านให้ครบ");
+    const body = await readJson(request);
+    if (!body || typeof body !== "object" || typeof body.shopSlug !== "string" || typeof body.username !== "string" || typeof body.password !== "string" || !body.username.trim() || body.password.length > 256 || body.username.length > 100 || body.shopSlug.length > 100) throw new AccessError(400, "กรุณาระบุร้าน ชื่อผู้ใช้ และรหัสผ่านให้ครบ");
     const slug = body.shopSlug.trim().toLowerCase();
     const username = body.username.trim().toLowerCase();
     const ip = clientIp(request);

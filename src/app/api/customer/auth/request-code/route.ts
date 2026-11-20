@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     checkOrigin(request);
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
     const result = await requestOtp(body?.shopSlug, body?.phone, { ip: clientIp(request), local: isLocalRequest(request) });
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return safeError(error); }

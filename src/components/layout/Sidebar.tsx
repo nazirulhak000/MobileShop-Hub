@@ -277,7 +277,7 @@ export function Sidebar() {
       <div className="lg:hidden fixed top-3 left-4 z-50">
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
           aria-label="Toggle navigation"
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -352,7 +352,7 @@ export function Sidebar() {
                   href={group.href!}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14.5px] font-semibold transition-all duration-150",
+                    "flex items-center gap-3 rounded-xl px-3.5 py-2.5 min-h-[44px] text-[14.5px] font-semibold transition-all duration-150",
                     active
                       ? "bg-teal-50 text-teal-900 font-bold border-l-4 border-teal-600 shadow-2xs pl-3"
                       : "text-slate-700 hover:bg-slate-100/70 hover:text-slate-950 hover:translate-x-0.5"
@@ -370,7 +370,7 @@ export function Sidebar() {
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.id)}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-[12px] font-bold text-slate-500 uppercase tracking-wider hover:bg-slate-50 hover:text-slate-900 transition-colors cursor-pointer"
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 min-h-[44px] text-[12px] font-bold text-slate-500 uppercase tracking-wider hover:bg-slate-50 hover:text-slate-900 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5">
                     <group.icon className="h-4 w-4 text-slate-400" />
@@ -395,7 +395,7 @@ export function Sidebar() {
                           href={item.href}
                           onClick={() => setMobileOpen(false)}
                           className={cn(
-                            "group flex items-center justify-between rounded-xl px-3 py-2 text-[14px] leading-snug font-medium transition-all duration-150",
+                            "group flex items-center justify-between rounded-xl px-3 py-2.5 min-h-[44px] text-[14px] leading-snug font-medium transition-all duration-150",
                             active
                               ? "bg-teal-50 text-teal-900 font-bold border-l-4 border-teal-600 shadow-2xs pl-2.5"
                               : "text-slate-700 hover:bg-slate-100/70 hover:text-slate-950 hover:translate-x-0.5"

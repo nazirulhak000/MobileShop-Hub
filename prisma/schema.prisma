@@ -208,6 +208,7 @@ model StaffBranchAccess {
   branchId String
 
   @@unique([userId, branchId])
+  @@index([tenantId, userId])
 }
 
 // ==========================================

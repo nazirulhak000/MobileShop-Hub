@@ -173,6 +173,10 @@ export default function InventoryPage() {
   // Handle Stock Adjustment
   const handleAdjustStock = async () => {
     if (!selectedProductForAdjust) return;
+    if (adjustType === "DEDUCT" && adjustQty > selectedProductForAdjust.currentStock) {
+      alert(`สต็อกมีเพียง ${selectedProductForAdjust.currentStock} ชิ้น ไม่สามารถลดจำนวน ${adjustQty} ชิ้นได้`);
+      return;
+    }
     try {
       setAdjustLoading(true);
       const res = await fetch("/api/inventory/adjust", {
@@ -204,6 +208,15 @@ export default function InventoryPage() {
   // Handle Add New IMEI
   const handleAddNewImei = async () => {
     if (!selectedProductForImei || !newImeiNum.trim()) return;
+    const cleanImei = newImeiNum.trim().replace(/\s+/g, "");
+    if (cleanImei.length < 8) {
+      alert("กรุณากรอกหมายเลข IMEI ให้ถูกต้อง (อย่างน้อย 8 ตัวอักษร)");
+      return;
+    }
+    if (selectedProductForImei.imeis.some((i) => i.imei.toLowerCase() === cleanImei.toLowerCase())) {
+      alert(`หมายเลข IMEI ${cleanImei} มีอยู่ในรายการของสินค้านี้แล้ว`);
+      return;
+    }
     try {
       setAddingImei(true);
       const res = await fetch("/api/inventory/imei", {
@@ -212,8 +225,8 @@ export default function InventoryPage() {
         body: JSON.stringify({
           productId: selectedProductForImei.id,
           branchCode: currentBranch.code,
-          imei: newImeiNum.trim(),
-          serialNo: newImeiSerial.trim(),
+          imei: cleanImei,
+          serialNo: newImeiSerial.trim() || undefined,
           conditionGrade: newImeiGrade,
           costPrice: Number(newImeiCost) || selectedProductForImei.costPrice,
           sellPrice: Number(newImeiSell) || selectedProductForImei.sellPrice,
@@ -221,7 +234,7 @@ export default function InventoryPage() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast(`บันทึก IMEI ${newImeiNum} เรียบร้อยแล้ว`);
+        showToast(`บันทึก IMEI ${cleanImei} เรียบร้อยแล้ว`);
         setNewImeiNum("");
         setNewImeiSerial("");
         fetchProducts();
@@ -819,9 +832,13 @@ export default function InventoryPage() {
               </label>
               <Input
                 type="number"
-                min="1"
+                min={adjustType === "SET" ? 0 : 1}
                 value={adjustQty}
-                onChange={(e) => setAdjustQty(Math.max(1, parseInt(e.target.value) || 1))}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const minVal = adjustType === "SET" ? 0 : 1;
+                  setAdjustQty(isNaN(val) ? minVal : Math.max(minVal, val));
+                }}
                 className="font-mono text-base font-bold"
               />
             </div>
@@ -843,6 +860,14 @@ export default function InventoryPage() {
                 <option value="โอนย้ายสต็อกระหว่างสาขา">โอนย้ายสต็อกระหว่างสาขา (Inter-branch Transfer)</option>
               </select>
             </div>
+
+            {/* Insufficient stock warning for DEDUCT */}
+            {adjustType === "DEDUCT" && adjustQty > selectedProductForAdjust.currentStock && (
+              <div className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-700 flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
+                <span>จำนวนที่ต้องการลด ({adjustQty} ชิ้น) มากกว่าสต็อกคงเหลือ ({selectedProductForAdjust.currentStock} ชิ้น)</span>
+              </div>
+            )}
 
             {/* Summary preview */}
             <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-800 flex items-center justify-between">
@@ -866,7 +891,12 @@ export default function InventoryPage() {
           <Button
             size="sm"
             onClick={handleAdjustStock}
-            disabled={adjustLoading}
+            disabled={
+              adjustLoading ||
+              (selectedProductForAdjust !== null &&
+                adjustType === "DEDUCT" &&
+                adjustQty > selectedProductForAdjust.currentStock)
+            }
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {adjustLoading ? "กำลังบันทึก..." : "ยืนยันการปรับสต็อก"}
@@ -971,7 +1001,7 @@ export default function InventoryPage() {
                   </span>
                 </h5>
 
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="rounded-xl border border-slate-200 overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                       <tr>

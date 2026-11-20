@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
@@ -13,6 +13,8 @@ import {
   ChevronRight,
   Clock,
   LogIn,
+  UserRound,
+  CalendarDays,
 } from "lucide-react";
 
 interface LandingNavbarProps {
@@ -37,6 +39,7 @@ export function LandingNavbar({
     ? `https://line.me/R/ti/p/${encodeURIComponent(lineId.trim().startsWith("@") ? lineId.trim() : `@${lineId.trim()}`)}`
     : "";
   const telUrl = phone ? `tel:${phone.replace(/[^0-9+]/g, "")}` : "";
+  const customerPortalHref = shopSlug ? `/s/${shopSlug}` : "/customer";
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [trackingCode, setTrackingCode] = useState("");
@@ -93,6 +96,14 @@ export function LandingNavbar({
             <span className="text-slate-700" aria-hidden="true">|</span>
             </>)}
             <Link
+              href={customerPortalHref}
+              className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
+            >
+              <UserRound className="h-3.5 w-3.5 text-emerald-400" />
+              <span>บริการลูกค้า / จองคิว</span>
+            </Link>
+            <span className="text-slate-700" aria-hidden="true">|</span>
+            <Link
               href="/dashboard"
               className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-sm"
             >
@@ -137,42 +148,46 @@ export function LandingNavbar({
             </Link>
 
             {/* Desktop Navigation Links */}
-            <nav className="hidden xl:flex items-center gap-1.5 lg:gap-3" aria-label="เมนูหลัก">
-              {navLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-                >
-                  {link.label}
-                </a>
-              ))}
-            </nav>
+            {navLinks.length > 0 && (
+              <nav className="hidden xl:flex items-center gap-1.5 lg:gap-3" aria-label="เมนูหลัก">
+                {navLinks.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </nav>
+            )}
 
             {/* Right Quick Action Group */}
             <div className="hidden sm:flex items-center gap-3">
               {/* Quick Tracking Search Mini Form */}
-              <form onSubmit={handleQuickTrackSubmit} className="relative hidden xl:block">
-                <input
-                  type="text"
-                  placeholder="วางลิงก์ติดตามงานซ่อม"
-                  value={trackingCode}
-                  onChange={(e) => setTrackingCode(e.target.value)}
-                  className="w-48 pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:w-56 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-all duration-150 motion-reduce:transition-none font-mono tabular-nums"
-                  aria-label="ลิงก์ติดตามงานซ่อมจากใบรับเครื่อง"
-                />
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500 pointer-events-none" />
-                {trackingCode && (
-                  <button
-                    type="button"
-                    onClick={() => setTrackingCode("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 hover:text-slate-600"
-                    aria-label="ล้างข้อความค้นหา"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </form>
+              {!hiddenSections.includes("#track-search") && (
+                <form onSubmit={handleQuickTrackSubmit} className="relative hidden xl:block">
+                  <input
+                    type="text"
+                    placeholder="วางลิงก์ติดตามงานซ่อม"
+                    value={trackingCode}
+                    onChange={(e) => setTrackingCode(e.target.value)}
+                    className="w-48 pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:bg-white focus:w-56 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 transition-all duration-150 motion-reduce:transition-none font-mono tabular-nums"
+                    aria-label="ลิงก์ติดตามงานซ่อมจากใบรับเครื่อง"
+                  />
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500 pointer-events-none" />
+                  {trackingCode && (
+                    <button
+                      type="button"
+                      onClick={() => setTrackingCode("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 hover:text-slate-600"
+                      aria-label="ล้างข้อความค้นหา"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </form>
+              )}
 
               {/* LINE Consultation CTA (real LINE OA only) */}
               {lineUrl && (
@@ -187,6 +202,15 @@ export function LandingNavbar({
               </a>
               )}
 
+              {/* Customer Portal Link */}
+              <Link
+                href={customerPortalHref}
+                className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 border border-slate-200 whitespace-nowrap shrink-0 shadow-2xs"
+              >
+                <UserRound className="h-4 w-4 text-emerald-600" />
+                <span>บัญชีลูกค้า</span>
+              </Link>
+
               {/* Staff Portal Link */}
               <Link
                 href="/dashboard"
@@ -200,13 +224,15 @@ export function LandingNavbar({
 
             {/* Mobile Menu Buttons */}
             <div className="flex items-center gap-2 lg:hidden">
-              <a
-                href="#track-search"
-                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-                aria-label="ไปยังช่องค้นหาสถานะซ่อม"
-              >
-                <Search className="h-5 w-5" />
-              </a>
+              {!hiddenSections.includes("#track-search") && (
+                <a
+                  href="#track-search"
+                  className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  aria-label="ไปยังช่องค้นหาสถานะซ่อม"
+                >
+                  <Search className="h-5 w-5" />
+                </a>
+              )}
 
               <button
                 type="button"
@@ -225,41 +251,45 @@ export function LandingNavbar({
         {mobileMenuOpen && (
           <div className="lg:hidden border-t border-slate-200 bg-white px-4 pt-4 pb-6 space-y-4 shadow-lg">
             {/* Quick Tracking Input for Mobile */}
-            <form onSubmit={handleQuickTrackSubmit} className="space-y-2">
-              <label htmlFor="mobile-nav-track" className="text-xs font-medium text-slate-700">
-                ติดตามงานซ่อม (วางลิงก์จากใบรับเครื่อง):
-              </label>
-              <div className="flex gap-2">
-                <input
-                  id="mobile-nav-track"
-                  type="text"
-                  placeholder="วางลิงก์ติดตามจากใบรับเครื่อง"
-                  value={trackingCode}
-                  onChange={(e) => setTrackingCode(e.target.value)}
-                  className="flex-1 min-h-[44px] px-3 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 font-mono tabular-nums"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[44px] min-w-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-medium shrink-0 hover:bg-slate-800 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-                >
-                  ค้นหา
-                </button>
-              </div>
-            </form>
+            {!hiddenSections.includes("#track-search") && (
+              <form onSubmit={handleQuickTrackSubmit} className="space-y-2">
+                <label htmlFor="mobile-nav-track" className="text-xs font-medium text-slate-700">
+                  ติดตามงานซ่อม (วางลิงก์จากใบรับเครื่อง):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="mobile-nav-track"
+                    type="text"
+                    placeholder="วางลิงก์ติดตามจากใบรับเครื่อง"
+                    value={trackingCode}
+                    onChange={(e) => setTrackingCode(e.target.value)}
+                    className="flex-1 min-h-[44px] px-3 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 font-mono tabular-nums"
+                  />
+                  <button
+                    type="submit"
+                    className="min-h-[44px] min-w-[44px] px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-medium shrink-0 hover:bg-slate-800 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  >
+                    ค้นหา
+                  </button>
+                </div>
+              </form>
+            )}
 
-            <nav className="divide-y divide-slate-100" aria-label="เมนูมือถือ">
-              {navLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
-                >
-                  <span>{link.label}</span>
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
-                </a>
-              ))}
-            </nav>
+            {navLinks.length > 0 && (
+              <nav className="divide-y divide-slate-100" aria-label="เมนูมือถือ">
+                {navLinks.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                  >
+                    <span>{link.label}</span>
+                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                  </a>
+                ))}
+              </nav>
+            )}
 
             {(telUrl || lineUrl) && (
             <div className={`pt-2 grid ${telUrl && lineUrl ? "grid-cols-2" : "grid-cols-1"} gap-2`}>
@@ -287,7 +317,16 @@ export function LandingNavbar({
             </div>
             )}
 
-            <div className="pt-2 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <Link
+                href={customerPortalHref}
+                onClick={() => setMobileMenuOpen(false)}
+                className="min-h-[44px] flex items-center justify-center gap-2 py-2.5 rounded-xl bg-teal-50 text-xs font-semibold text-teal-900 hover:bg-teal-100 transition-colors"
+              >
+                <UserRound className="h-4 w-4 text-teal-700" />
+                <span>เข้าสู่บัญชีลูกค้า / จองคิวเข้ารับบริการ</span>
+              </Link>
+
               <Link
                 href="/dashboard"
                 onClick={() => setMobileMenuOpen(false)}

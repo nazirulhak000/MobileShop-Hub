@@ -131,7 +131,7 @@ export function Header() {
               setBranchOpen(!branchOpen);
               setUserOpen(false);
             }}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 min-h-[44px] text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
           >
             <Building2 className="h-4 w-4 text-teal-600" />
             <span className="font-semibold text-slate-900">{currentBranch.name}</span>
@@ -184,7 +184,7 @@ export function Header() {
           type="button"
           disabled
           title="เร็วๆ นี้"
-          className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-2xs cursor-not-allowed opacity-60"
+          className="relative flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 shadow-2xs cursor-not-allowed opacity-60"
           aria-label="การแจ้งเตือน (เร็วๆ นี้)"
         >
           <Bell className="h-4.5 w-4.5" />
@@ -198,7 +198,7 @@ export function Header() {
               setUserOpen(!userOpen);
               setBranchOpen(false);
             }}
-            className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 transition-all shadow-2xs cursor-pointer"
+            className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 min-h-[44px] text-sm text-slate-700 hover:bg-slate-50 transition-all shadow-2xs cursor-pointer"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 text-white font-bold text-sm shadow-2xs">
               {currentUser.name ? currentUser.name[0].toUpperCase() : "R"}

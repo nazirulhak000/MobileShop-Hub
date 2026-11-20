@@ -87,6 +87,10 @@ export default function SparePartsPage() {
   });
 
   const handleOpenAdjust = (p: SparePartItem) => {
+    if ((p.stock || 0) <= 0) {
+      alert("อะไหล่รายการนี้หมดสต็อกในสาขา ไม่สามารถเบิกได้");
+      return;
+    }
     setSelectedPart(p);
     setAdjustAmount(1);
     setAdjustReason("เบิกใช้อะไหล่ซ่อมด่วนหน้าร้าน");
@@ -98,9 +102,18 @@ export default function SparePartsPage() {
     e.preventDefault();
     if (!selectedPart || saving) return;
 
+    if ((selectedPart.stock || 0) <= 0) {
+      setAdjustError("อะไหล่หมดสต็อก ไม่สามารถเบิกได้");
+      return;
+    }
+
     const qty = Number(adjustAmount);
     if (!Number.isInteger(qty) || qty < 1) {
       setAdjustError("กรุณาระบุจำนวนเป็นจำนวนเต็มตั้งแต่ 1");
+      return;
+    }
+    if (qty > selectedPart.stock) {
+      setAdjustError(`สต็อกคงเหลือ ${selectedPart.stock} ชิ้น ไม่เพียงพอสำหรับเบิก ${qty} ชิ้น`);
       return;
     }
     const reason = adjustReason.trim();
@@ -332,10 +345,11 @@ export default function SparePartsPage() {
                             onClick={() => handleOpenAdjust(p)}
                             variant="outline"
                             size="sm"
-                            className="h-7 text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                            disabled={(p.stock || 0) <= 0}
+                            className={`h-7 text-xs gap-1 ${(p.stock || 0) <= 0 ? "opacity-50 cursor-not-allowed border-slate-200 text-slate-400" : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"}`}
                           >
                             <Wrench className="h-3 w-3" />
-                            <span>เบิกใช้งาน</span>
+                            <span>{(p.stock || 0) <= 0 ? "ของหมด" : "เบิกใช้งาน"}</span>
                           </Button>
                         </td>
                       </tr>
@@ -372,7 +386,7 @@ export default function SparePartsPage() {
                 <Input
                   type="number"
                   min={1}
-                  max={Math.max(1, Math.min(selectedPart.stock || 1, 100000))}
+                  max={Math.max(1, selectedPart.stock || 1)}
                   step={1}
                   value={adjustAmount}
                   onChange={(e) => setAdjustAmount(parseInt(e.target.value, 10) || 0)}
@@ -393,6 +407,12 @@ export default function SparePartsPage() {
                 />
               </div>
 
+              {adjustAmount > (selectedPart.stock || 0) && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  จำนวนที่ต้องการเบิก ({adjustAmount} ชิ้น) เกินกว่าสต็อกคงเหลือ ({selectedPart.stock} ชิ้น)
+                </div>
+              )}
+
               {adjustError && (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                   {adjustError}
@@ -411,7 +431,7 @@ export default function SparePartsPage() {
                 <Button
                   type="submit"
                   className="bg-indigo-600 hover:bg-indigo-700 gap-1.5"
-                  disabled={saving}
+                  disabled={saving || (selectedPart.stock || 0) <= 0 || adjustAmount > (selectedPart.stock || 0)}
                 >
                   {saving && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                   <span>ยืนยันการตัดสต็อกเบิก</span>

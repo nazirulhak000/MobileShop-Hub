@@ -1,6 +1,6 @@
 import { staffContext } from "@/lib/staff-context";
 import { AccessError } from "@/lib/staff-context";
-import { assertTransition, reqInt, reqMoney, requireRole, safeError } from "@/lib/staff-http";
+import { assertTransition, readJson, reqInt, reqMoney, requireRole, safeError } from "@/lib/staff-http";
 import { withStaff } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
@@ -56,7 +56,9 @@ const CUSTOMER_MESSAGES: Record<RepairStatusValue, string> = {
 const ASSIGNABLE_ROLES = ["TECHNICIAN", "ADMIN", "MANAGER"];
 
 const jobResponseInclude = {
-  customer: true,
+  customer: {
+    select: { id: true, name: true, phone: true, lineId: true, address: true },
+  },
   branch: true,
   technician: { select: staffUserSelect },
   partUsages: {
@@ -79,12 +81,8 @@ async function handleGET(
       );
     }
     return NextResponse.json({ success: true, data: job });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch repair job" },
-      { status: 500 }
-    );
+  } catch (error) {
+    return safeError(error);
   }
 }
 
@@ -93,7 +91,7 @@ async function handlePATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const {
       status: rawStatus,
       technicianId,
@@ -193,7 +191,13 @@ async function handlePATCH(
     }
 
     if (estimatedFinish !== undefined) {
-      updateData.estimatedFinish = estimatedFinish ? new Date(estimatedFinish) : null;
+      if (estimatedFinish === null || estimatedFinish === "") {
+        updateData.estimatedFinish = null;
+      } else {
+        const d = new Date(estimatedFinish);
+        if (isNaN(d.getTime())) throw new AccessError(400, "วันที่คาดว่าจะเสร็จไม่ถูกต้อง");
+        updateData.estimatedFinish = d;
+      }
     }
 
     if (photos !== undefined) {
@@ -231,7 +235,7 @@ async function handlePATCH(
         const remaining = await tx.repairPartUsage.findMany({ where: { repairJobId: existing.id } });
         const partsTotal = remaining.reduce((sum, p) => sum + p.sellPrice * p.quantity, 0);
         const fee = updateData.laborFee ?? existing.laborFee;
-        await tx.repairJob.update({ where: { id: existing.id }, data: { totalCost: fee + partsTotal } });
+        await tx.repairJob.update({ where: { id: existing.id }, data: { totalCost: Math.round((fee + partsTotal) * 100) / 100 } });
       }
 
       const updated = await tx.repairJob.findUniqueOrThrow({
@@ -264,13 +268,8 @@ async function handlePATCH(
     });
 
     return NextResponse.json({ success: true, data: redactDeviceLock(updatedJob) });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("Error updating repair job:");
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to update repair job" },
-      { status: 500 }
-    );
+  } catch (error) {
+    return safeError(error);
   }
 }
 

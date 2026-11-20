@@ -401,6 +401,7 @@ export default function WithholdingTaxPage() {
                 </div>
 
                 {/* Details Table */}
+                <div className="overflow-x-auto">
                 <table className="w-full text-xs border border-slate-200">
                   <thead className="bg-slate-100 font-bold border-b border-slate-200">
                     <tr>
@@ -419,6 +420,7 @@ export default function WithholdingTaxPage() {
                     </tr>
                   </tbody>
                 </table>
+                </div>
 
                 {/* Signatures */}
                 <div className="pt-6 grid grid-cols-2 gap-4 text-center text-xs text-slate-500">

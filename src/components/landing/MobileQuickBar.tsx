@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
 import {
   Search,
@@ -11,6 +12,7 @@ import {
   ArrowRight,
   Smartphone,
   AlertCircle,
+  CalendarDays,
 } from "lucide-react";
 
 interface MobileQuickBarProps {
@@ -18,11 +20,13 @@ interface MobileQuickBarProps {
   phone?: string | null;
   /** LINE OA id (e.g. "@myshop"); the LINE button is hidden when missing. */
   lineId?: string | null;
+  /** Tenant shop slug for tenant-scoped portal navigation. */
+  shopSlug?: string;
   /** Show the "ประเมินราคา" shortcut (only when the page renders #estimate). */
   showEstimate?: boolean;
 }
 
-export function MobileQuickBar({ phone, lineId, showEstimate = true }: MobileQuickBarProps = {}) {
+export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true }: MobileQuickBarProps = {}) {
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [quickCode, setQuickCode] = useState("");
   const [modalError, setModalError] = useState("");
@@ -41,8 +45,10 @@ export function MobileQuickBar({ phone, lineId, showEstimate = true }: MobileQui
   const lineUrl = lineId
     ? `https://line.me/R/ti/p/${encodeURIComponent(lineId.trim().startsWith("@") ? lineId.trim() : `@${lineId.trim()}`)}`
     : "";
-  const columns = 1 + (showEstimate ? 1 : 0) + (phone ? 1 : 0) + (lineUrl ? 1 : 0);
-  const gridCols = ["grid-cols-1", "grid-cols-2", "grid-cols-3", "grid-cols-4"][columns - 1];
+  const columns = 1 + (shopSlug ? 1 : 0) + (showEstimate ? 1 : 0) + (phone ? 1 : 0) + (lineUrl ? 1 : 0);
+  const gridCols = ["grid-cols-1", "grid-cols-2", "grid-cols-3", "grid-cols-4", "grid-cols-5"][
+    Math.max(0, Math.min(4, columns - 1))
+  ] || "grid-cols-1";
 
   return (
     <>
@@ -64,6 +70,20 @@ export function MobileQuickBar({ phone, lineId, showEstimate = true }: MobileQui
             </div>
             <span className="text-[11px] font-medium mt-1 tracking-tight">เช็คสถานะ</span>
           </button>
+
+          {/* Action 2: Book / Customer Portal (when shopSlug present) */}
+          {shopSlug && (
+            <Link
+              href={`/s/${shopSlug}`}
+              className="min-h-[48px] flex flex-col items-center justify-center py-1 px-1 rounded-xl text-teal-800 hover:bg-teal-50 transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+              aria-label="พอร์ทัลลูกค้าและจองคิว"
+            >
+              <div className="h-7 w-7 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200">
+                <CalendarDays className="h-4 w-4" />
+              </div>
+              <span className="text-[11px] font-medium mt-1 tracking-tight">จองคิว/ลูกค้า</span>
+            </Link>
+          )}
 
           {/* Action 2: Price Estimator */}
           {showEstimate && (

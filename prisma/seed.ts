@@ -38,30 +38,93 @@ async function main() {
   }
   const passwordHash = await bcrypt.hash(seedPassword, 12);
   if (process.env.SEED_RESET === "true") {
-  console.warn("WARNING: SEED_RESET=true — deleting ALL existing rows in the seeded tables...");
-  // Children that reference User/Branch/Customer with onDelete: Restrict must go first
-  await prisma.installmentPayment.deleteMany();
-  await prisma.installmentContract.deleteMany();
-  await prisma.attendanceRecord.deleteMany();
-  await prisma.payrollSlip.deleteMany();
-  await prisma.shopExpense.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.repairPartUsage.deleteMany();
-  await prisma.saleItem.deleteMany();
-  await prisma.sale.deleteMany();
-  await prisma.repairJob.deleteMany();
-  await prisma.deviceIMEI.deleteMany();
-  await prisma.tradeInContract.deleteMany();
-  await prisma.stockItem.deleteMany();
-  await prisma.product.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.customer.deleteMany();
-  await prisma.branch.deleteMany();
+    console.warn("WARNING: SEED_RESET=true — deleting ALL existing rows in the seeded tables...");
+    // Children that reference User/Branch/Customer with onDelete: Restrict must go first
+    await prisma.publicTrackingToken.deleteMany();
+    await prisma.repairStatusEvent.deleteMany();
+    await prisma.repairQuote.deleteMany();
+    await prisma.appointmentEvent.deleteMany();
+    await prisma.appointment.deleteMany();
+    await prisma.bookingSlot.deleteMany();
+    await prisma.bookingPolicy.deleteMany();
+    await prisma.bookingRequest.deleteMany();
+    await prisma.customerNotification.deleteMany();
+    await prisma.customerSession.deleteMany();
+    await prisma.customerAccountLink.deleteMany();
+    await prisma.customerAccount.deleteMany();
+    await prisma.staffBranchAccess.deleteMany();
+    await prisma.staffSession.deleteMany();
+    await prisma.storefrontConfig.deleteMany();
+    await prisma.billingInvoice.deleteMany();
+    await prisma.subscription.deleteMany();
+    await prisma.sequenceCounter.deleteMany();
+    await prisma.installmentPayment.deleteMany();
+    await prisma.installmentContract.deleteMany();
+    await prisma.attendanceRecord.deleteMany();
+    await prisma.payrollSlip.deleteMany();
+    await prisma.shopExpense.deleteMany();
+    await prisma.auditLog.deleteMany();
+    await prisma.repairPartUsage.deleteMany();
+    await prisma.saleItem.deleteMany();
+    await prisma.sale.deleteMany();
+    await prisma.repairJob.deleteMany();
+    await prisma.deviceIMEI.deleteMany();
+    await prisma.tradeInContract.deleteMany();
+    await prisma.stockItem.deleteMany();
+    await prisma.product.deleteMany();
+    await prisma.user.deleteMany();
+    await prisma.customer.deleteMany();
+    await prisma.branch.deleteMany();
+    await prisma.tenant.deleteMany();
   }
+
+  console.log("Seeding Default Tenant & Storefront Config...");
+  const defaultTenant = await prisma.tenant.upsert({
+    where: { slug: "mobileshop" },
+    update: {},
+    create: {
+      id: "tenant-5f4958e4ddf549199fc1ac3d7519dd16",
+      name: "MobileShop",
+      slug: "mobileshop",
+      plan: "PRO",
+      status: "ACTIVE",
+      maxBranches: 5,
+      maxUsers: 20,
+    },
+  });
+
+  await prisma.storefrontConfig.upsert({
+    where: { tenantId: defaultTenant.id },
+    update: {},
+    create: {
+      tenantId: defaultTenant.id,
+      themeColor: "emerald",
+      headline: "ศูนย์บริการซ่อมมือถือด่วน มาตรฐานระดับโปร",
+      subheadline: "ตรวจเช็กด้วยระบบดิจิทัล รู้ผลทันที ติดตามสถานะเรียลไทม์ 24 ชม. อะไหล่แท้ รับประกันสูงสุด 180 วัน",
+      badge: "Official Service Center",
+      announcementText: "โปรโมชั่นเปิดร้านใหม่: เปลี่ยนแบตเตอรี่ลด 20% ฟรีตรวจเช็กสภาพเครื่อง 10 รายการ!",
+      announcementEnabled: true,
+      phone: "02-123-4567",
+      lineId: "@mobileshophub",
+      lineQrUrl: "",
+      googleMapsUrl: "https://maps.google.com",
+      showLiveTracking: true,
+      showHardwareScanner: true,
+      showServicesBento: true,
+      showInspectionBench: true,
+      showPriceEstimator: true,
+      showBeforeAfterSlider: true,
+      showCustomerReviews: true,
+      showLocationSection: true,
+      showFaqSection: true,
+      showMobileQuickBar: true,
+    },
+  });
 
   console.log("Seeding Branches...");
   const hq = await prisma.branch.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "MobileShop HQ (สำนักงานใหญ่ สุขุมวิท)",
       code: "HQ",
       address: "123/45 ถนนสุขุมวิท ซอย 55 คลองเตย กรุงเทพฯ 10110",
@@ -72,6 +135,7 @@ async function main() {
 
   const branch2 = await prisma.branch.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "MobileShop สาขา 2 (เซ็นทรัลพระราม 9)",
       code: "BR-02",
       address: "ห้อง 402 ชั้น 4 ศูนย์การค้าเซ็นทรัลพลาซา พระราม 9 ห้วยขวาง กรุงเทพฯ 10320",
@@ -83,6 +147,7 @@ async function main() {
   console.log("Seeding Users...");
   const admin = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "สมชาย ผู้จัดการใหญ่",
       username: "admin",
       password: passwordHash,
@@ -94,6 +159,7 @@ async function main() {
 
   const manager2 = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "วิภาดา สาขาเก้า",
       username: "manager2",
       password: passwordHash,
@@ -105,6 +171,7 @@ async function main() {
 
   const tech1 = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "ช่างเอก มือทอง",
       username: "tech_ek",
       password: passwordHash,
@@ -116,6 +183,7 @@ async function main() {
 
   const tech2 = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "ช่างนนท์ สายไว",
       username: "tech_non",
       password: passwordHash,
@@ -127,6 +195,7 @@ async function main() {
 
   const cashier1 = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "น้องแพรว แคชเชียร์",
       username: "cashier1",
       password: passwordHash,
@@ -138,6 +207,7 @@ async function main() {
 
   const cashier2 = await prisma.user.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "น้องก้อย แคชเชียร์",
       username: "cashier2",
       password: passwordHash,
@@ -150,6 +220,7 @@ async function main() {
   console.log("Seeding Customers...");
   const cust1 = await prisma.customer.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "คุณธนกร รัตนสิทธิ",
       phone: "081-234-5678",
       nationalId: "1100400123451",
@@ -160,6 +231,7 @@ async function main() {
 
   const cust2 = await prisma.customer.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "คุณพิมพ์ชนก สิริพร",
       phone: "089-876-5432",
       nationalId: "3100500987654",
@@ -170,6 +242,7 @@ async function main() {
 
   const cust3 = await prisma.customer.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "คุณอนันต์ พัฒนเดช",
       phone: "095-555-1234",
       nationalId: "1100600456789",
@@ -180,6 +253,7 @@ async function main() {
 
   const cust4 = await prisma.customer.create({
     data: {
+      tenantId: defaultTenant.id,
       name: "คุณศิริพร บุญรักษา",
       phone: "062-345-6789",
       nationalId: "2100700876543",
@@ -189,8 +263,21 @@ async function main() {
   });
 
   console.log("Seeding Products (Parts, Accessories, Devices)...");
+  const createProduct = (args: any) =>
+    prisma.product.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+  const createRepairJob = (args: any) =>
+    prisma.repairJob.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+  const createRepairPartUsage = (args: any) =>
+    prisma.repairPartUsage.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+  const createTradeInContract = (args: any) =>
+    prisma.tradeInContract.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+  const createSale = (args: any) =>
+    prisma.sale.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+  const createSaleItem = (args: any) =>
+    prisma.saleItem.create({ ...args, data: { tenantId: defaultTenant.id, ...args.data } });
+
   // Spare Parts
-  const pScreen14PM = await prisma.product.create({
+  const pScreen14PM = await createProduct({
     data: {
       code: "SCR-IP14PM",
       name: "หน้าจอแท้ iPhone 14 Pro Max (OLED Super Retina XDR)",
@@ -204,7 +291,7 @@ async function main() {
     },
   });
 
-  const pScreen13 = await prisma.product.create({
+  const pScreen13 = await createProduct({
     data: {
       code: "SCR-IP13-INC",
       name: "หน้าจอเทียบแท้เกรด A iPhone 13 (In-Cell FHD Display)",
@@ -218,7 +305,7 @@ async function main() {
     },
   });
 
-  const pBat13 = await prisma.product.create({
+  const pBat13 = await createProduct({
     data: {
       code: "BAT-IP13",
       name: "แบตเตอรี่แท้ มอก. iPhone 13 (High Capacity 3227mAh)",
@@ -232,7 +319,7 @@ async function main() {
     },
   });
 
-  const pBatS23U = await prisma.product.create({
+  const pBatS23U = await createProduct({
     data: {
       code: "BAT-S23U",
       name: "แบตเตอรี่แท้ Samsung Galaxy S23 Ultra (5000mAh มอก.)",
@@ -246,7 +333,7 @@ async function main() {
     },
   });
 
-  const pChgBoardA54 = await prisma.product.create({
+  const pChgBoardA54 = await createProduct({
     data: {
       code: "CHG-SMA54",
       name: "แผงชาร์จ Type-C Charging Port Board Samsung A54 5G",
@@ -261,7 +348,7 @@ async function main() {
   });
 
   // Accessories
-  const pAnker30W = await prisma.product.create({
+  const pAnker30W = await createProduct({
     data: {
       code: "ACC-ANK-30W",
       name: "หัวชาร์จเร็ว Anker 30W Nano II PD Fast Charger",
@@ -274,7 +361,7 @@ async function main() {
     },
   });
 
-  const pRemaxCL = await prisma.product.create({
+  const pRemaxCL = await createProduct({
     data: {
       code: "ACC-RMX-CL",
       name: "สายชาร์จถัก Remax Type-C to Lightning 1.2m MFi Cert",
@@ -287,7 +374,7 @@ async function main() {
     },
   });
 
-  const pFocus15P = await prisma.product.create({
+  const pFocus15P = await createProduct({
     data: {
       code: "ACC-FOC-15P",
       name: "กระจกกันรอยเต็มจอ Focus 3D Full Cover iPhone 15 Pro",
@@ -300,7 +387,7 @@ async function main() {
     },
   });
 
-  const pUAG14PM = await prisma.product.create({
+  const pUAG14PM = await createProduct({
     data: {
       code: "ACC-UAG-14PM",
       name: "เคสกันกระแทก UAG Monarch Kevlar iPhone 14 Pro Max",
@@ -314,7 +401,7 @@ async function main() {
   });
 
   // Devices (New / Secondhand)
-  const pPhone13_128 = await prisma.product.create({
+  const pPhone13_128 = await createProduct({
     data: {
       code: "DEV-IP13-128",
       name: "iPhone 13 128GB Midnight (มือสอง สภาพสวย Grade A)",
@@ -327,7 +414,7 @@ async function main() {
     },
   });
 
-  const pPhone14P_256 = await prisma.product.create({
+  const pPhone14P_256 = await createProduct({
     data: {
       code: "DEV-IP14P-256",
       name: "iPhone 14 Pro 256GB Deep Purple (มือสอง แบต 90% Grade A)",
@@ -340,7 +427,7 @@ async function main() {
     },
   });
 
-  const pPhoneS23 = await prisma.product.create({
+  const pPhoneS23 = await createProduct({
     data: {
       code: "DEV-S23-128",
       name: "Samsung Galaxy S23 5G 128GB Phantom Black (เครื่องใหม่ศูนย์)",
@@ -385,13 +472,14 @@ async function main() {
   ];
 
   for (const s of stockData) {
-    await prisma.stockItem.create({ data: s });
+    await prisma.stockItem.create({ data: { ...s, tenantId: defaultTenant.id } });
   }
 
   console.log("Seeding Device IMEIs...");
   await prisma.deviceIMEI.createMany({
     data: [
       {
+        tenantId: defaultTenant.id,
         productId: pPhone13_128.id,
         branchId: hq.id,
         imei: "354928110293847",
@@ -402,6 +490,7 @@ async function main() {
         sellPrice: 14900,
       },
       {
+        tenantId: defaultTenant.id,
         productId: pPhone13_128.id,
         branchId: hq.id,
         imei: "354928110293848",
@@ -412,6 +501,7 @@ async function main() {
         sellPrice: 13900,
       },
       {
+        tenantId: defaultTenant.id,
         productId: pPhone14P_256.id,
         branchId: hq.id,
         imei: "358765098123456",
@@ -422,6 +512,7 @@ async function main() {
         sellPrice: 23900,
       },
       {
+        tenantId: defaultTenant.id,
         productId: pPhoneS23.id,
         branchId: hq.id,
         imei: "359182736451029",
@@ -432,6 +523,7 @@ async function main() {
         sellPrice: 19900,
       },
       {
+        tenantId: defaultTenant.id,
         productId: pPhoneS23.id,
         branchId: branch2.id,
         imei: "359182736451030",
@@ -445,7 +537,7 @@ async function main() {
   });
 
   console.log("Seeding Trade-in / Pawn Contracts...");
-  const tc1 = await prisma.tradeInContract.create({
+  const tc1 = await createTradeInContract({
     data: {
       contractNo: "TC-202611-0001",
       type: "BUYBACK",
@@ -469,7 +561,7 @@ async function main() {
     },
   });
 
-  const tc2 = await prisma.tradeInContract.create({
+  const tc2 = await createTradeInContract({
     data: {
       contractNo: "TC-202611-0002",
       type: "PAWN",
@@ -513,7 +605,7 @@ async function main() {
   });
 
   // 1. PENDING
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0001",
       branchId: hq.id,
@@ -550,7 +642,7 @@ async function main() {
   });
 
   // 2. DIAGNOSING
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0002",
       branchId: hq.id,
@@ -588,7 +680,7 @@ async function main() {
   });
 
   // 3. WAITING_PARTS
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0003",
       branchId: branch2.id,
@@ -613,7 +705,7 @@ async function main() {
   });
 
   // 4. REPAIRING (With parts usage)
-  const rep4 = await prisma.repairJob.create({
+  const rep4 = await createRepairJob({
     data: {
       trackingCode: "REP-202611-0004",
       branchId: hq.id,
@@ -650,7 +742,7 @@ async function main() {
     },
   });
 
-  await prisma.repairPartUsage.create({
+  await createRepairPartUsage({
     data: {
       repairJobId: rep4.id,
       productId: pScreen13.id,
@@ -660,7 +752,7 @@ async function main() {
     },
   });
 
-  await prisma.repairPartUsage.create({
+  await createRepairPartUsage({
     data: {
       repairJobId: rep4.id,
       productId: pBat13.id,
@@ -671,7 +763,7 @@ async function main() {
   });
 
   // 5. QC_PASSED
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0005",
       branchId: branch2.id,
@@ -707,7 +799,7 @@ async function main() {
   });
 
   // 6. READY
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0006",
       branchId: hq.id,
@@ -733,7 +825,7 @@ async function main() {
   });
 
   // 7. COMPLETED
-  await prisma.repairJob.create({
+  await createRepairJob({
     data: {
       trackingCode: "REP-202611-0007",
       branchId: hq.id,
@@ -760,7 +852,7 @@ async function main() {
   });
 
   console.log("Seeding Sales and POS Checkout...");
-  const sale1 = await prisma.sale.create({
+  const sale1 = await createSale({
     data: {
       invoiceNo: "INV-202611-0001",
       branchId: hq.id,
@@ -776,7 +868,7 @@ async function main() {
     },
   });
 
-  await prisma.saleItem.create({
+  await createSaleItem({
     data: {
       saleId: sale1.id,
       productId: pAnker30W.id,
@@ -787,7 +879,7 @@ async function main() {
     },
   });
 
-  await prisma.saleItem.create({
+  await createSaleItem({
     data: {
       saleId: sale1.id,
       productId: pFocus15P.id,

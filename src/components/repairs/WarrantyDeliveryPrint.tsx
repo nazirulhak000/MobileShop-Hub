@@ -18,7 +18,7 @@ export function WarrantyDeliveryPrint({
   onClose,
   job,
 }: WarrantyDeliveryPrintProps) {
-  const [printFormat, setPrintFormat] = useState<"A4" | "80mm">("A4");
+  const [printFormat, setPrintFormat] = useState<"A4" | "80mm" | "58mm">("A4");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
 
   useEffect(() => {
@@ -42,7 +42,9 @@ export function WarrantyDeliveryPrint({
   if (!job) return null;
 
   const handlePrint = () => {
+    document.body.classList.add("printing-slip");
     window.print();
+    setTimeout(() => document.body.classList.remove("printing-slip"), 1000);
   };
 
   const partsTotal =
@@ -64,7 +66,7 @@ export function WarrantyDeliveryPrint({
             พิมพ์ใบส่งมอบเครื่อง & ใบรับประกันงานซ่อม (Delivery Slip & Warranty)
           </DialogTitle>
           <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-100 text-xs">
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-100 text-xs no-print">
               <button
                 type="button"
                 onClick={() => setPrintFormat("A4")}
@@ -74,7 +76,7 @@ export function WarrantyDeliveryPrint({
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                ขนาด A4 (แบบมาตรฐาน)
+                A4 มาตรฐาน
               </button>
               <button
                 type="button"
@@ -85,7 +87,18 @@ export function WarrantyDeliveryPrint({
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                ขนาด 80mm (สลิปความร้อน)
+                สลิป 80mm
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintFormat("58mm")}
+                className={`px-3 py-1 rounded-md font-medium transition-all ${
+                  printFormat === "58mm"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                สลิป 58mm
               </button>
             </div>
             <Button
@@ -95,7 +108,7 @@ export function WarrantyDeliveryPrint({
               className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>พิมพ์เอกสาร</span>
+              <span>พิมพ์เอกสาร ({printFormat})</span>
             </Button>
           </div>
         </DialogHeader>
@@ -299,10 +312,12 @@ export function WarrantyDeliveryPrint({
               </div>
             </div>
           ) : (
-            /* 80mm Thermal Delivery Slip */
+            /* 80mm & 58mm Thermal Delivery Slip */
             <div
               id="print-document"
-              className="w-[300px] bg-white text-black p-4 font-mono text-[11px] leading-tight shadow-md border border-slate-300 rounded-sm"
+              className={`${
+                printFormat === "58mm" ? "thermal-58mm" : "thermal-80mm"
+              } w-[300px] bg-white text-black p-4 font-mono text-[11px] leading-tight shadow-md border border-slate-300 rounded-sm`}
             >
               <div className="text-center pb-2 border-b border-dashed border-black">
                 <h2 className="text-sm font-bold">

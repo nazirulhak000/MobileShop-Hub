@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState } from "react";
 import {
@@ -13,6 +13,7 @@ import {
   Package,
   MessageCircle,
 } from "lucide-react";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface FaqItem {
   id: string;
@@ -86,8 +87,22 @@ function lineAddFriendUrl(lineId: string) {
   return `https://line.me/R/ti/p/${encodeURIComponent(id.startsWith("@") ? id : `@${id}`)}`;
 }
 
-export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
-  const [openId, setOpenId] = useState<string>("faq-1");
+export interface LandingFaqProps {
+  lineId?: string | null;
+  themeColor?: StorefrontThemeColor;
+  customFaqs?: any[];
+}
+
+export function LandingFaq({ lineId, themeColor = "emerald", customFaqs }: LandingFaqProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+  const faqsList = React.useMemo(() => {
+    if (customFaqs && Array.isArray(customFaqs) && customFaqs.length > 0) {
+      const valid = customFaqs.filter((item) => Boolean(item && typeof item === "object"));
+      if (valid.length > 0) return valid;
+    }
+    return FAQS;
+  }, [customFaqs]);
+  const [openId, setOpenId] = useState<string>(faqsList[0]?.id || "faq-1");
 
   const toggleAccordion = (id: string) => {
     setOpenId(openId === id ? "" : id);
@@ -99,7 +114,7 @@ export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
         {/* Section Header */}
         <div className="text-center space-y-3 mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium border border-slate-200">
-            <HelpCircle className="h-3.5 w-3.5 text-emerald-600" />
+            <HelpCircle className={`h-3.5 w-3.5 ${theme.iconColor}`} />
             <span>คำถามที่พบบ่อย (FAQ)</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
@@ -112,13 +127,16 @@ export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
 
         {/* Accordion List */}
         <div className="space-y-3">
-          {FAQS.map((item) => {
-            const isOpen = openId === item.id;
-            const IconComponent = item.icon;
+          {faqsList.map((item: any, idx: number) => {
+            const itemId = item.id || `faq-${idx + 1}`;
+            const itemQuestion = item.question || "คำถามพบบ่อย";
+            const itemAnswer = item.answer || "คำตอบทางเทคนิคจากทีมช่าง";
+            const isOpen = openId === itemId;
+            const IconComponent = item.icon || HelpCircle;
 
             return (
               <div
-                key={item.id}
+                key={itemId}
                 className={`rounded-2xl border transition-colors duration-150 overflow-hidden ${
                   isOpen
                     ? "bg-slate-50 border-slate-300 shadow-2xs"
@@ -127,10 +145,10 @@ export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
               >
                 <button
                   type="button"
-                  id={`faq-btn-${item.id}`}
-                  aria-controls={`faq-answer-${item.id}`}
-                  onClick={() => toggleAccordion(item.id)}
-                  className="w-full min-h-[44px] p-4 sm:p-5 flex items-center justify-between gap-4 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                  id={`faq-btn-${itemId}`}
+                  aria-controls={`faq-answer-${itemId}`}
+                  onClick={() => toggleAccordion(itemId)}
+                  className={`w-full min-h-[44px] p-4 sm:p-5 flex items-center justify-between gap-4 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing}`}
                   aria-expanded={isOpen}
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
@@ -144,7 +162,7 @@ export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
                       <IconComponent className="h-4 w-4" />
                     </div>
                     <span className="text-sm sm:text-base font-semibold text-slate-900 leading-snug">
-                      {item.question}
+                      {itemQuestion}
                     </span>
                   </div>
 
@@ -159,17 +177,17 @@ export function LandingFaq({ lineId }: { lineId?: string | null } = {}) {
 
                 {isOpen && (
                   <div
-                    id={`faq-answer-${item.id}`}
+                    id={`faq-answer-${itemId}`}
                     role="region"
-                    aria-labelledby={`faq-btn-${item.id}`}
+                    aria-labelledby={`faq-btn-${itemId}`}
                     className="px-4 pb-5 sm:px-5 sm:pb-6 pt-1 text-xs sm:text-sm text-slate-600 leading-relaxed space-y-2 pl-16 sm:pl-17"
                   >
                     {item.highlight && (
-                      <div className="font-medium text-emerald-900 bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-xs">
+                      <div className={`font-medium ${theme.lightText} ${theme.lightBg} p-2.5 rounded-xl border ${theme.lightBorder} text-xs`}>
                         ✓ {item.highlight}
                       </div>
                     )}
-                    <p>{item.answer}</p>
+                    <p>{itemAnswer}</p>
                   </div>
                 )}
               </div>

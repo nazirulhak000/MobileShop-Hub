@@ -11,9 +11,10 @@ export const dynamic = "force-dynamic";
  * restocks every item at the sale's branch, returns IMEI devices to IN_STOCK and
  * writes an AuditLog entry (the only place the reason is stored - Sale has no void fields).
  */
-async function handlePOST(request: NextRequest, { params }: { params: { id: string } }) {
+async function handlePOST(request: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
   const actor = staffContext();
-  const id = reqId(params.id);
+  const resolved = await Promise.resolve(params);
+  const id = reqId(resolved?.id, "id");
   const body = await request.json().catch(() => null);
   const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
   if (reason.length < 3) throw new AccessError(400, "กรุณาระบุเหตุผลการยกเลิก/คืนเงิน (อย่างน้อย 3 ตัวอักษร)");

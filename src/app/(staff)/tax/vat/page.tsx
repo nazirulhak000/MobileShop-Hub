@@ -6,6 +6,7 @@ import { ChevronRight, Printer, AlertCircle, ArrowDownRight, ArrowUpRight, Loade
 import { useApp } from "@/context/AppContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { formatTHB } from "@/lib/tax";
 
@@ -43,9 +44,14 @@ export default function VatFilingPage() {
   // Default: previous month (the one being filed by the 23rd of this month)
   const [selectedMonth, setSelectedMonth] = useState(() => shiftMonth(bkkMonth(), -1));
   const [branch, setBranch] = useState("ALL");
+  const [customInputVat, setCustomInputVat] = useState("");
   const [data, setData] = useState<VatData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const parsedInputVat = Math.max(0, parseFloat(customInputVat) || 0);
+  const netPayable = data ? Math.max(0, data.outputVat - parsedInputVat) : 0;
+  const taxCredit = data && parsedInputVat > data.outputVat ? parsedInputVat - data.outputVat : 0;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,18 +155,42 @@ export default function VatFilingPage() {
                   <span className="text-xs font-semibold text-slate-500">2. ภาษีซื้อ (Input VAT)</span>
                   <span className="rounded-full bg-blue-100 p-1 text-blue-700"><ArrowDownRight className="h-4 w-4" /></span>
                 </div>
-                <div className="text-2xl font-bold font-mono text-slate-400">{formatTHB(data.inputVat)}</div>
-                <div className="text-[11px] text-amber-700 font-semibold">ยังไม่บันทึกในระบบ</div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={customInputVat}
+                    onChange={(e) => setCustomInputVat(e.target.value)}
+                    className="h-8 text-base font-mono font-bold text-blue-700 bg-white"
+                  />
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {parsedInputVat > 0 ? (
+                    <span className="text-blue-700 font-medium">นำภาษีซื้อจากใบกำกับภาษีจริงมาหัก: {formatTHB(parsedInputVat)}</span>
+                  ) : (
+                    <span className="text-amber-700 font-semibold">กรอกภาษีซื้อจากใบกำกับภาษีของผู้ขายเพื่อคำนวณสุทธิ</span>
+                  )}
+                </div>
               </CardContent>
             </Card>
             <Card className="bg-emerald-900 text-white shadow-md">
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-emerald-200">3. ภาษีที่ต้องชำระ (ก่อนหักภาษีซื้อ)</span>
+                  <span className="text-xs text-emerald-200">
+                    {taxCredit > 0 ? "3. ภาษีชำระเกินยกไป (Tax Credit)" : "3. ภาษีที่ต้องชำระสุทธิ (ภ.พ.30)"}
+                  </span>
                   <Badge variant="success" className="text-[10px] bg-emerald-800 text-emerald-100 border-emerald-700">{dueLabel}</Badge>
                 </div>
-                <div className="text-3xl font-extrabold font-mono text-emerald-400">{formatTHB(data.netVatPayable)}</div>
-                <div className="text-[11px] text-emerald-200/80">(ภาษีขาย {formatTHB(data.outputVat)} - ภาษีซื้อ {formatTHB(data.inputVat)})</div>
+                <div className={`text-3xl font-extrabold font-mono ${taxCredit > 0 ? "text-amber-300" : "text-emerald-400"}`}>
+                  {formatTHB(taxCredit > 0 ? taxCredit : netPayable)}
+                </div>
+                <div className="text-[11px] text-emerald-200/80">
+                  {taxCredit > 0
+                    ? `(ภาษีซื้อ ${formatTHB(parsedInputVat)} มากกว่าภาษีขาย ${formatTHB(data.outputVat)} นำไปเครดิตเดือนถัดไป)`
+                    : `(ภาษีขาย ${formatTHB(data.outputVat)} - ภาษีซื้อ ${formatTHB(parsedInputVat)})`}
+                </div>
               </CardContent>
             </Card>
           </div>

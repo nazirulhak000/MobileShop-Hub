@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { db } from "@/lib/db";
 import { withStaff } from "@/lib/staff-http";
-import { staffContext } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { hashToken } from "@/lib/staff-auth";
 export const POST = withStaff(async (_request: NextRequest, { params }: { params: { id: string } }) => {
   const job = await prisma.repairJob.findUnique({ where: { id: params.id }, select: { id: true } });
-  if (!job) return NextResponse.json({ error: "ไม่พบงานซ่อม" }, { status: 404 });
+  if (!job) throw new AccessError(404, "ไม่พบงานซ่อม");
   const tenantId = staffContext().tenantId;
   const token = randomBytes(32).toString("hex");
   const now = new Date();
@@ -21,7 +21,7 @@ export const POST = withStaff(async (_request: NextRequest, { params }: { params
 }, ["ADMIN", "MANAGER", "CASHIER"]);
 export const DELETE = withStaff(async (_request: NextRequest, { params }: { params: { id: string } }) => {
   const job = await prisma.repairJob.findUnique({ where: { id: params.id }, select: { id: true } });
-  if (!job) return NextResponse.json({ error: "ไม่พบงานซ่อม" }, { status: 404 });
+  if (!job) throw new AccessError(404, "ไม่พบงานซ่อม");
   await db.publicTrackingToken.updateMany({ where: { tenantId: staffContext().tenantId, repairJobId: job.id, revokedAt: null }, data: { revokedAt: new Date() } });
   return NextResponse.json({ success: true });
 }, ["ADMIN", "MANAGER"]);

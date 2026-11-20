@@ -1,6 +1,5 @@
 import { AccessError } from "@/lib/staff-context";
-import { safeError } from "@/lib/staff-http";
-import { withStaff } from "@/lib/staff-http";
+import { readJson, safeError, withStaff } from "@/lib/staff-http";
 import { staffTenantId } from "@/lib/staff-context";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -40,17 +39,15 @@ async function handleGET(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: customers, customers });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("GET /api/customers error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
 // POST /api/customers - Create or update customer
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const { name, phone, nationalId, lineId, address } = body;
 
     if (!name || !phone) {
@@ -78,10 +75,8 @@ async function handlePOST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: customer, customer });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("POST /api/customers error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

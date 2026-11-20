@@ -15,6 +15,6 @@ export const GET = withStaff(async () => {
     prisma.user.findMany({ where: fullDirectory ? { isActive: true } : { isActive: true, OR: [{ id: user.id }, { role: "TECHNICIAN" }] }, select: { id: true, name: true, role: true, username: true, branch: { select: { code: true } } } }),
     prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { name: true, slug: true } }),
   ]);
-  const users = directory.map(u => ({ id: u.id, name: u.name, role: u.role, username: fullDirectory || u.id === user.id ? u.username : "", branchCode: u.branch.code }));
+  const users = directory.map(u => ({ id: u.id, name: u.name, role: u.role, username: fullDirectory || u.id === user.id ? u.username : "", branchCode: u.branch?.code ?? "" }));
   return NextResponse.json({ user: { ...user, branchCode: branches.find(b => b.id === user.branchId)?.code ?? "" }, branches, users, tenant });
 }, ["ADMIN", "MANAGER", "CASHIER", "TECHNICIAN"]);

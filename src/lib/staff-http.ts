@@ -1,13 +1,63 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { AccessError, staffStorage } from "./staff-context";
 import { checkOrigin, requireStaffSession } from "./staff-auth";
+
 export function safeError(error: unknown) {
+  if (error instanceof SyntaxError) {
+    return NextResponse.json(
+      { success: false, error: "รูปแบบข้อมูล JSON ไม่ถูกต้อง" },
+      { status: 400, headers: { "Cache-Control": "private, no-store" } }
+    );
+  }
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target) ? error.meta.target.join(", ") : "";
+      return NextResponse.json(
+        { success: false, error: target ? `ข้อมูลซ้ำซ้อนในระบบ (${target})` : "ข้อมูลนี้มีอยู่ในระบบแล้ว (ซ้ำซ้อน)" },
+        { status: 409, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    if (error.code === "P2003") {
+      return NextResponse.json(
+        { success: false, error: "ไม่สามารถดำเนินการได้เนื่องจากข้อมูลเชื่อมโยงกันอยู่" },
+        { status: 409, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+    if (error.code === "P2025") {
+      return NextResponse.json(
+        { success: false, error: "ไม่พบข้อมูลที่ต้องการ" },
+        { status: 404, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
+  }
   const status = error instanceof AccessError ? error.status : 500;
-  return NextResponse.json({ success: false, error: error instanceof AccessError ? error.message : "ไม่สามารถทำรายการได้ กรุณาลองใหม่" }, { status, headers: { "Cache-Control": "private, no-store" } });
+  return NextResponse.json(
+    { success: false, error: error instanceof AccessError ? error.message : "ไม่สามารถทำรายการได้ กรุณาลองใหม่" },
+    { status, headers: { "Cache-Control": "private, no-store" } }
+  );
 }
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !["password", "tokenHash", "secretHash"].includes(key)).map(([key, entry]) => [key, redact(entry)]));
+
+export async function readJson<T = any>(request: NextRequest | Request): Promise<T> {
+  try {
+    return await request.json();
+  } catch {
+    throw new AccessError(400, "รูปแบบข้อมูล JSON ไม่ถูกต้อง");
+  }
+}
+function redact(value: unknown, isMarginRole = true): unknown {
+  if (Array.isArray(value)) return value.map(v => redact(v, isMarginRole));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => {
+          if (["password", "tokenHash", "secretHash"].includes(key)) return false;
+          if (!isMarginRole && key === "costPrice") return false;
+          return true;
+        })
+        .map(([key, entry]) => [key, redact(entry, isMarginRole)])
+    );
+  }
   return value;
 }
 // ---------- Shared input validation (throw AccessError(400) on bad input) ----------
@@ -92,10 +142,11 @@ export function withStaff<C>(handler: (request: NextRequest, context: C) => Prom
       checkOrigin(request);
       const principal = await requireStaffSession();
       if (!roles.includes(principal.role)) throw new AccessError(403, "ไม่มีสิทธิ์ทำรายการนี้");
+      const isMarginRole = ["ADMIN", "MANAGER"].includes(principal.role);
       const resolved = { ...context, params: await context.params } as C;
       const response = await staffStorage.run(principal, () => handler(request, resolved));
       if (response.status >= 500) return safeError(new Error());
-      if (response.headers.get("content-type")?.includes("application/json")) return NextResponse.json(redact(await response.json()), { status: response.status, headers: { "Cache-Control": "private, no-store" } });
+      if (response.headers.get("content-type")?.includes("application/json")) return NextResponse.json(redact(await response.json(), isMarginRole), { status: response.status, headers: { "Cache-Control": "private, no-store" } });
       response.headers.set("Cache-Control", "private, no-store");
       return response;
     } catch (error) { return safeError(error); }

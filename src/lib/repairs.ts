@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { staffContext } from "@/lib/staff-context";
+import { bangkokYYYYMM } from "@/lib/staff-http";
 
 export interface RepairFilters {
   status?: string;
@@ -18,7 +19,8 @@ const customerListSelect = { id: true, name: true, phone: true } as const;
 
 /**
  * RepairJob scalar fields returned by list endpoints.
- * Deliberately excludes `passcode` and `patternLock` (device unlock secrets).
+ * Deliberately excludes `passcode`, `patternLock` (device unlock secrets),
+ * and large base64 `customerSignature` payloads.
  */
 const repairJobListScalars = {
   id: true,
@@ -34,7 +36,6 @@ const repairJobListScalars = {
   preCheckData: true,
   postCheckData: true,
   issueDescription: true,
-  customerSignature: true,
   status: true,
   estimatedFinish: true,
   completedAt: true,
@@ -82,6 +83,7 @@ export async function getRepairJobs(filters: RepairFilters = {}) {
       ...repairJobListScalars,
       passcode: true,
       patternLock: true,
+      customerSignature: true,
       customer: { select: customerListSelect },
       branch: true,
       technician: { select: staffUserSelect },
@@ -96,11 +98,12 @@ export async function getRepairJobs(filters: RepairFilters = {}) {
     },
     take: Math.min(Math.max(1, Math.trunc(filters.take ?? 200) || 200), 500),
   });
-  // Only expose whether a lock exists, never the secret itself.
-  return jobs.map(({ passcode, patternLock, ...job }) => ({
+  // Only expose whether a lock/signature exists, never secrets/large payloads in lists.
+  return jobs.map(({ passcode, patternLock, customerSignature, ...job }) => ({
     ...job,
     hasPasscode: Boolean(passcode),
     hasPatternLock: Boolean(patternLock),
+    hasCustomerSignature: Boolean(customerSignature),
   }));
 }
 
@@ -115,7 +118,9 @@ export async function getRepairJobById(id: string) {
   const job = await prisma.repairJob.findUnique({
     where: { id },
     include: {
-      customer: true,
+      customer: {
+        select: { id: true, name: true, phone: true, lineId: true, address: true },
+      },
       branch: true,
       technician: { select: staffUserSelect },
       partUsages: {
@@ -158,10 +163,7 @@ export async function getRepairJobByTrackingCode(trackingCode: string) {
 
 export async function generateNextTrackingCode(tx?: any): Promise<string> {
   const client = tx || prisma;
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const yyyymm = `${year}${month}`;
+  const yyyymm = bangkokYYYYMM();
   const prefix = `REP-${yyyymm}-`;
 
   const counter = await client.sequenceCounter.upsert({

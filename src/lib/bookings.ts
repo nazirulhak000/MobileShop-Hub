@@ -6,6 +6,15 @@ import { AccessError } from "./staff-context";
 export const services: Record<string, string> = { DIAGNOSIS: "ตรวจอาการ", SCREEN: "ตรวจจอ/เปลี่ยนจอ", BATTERY: "ตรวจแบตเตอรี่", OTHER: "บริการอื่น ๆ" };
 export interface BookingActor { tenantId: string; accountId: string }
 const HOUR = 3_600_000;
+function parseJsonArray(raw: string | null | undefined): any[] {
+  if (!raw) return [];
+  try {
+    const val = JSON.parse(raw);
+    return Array.isArray(val) ? val : [];
+  } catch {
+    return [];
+  }
+}
 function validStart(value: unknown) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(value)) throw new AccessError(400, "เวลานัดไม่ถูกต้อง");
   const date = new Date(value);
@@ -19,7 +28,7 @@ async function validateSlot(tx: Prisma.TransactionClient, tenantId: string, bran
   const local = new Date(startsAt.getTime() + 7 * HOUR);
   const minute = local.getUTCHours() * 60 + local.getUTCMinutes();
   const day = local.toISOString().slice(0, 10);
-  if (startsAt.getTime() < Date.now() + HOUR || startsAt.getTime() > Date.now() + 30 * 24 * HOUR || minute % 30 !== 0 || minute < policy.opensMinute || minute + 30 > policy.closesMinute || JSON.parse(policy.closedDates).includes(day) || JSON.parse(policy.closedWeekdays).includes(local.getUTCDay())) throw new AccessError(409, "เวลานี้ไม่เปิดรับจอง กรุณาเลือกเวลาใหม่");
+  if (startsAt.getTime() < Date.now() + HOUR || startsAt.getTime() > Date.now() + 30 * 24 * HOUR || minute % 30 !== 0 || minute < policy.opensMinute || minute + 30 > policy.closesMinute || parseJsonArray(policy.closedDates).includes(day) || parseJsonArray(policy.closedWeekdays).includes(local.getUTCDay())) throw new AccessError(409, "เวลานี้ไม่เปิดรับจอง กรุณาเลือกเวลาใหม่");
   return policy;
 }
 async function claimSlot(tx: Prisma.TransactionClient, actor: BookingActor, branchId: string, startsAt: Date) {
@@ -48,7 +57,7 @@ export async function availability(tenantId: string, branchId: string, date: str
   if (!branch || !policy) return [];
   const existing = await db.bookingSlot.findMany({ where: { tenantId, branchId, startsAt: { gte: midnight, lt: new Date(midnight.getTime() + 24 * HOUR) } } });
   const localDay = new Date(midnight.getTime() + 7 * HOUR).getUTCDay();
-  if (JSON.parse(policy.closedDates).includes(date) || JSON.parse(policy.closedWeekdays).includes(localDay)) return [];
+  if (parseJsonArray(policy.closedDates).includes(date) || parseJsonArray(policy.closedWeekdays).includes(localDay)) return [];
   const slots: { startsAt: string; remaining: number }[] = [];
   for (let minute = policy.opensMinute; minute + 30 <= policy.closesMinute; minute += 30) {
     const start = new Date(midnight.getTime() + minute * 60_000);
@@ -86,7 +95,7 @@ export async function mutateBooking(actor: BookingActor, action: "create" | "can
       const oldSlot = await tx.bookingSlot.findFirstOrThrow({ where: { id: current.slotId, tenantId: actor.tenantId } });
       if (action === "cancel" && current.status === "CANCELLED") appointment = current;
       else {
-        if (current.status !== "CONFIRMED" || oldSlot.startsAt.getTime() - Date.now() < 2 * HOUR) throw new AccessError(409, "เปลี่ยนนัดได้ก่อนเวลานัดอย่างน้อย 2 ชั่วโมง กรุณาติดต่อร้าน");
+        if (current.status !== "CONFIRMED" || current.repairJobId || oldSlot.startsAt.getTime() - Date.now() < 2 * HOUR) throw new AccessError(409, "เปลี่ยนนัดได้ก่อนเวลานัดอย่างน้อย 2 ชั่วโมง กรุณาติดต่อร้าน");
         if (action === "reschedule" && startsAt!.getTime() === oldSlot.startsAt.getTime()) appointment = current;
         else {
           const next = action === "reschedule" ? await claimSlot(tx, actor, current.branchId, startsAt!) : null;
@@ -94,7 +103,7 @@ export async function mutateBooking(actor: BookingActor, action: "create" | "can
           if (!changed.count) throw new AccessError(409, "นัดถูกเปลี่ยนแล้ว กรุณาโหลดใหม่");
           const released = await tx.bookingSlot.updateMany({ where: { id: oldSlot.id, tenantId: actor.tenantId, reservedCount: { gt: 0 } }, data: { reservedCount: { decrement: 1 } } });
           if (!released.count) throw new Error("Booking capacity invariant failed");
-          appointment = await tx.appointment.findUniqueOrThrow({ where: { id } });
+          appointment = await tx.appointment.findFirstOrThrow({ where: { id, tenantId: actor.tenantId } });
         }
       }
     }

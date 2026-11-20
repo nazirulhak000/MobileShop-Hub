@@ -69,6 +69,8 @@ async function handleGET(req: NextRequest) {
   if (branch) {
     if (!actor.branchIds.includes(branch)) throw new AccessError(404, "ไม่พบสาขาที่มีสิทธิ์");
     where.branchId = branch;
+  } else {
+    where.branchId = { in: actor.branchIds };
   }
   const category = params.get("category");
   if (category && category !== "ALL") where.category = reqEnum(category, "category", EXPENSE_CATEGORIES);
@@ -124,7 +126,7 @@ async function handlePOST(req: NextRequest) {
     });
     const expenseNo = `EXP-${yyyymm}-${String(counter.current).padStart(3, "0")}`;
     const expense = await tx.shopExpense.create({
-      data: { expenseNo, branchId, category, title, amount, date, receiptUrl, createdById: actor.id },
+      data: { tenantId: actor.tenantId, expenseNo, branchId, category, title, amount, date, receiptUrl, createdById: actor.id },
       select: expenseSelect,
     });
     await tx.auditLog.create({
@@ -150,7 +152,7 @@ async function handleDELETE(req: NextRequest) {
   const id = reqId(new URL(req.url).searchParams.get("id"), "id");
 
   await prisma.$transaction(async tx => {
-    const existing = await tx.shopExpense.findFirst({ where: { id }, select: expenseSelect });
+    const existing = await tx.shopExpense.findFirst({ where: { id, branchId: { in: actor.branchIds } }, select: expenseSelect });
     if (!existing) throw new AccessError(404, "ไม่พบรายการค่าใช้จ่าย");
     await tx.shopExpense.delete({ where: { id } });
     await tx.auditLog.create({

@@ -132,37 +132,37 @@ export function calculatePIT(revenue: number, settings: TaxSettings, options: Pi
   const g1Spouse = settings.spouseAllowance ? 60000 * half : 0;
   const g1Child = Math.max(0, settings.childCount || 0) * 30000 * half;
   const g1Parents = Math.min(4, Math.max(0, settings.parentsCount || 0)) * 30000 * half;
-  const g1ParentsHealth = Math.min(15000, settings.parentsHealthInsurance || 0);
+  const g1ParentsHealth = Math.min(15000, Math.max(0, settings.parentsHealthInsurance || 0));
   const group1Total = g1Personal + g1Spouse + g1Child + g1Parents + g1ParentsHealth;
 
   // Group 2: Insurance & Retirement
   // Life (max 100k) + Health (max 25k), combined max 100k
-  const rawHealth = Math.min(25000, settings.healthInsurance || 0);
-  const rawLife = Math.min(100000, settings.lifeInsurance || 0);
+  const rawHealth = Math.min(25000, Math.max(0, settings.healthInsurance || 0));
+  const rawLife = Math.min(100000, Math.max(0, settings.lifeInsurance || 0));
   const g2LifeAndHealth = Math.min(100000, rawLife + rawHealth);
-  const g2SocialSecurity = Math.min(9000, settings.socialSecurity || 0);
+  const g2SocialSecurity = Math.min(9000, Math.max(0, settings.socialSecurity || 0));
 
   // Retirement funds: each has a percentage-of-income cap, then a combined 500,000 cap.
-  const g2Rmf = Math.min(500000, revenue * 0.3, settings.rmfFund || 0); // RMF: 30% of income
-  const g2Ssf = Math.min(200000, revenue * 0.3, settings.ssfFund || 0); // SSF: 30% of income
-  const g2Pvd = Math.min(500000, revenue * 0.15, settings.providentFund || 0); // PVD: 15% of wages
+  const g2Rmf = Math.min(500000, revenue * 0.3, Math.max(0, settings.rmfFund || 0)); // RMF: 30% of income
+  const g2Ssf = Math.min(200000, revenue * 0.3, Math.max(0, settings.ssfFund || 0)); // SSF: 30% of income
+  const g2Pvd = Math.min(500000, revenue * 0.15, Math.max(0, settings.providentFund || 0)); // PVD: 15% of wages
   const retirementPool = Math.min(500000, g2Rmf + g2Ssf + g2Pvd);
 
   // Thai ESG: 30% of income, max 300,000, outside the 500,000 retirement cap
-  const g2ThaiEsg = Math.min(300000, revenue * 0.3, settings.thaiEsgFund || 0);
+  const g2ThaiEsg = Math.min(300000, revenue * 0.3, Math.max(0, settings.thaiEsgFund || 0));
   const group2Total = g2LifeAndHealth + g2SocialSecurity + retirementPool + g2ThaiEsg;
 
   // Group 3: Stimulus & Real Estate
-  const g3HomeLoan = Math.min(100000, settings.homeLoanInterest || 0);
-  const g3EasyEReceipt = Math.min(50000, settings.easyEReceipt || 0);
+  const g3HomeLoan = Math.min(100000, Math.max(0, settings.homeLoanInterest || 0));
+  const g3EasyEReceipt = Math.min(50000, Math.max(0, settings.easyEReceipt || 0));
   const group3Total = g3HomeLoan + g3EasyEReceipt;
 
   const totalAllowancesBeforeDonations = group1Total + group2Total + group3Total;
   const preDonationNetIncome = Math.max(0, incomeAfterExpenses - totalAllowancesBeforeDonations);
 
   // Group 4: Donations. Education (2x) <= 10% of net income; general <= 10% of net income after the education donation.
-  const g4Education2x = Math.min(preDonationNetIncome * 0.1, (settings.educationDonation || 0) * 2);
-  const g4General = Math.min(Math.max(0, preDonationNetIncome - g4Education2x) * 0.1, settings.generalDonation || 0);
+  const g4Education2x = Math.min(preDonationNetIncome * 0.1, Math.max(0, settings.educationDonation || 0) * 2);
+  const g4General = Math.min(Math.max(0, preDonationNetIncome - g4Education2x) * 0.1, Math.max(0, settings.generalDonation || 0));
   const group4Total = g4Education2x + g4General;
 
   const totalAllowances = totalAllowancesBeforeDonations + group4Total;
@@ -228,6 +228,54 @@ export function calculateCIT(revenue: number, expenses: number, isSme: boolean =
     brackets: details,
     totalTax: total,
     effectiveTaxRate: netProfit > 0 ? (total / netProfit) * 100 : 0,
+  };
+}
+
+// Thai Value Added Tax (VAT 7%) Calculation Engine
+export function calculateVAT(amount: number, isInclusive = true, rate = 0.07) {
+  const safeAmount = Math.max(0, amount || 0);
+  if (safeAmount === 0) return { base: 0, vat: 0, total: 0 };
+  if (isInclusive) {
+    const base = round2(safeAmount / (1 + rate));
+    const vat = round2(safeAmount - base);
+    return { base, vat, total: safeAmount };
+  } else {
+    const vat = round2(safeAmount * rate);
+    const total = round2(safeAmount + vat);
+    return { base: safeAmount, vat, total };
+  }
+}
+
+// Thai Withholding Tax (WHT ภ.ง.ด.3 / ภ.ง.ด.53) Calculation Engine
+// Rule: Minimum payment threshold for single payment is 1,000 THB (excluding VAT)
+export function calculateWHT(amount: number, ratePercent: number, isVatInclusive = false) {
+  const safeAmount = Math.max(0, amount || 0);
+  const { base } = isVatInclusive ? calculateVAT(safeAmount, true) : { base: safeAmount };
+  const applies = base >= 1000;
+  const wht = applies ? round2(base * (ratePercent / 100)) : 0;
+  return {
+    base,
+    applies,
+    rate: ratePercent,
+    wht,
+    netPayment: round2(base - wht),
+  };
+}
+
+// Thai Monthly VAT (ภ.พ.30) Return Calculation
+export function calculatePP30(salesGross: number, outputVat: number, inputVat: number) {
+  const safeGross = Math.max(0, salesGross || 0);
+  const safeOutput = Math.max(0, outputVat || 0);
+  const safeInput = Math.max(0, inputVat || 0);
+  const salesBase = round2(safeGross - safeOutput);
+  const diff = round2(safeOutput - safeInput);
+  return {
+    salesGross: safeGross,
+    salesBase,
+    outputVat: safeOutput,
+    inputVat: safeInput,
+    netVatPayable: Math.max(0, diff),
+    excessCredit: diff < 0 ? round2(Math.abs(diff)) : 0, // Tax credit carried forward
   };
 }
 

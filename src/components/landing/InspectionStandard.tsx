@@ -1,6 +1,6 @@
-﻿"use client";
+"use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ShieldCheck,
   CheckCircle2,
@@ -17,6 +17,7 @@ import {
   FileCheck,
   Activity,
   Play,
+  Pause,
   RotateCcw,
   Sparkles,
   Zap,
@@ -158,12 +159,20 @@ export function InspectionStandard({
   // Bench 3: Battery Fast Charge simulator
   const [isCharging, setIsCharging] = useState<boolean>(true);
 
-  // Bench 4: Camera OIS Gyro position (interactive mouse)
+  // Bench 4: Face ID dot matrix simulator
+  const [isScanningFace, setIsScanningFace] = useState<boolean>(false);
+  const [faceScanSuccess, setFaceScanSuccess] = useState<boolean>(true);
+  const faceScanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Bench 5: Camera OIS Gyro position (interactive mouse & touch)
   const [gyroOffset, setGyroOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Update audio bars periodically if playing
+  // Update audio bars periodically if playing, otherwise idle flatline
   useEffect(() => {
-    if (!isPlayingAudio) return;
+    if (!isPlayingAudio) {
+      setAudioBars(Array(12).fill(12));
+      return;
+    }
     const interval = setInterval(() => {
       setAudioBars(
         Array.from({ length: 12 }, () => Math.floor(Math.random() * 65) + 30)
@@ -172,16 +181,57 @@ export function InspectionStandard({
     return () => clearInterval(interval);
   }, [isPlayingAudio]);
 
+  // Clean up all timers on unmount
+  useEffect(() => {
+    return () => {
+      if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+    };
+  }, []);
+
   const handleTileHover = (idx: number) => {
     setTouchedTiles((prev) => {
+      if (prev.has(idx)) return prev;
       const next = new Set(prev);
       next.add(idx);
       return next;
     });
   };
 
+  const handleToggleTile = (idx: number) => {
+    setTouchedTiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  };
+
+  const handleFillAllTiles = () => {
+    setTouchedTiles(new Set(Array.from({ length: 36 }, (_, i) => i)));
+  };
+
   const handleResetTiles = () => {
     setTouchedTiles(new Set());
+  };
+
+  const handleStartFaceScan = () => {
+    setIsScanningFace(true);
+    setFaceScanSuccess(false);
+    if (faceScanTimeoutRef.current) clearTimeout(faceScanTimeoutRef.current);
+    faceScanTimeoutRef.current = setTimeout(() => {
+      setIsScanningFace(false);
+      setFaceScanSuccess(true);
+    }, 1200);
+  };
+
+  const handleGyroMove = (clientX: number, clientY: number, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    const x = Math.max(-12, Math.min(12, ((clientX - rect.left) / rect.width - 0.5) * 24));
+    const y = Math.max(-12, Math.min(12, ((clientY - rect.top) / rect.height - 0.5) * 24));
+    setGyroOffset({ x, y });
   };
 
   return (
@@ -202,7 +252,7 @@ export function InspectionStandard({
 
           {/* Interactive Mode Toggle */}
           <div
-            className="pt-3 inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200"
+            className="pt-3 inline-flex flex-col sm:flex-row p-1 bg-slate-100 rounded-2xl border border-slate-200 max-w-full gap-1 sm:gap-0"
             role="tablist"
             aria-label="เลือกโหมดตรวจเช็ค"
           >
@@ -211,7 +261,7 @@ export function InspectionStandard({
               role="tab"
               aria-selected={mode === "pre"}
               onClick={() => setMode("pre")}
-              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
+              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 text-center ${
                 mode === "pre"
                   ? "bg-white text-slate-900 shadow-xs border border-slate-200"
                   : "text-slate-600 hover:text-slate-900"
@@ -224,7 +274,7 @@ export function InspectionStandard({
               role="tab"
               aria-selected={mode === "post"}
               onClick={() => setMode("post")}
-              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
+              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 text-center ${
                 mode === "post"
                   ? "bg-slate-900 text-white shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
@@ -239,13 +289,16 @@ export function InspectionStandard({
         {showBench && (
         <div className="mb-14 rounded-3xl bg-slate-950 p-6 sm:p-8 lg:p-10 text-white border border-slate-800 shadow-xl overflow-hidden relative">
           {/* Ambient subtle glow */}
-          <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div
+            className="absolute top-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none"
+            style={{ backgroundColor: `${theme.hex}1a` }}
+          />
 
           {/* Test Bench Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-medium bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1.5">
+                <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-medium ${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder} flex items-center gap-1.5`}>
                   <Activity className="h-3 w-3" /> Live Diagnostic Test Bench
                 </span>
                 <span className="text-xs text-slate-400">แท่นทดสอบจำลองเครื่องมือวัดทางวิศวกรรม</span>
@@ -273,9 +326,9 @@ export function InspectionStandard({
                     role="tab"
                     aria-selected={isSelected}
                     onClick={() => setActiveBench(b.id as any)}
-                    className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors border ${
+                    className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors border ${
                       isSelected
-                        ? "bg-emerald-600 text-white border-emerald-400 shadow-xs"
+                        ? theme.activePill
                         : "bg-slate-900 text-slate-300 border-slate-800 hover:text-white"
                     }`}
                   >
@@ -294,41 +347,78 @@ export function InspectionStandard({
               {/* Bench Widget 1: Touchscreen Draw Grid */}
               {activeBench === "touch" && (
                 <div className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h4 className="text-sm font-semibold text-white">
                         Multi-Touch 36-Node Inspection Grid
                       </h4>
                       <p className="text-xs text-slate-400">
-                        ลากเมาส์หรือใช้นิ้วเลื่อนผ่านช่องตารางเพื่อทดสอบการตอบสนองของหน้าจอสัมผัส
+                        แตะเพื่อเปิด/ปิดจุด หรือลากผ่านช่องตารางเพื่อทดสอบการตอบสนอง 100%
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleResetTiles}
-                      className="min-h-[32px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-300 flex items-center gap-1"
-                    >
-                      <RotateCcw className="h-3 w-3" /> ล้างตาราง
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleFillAllTiles}
+                        className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200 flex items-center gap-1.5 transition-colors border border-slate-700"
+                        title="ทดสอบผ่านทุกจุด"
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-cyan-400" /> ครบ 36 จุด
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleResetTiles}
+                        className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-300 flex items-center gap-1.5 transition-colors border border-slate-700"
+                        title="ล้างข้อมูลตาราง"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" /> ล้างตาราง
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 6x6 Interactive Grid */}
-                  <div className="grid grid-cols-6 gap-2 max-w-[360px] mx-auto select-none touch-none py-2">
+                  {/* 6x6 Interactive Grid with drag/draw and tile toggling */}
+                  <div
+                    onPointerMove={(e) => {
+                      if (e.buttons === 1) {
+                        const elem = document.elementFromPoint(e.clientX, e.clientY);
+                        const tileIdx = elem?.getAttribute("data-tile-index");
+                        if (tileIdx !== null && tileIdx !== undefined) {
+                          handleTileHover(parseInt(tileIdx, 10));
+                        }
+                      }
+                    }}
+                    onTouchMove={(e) => {
+                      const touch = e.touches[0];
+                      if (touch) {
+                        const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+                        const tileIdx = elem?.getAttribute("data-tile-index");
+                        if (tileIdx !== null && tileIdx !== undefined) {
+                          handleTileHover(parseInt(tileIdx, 10));
+                        }
+                      }
+                    }}
+                    className="grid grid-cols-6 gap-2 max-w-[360px] mx-auto select-none touch-none py-2"
+                  >
                     {Array.from({ length: 36 }).map((_, idx) => {
                       const isTouched = touchedTiles.has(idx);
                       return (
-                        <div
+                        <button
                           key={idx}
-                          onMouseEnter={() => handleTileHover(idx)}
-                          onTouchStart={() => handleTileHover(idx)}
-                          className={`aspect-square rounded-lg border flex items-center justify-center text-[10px] font-mono transition-all duration-150 cursor-pointer ${
+                          type="button"
+                          data-tile-index={idx}
+                          onClick={() => handleToggleTile(idx)}
+                          onMouseEnter={(e) => {
+                            if (e.buttons === 1) handleTileHover(idx);
+                          }}
+                          className={`aspect-square min-h-[44px] rounded-lg border flex items-center justify-center text-[11px] font-mono font-semibold transition-all duration-150 cursor-pointer focus:outline-none focus:ring-1 focus:ring-white ${
                             isTouched
-                              ? "bg-emerald-500 border-emerald-300 text-slate-950 font-bold shadow-[0_0_8px_#10b981]"
-                              : "bg-slate-950 border-slate-800 text-slate-600 hover:border-emerald-500/50"
+                              ? theme.activeTile
+                              : "bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700 hover:text-slate-300"
                           }`}
+                          aria-label={`จุดสัมผัสที่ ${idx + 1} สถานะ ${isTouched ? "ผ่าน" : "รอทดสอบ"}`}
                         >
                           {isTouched ? "OK" : idx + 1}
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -336,12 +426,12 @@ export function InspectionStandard({
                   <div className="flex items-center justify-between text-xs font-mono pt-2 border-t border-slate-800">
                     <span className="text-slate-400">
                       ตรวจผ่าน:{" "}
-                      <span className="text-emerald-400 font-bold">{touchedTiles.size}</span> / 36 จุด
+                      <span className={`${theme.accentText} font-bold`}>{touchedTiles.size}</span> / 36 จุด
                     </span>
-                    <span className="text-emerald-400">
+                    <span className={touchedTiles.size === 36 ? theme.accentText : "text-slate-400"}>
                       {touchedTiles.size === 36
                         ? "✓ 100% Fully Responsive (ผ่านเกณฑ์)"
-                        : "กำลังทำการสแกน..."}
+                        : "แตะหรือลากนิ้วบนตารางเพื่อทดสอบ..."}
                     </span>
                   </div>
                 </div>
@@ -362,13 +452,14 @@ export function InspectionStandard({
                     <button
                       type="button"
                       onClick={() => setIsCharging(!isCharging)}
-                      className={`min-h-[32px] px-3 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5 transition-colors ${
+                      className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-mono font-medium flex items-center gap-1.5 transition-colors border ${
                         isCharging
-                          ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                          : "bg-slate-800 text-slate-400"
+                          ? `${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder}`
+                          : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"
                       }`}
+                      aria-label={isCharging ? "สลับเป็นโหมดสแตนด์บาย" : "สลับเป็นโหมดชาร์จด่วน"}
                     >
-                      <Zap className="h-3 w-3" /> {isCharging ? "ชาร์จอยู่ (20W PD)" : "สแตนด์บาย"}
+                      <Zap className="h-3.5 w-3.5" /> {isCharging ? "ชาร์จอยู่ (20W PD)" : "โหมดสแตนด์บาย"}
                     </button>
                   </div>
 
@@ -388,34 +479,36 @@ export function InspectionStandard({
                           cx="50"
                           cy="50"
                           r="42"
-                          stroke="#10b981"
+                          stroke={theme.hex}
                           strokeWidth="8"
                           strokeDasharray="264"
                           strokeDashoffset="0"
                           strokeLinecap="round"
                           fill="transparent"
-                          className="transition-all duration-1000"
+                          className={isCharging ? "animate-pulse transition-all duration-1000" : "transition-all duration-1000"}
                         />
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                         <span className="text-2xl font-bold font-mono text-white">100%</span>
-                        <span className="text-[10px] font-mono text-emerald-400">Battery Health</span>
+                        <span className={`text-[10px] font-mono ${theme.accentText}`}>Battery Health</span>
                       </div>
                     </div>
 
                     {/* Stats List */}
                     <div className="space-y-2 text-xs font-mono w-full sm:w-auto">
                       <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between gap-6">
-                        <span className="text-slate-400">รอบการชาร์จ (Cycles):</span>
-                        <span className="text-white font-semibold">0 Cycle (เซลล์ใหม่)</span>
+                        <span className="text-slate-400">สถานะวงจร:</span>
+                        <span className={isCharging ? `${theme.accentText} font-semibold` : "text-amber-400 font-semibold"}>
+                          {isCharging ? "กำลังชาร์จ 9.05V / 2.21A (20W PD)" : "สแตนด์บาย 0.00A (0W)"}
+                        </span>
                       </div>
                       <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between gap-6">
                         <span className="text-slate-400">แรงดันไฟเสถียร:</span>
-                        <span className="text-emerald-400 font-semibold">4.42V Peak</span>
+                        <span className="text-white font-semibold">{isCharging ? "4.42V Peak" : "3.85V นิ่ง"}</span>
                       </div>
                       <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between gap-6">
                         <span className="text-slate-400">อุณหภูมิแพ็คเกจ:</span>
-                        <span className="text-cyan-400 font-semibold">28.4°C นิ่ง</span>
+                        <span className="text-cyan-400 font-semibold">{isCharging ? "31.2°C (ระบบตัดความร้อนปกติ)" : "26.4°C นิ่ง"}</span>
                       </div>
                     </div>
                   </div>
@@ -437,9 +530,22 @@ export function InspectionStandard({
                     <button
                       type="button"
                       onClick={() => setIsPlayingAudio(!isPlayingAudio)}
-                      className="min-h-[32px] px-3 py-1 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs font-mono flex items-center gap-1.5"
+                      className={`min-h-[44px] px-4 py-2 rounded-xl ${
+                        isPlayingAudio
+                          ? `${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder}`
+                          : "bg-slate-800 text-slate-300 border-slate-700 hover:text-white"
+                      } text-xs font-mono flex items-center gap-1.5 transition-colors border`}
+                      aria-label={isPlayingAudio ? "หยุดทดสอบเสียง" : "เริ่มทดสอบเสียง 1kHz"}
                     >
-                      <Play className="h-3 w-3" /> {isPlayingAudio ? "กำลังเล่น 1kHz" : "เริ่มทดสอบ"}
+                      {isPlayingAudio ? (
+                        <>
+                          <Pause className="h-3.5 w-3.5" /> กำลังเล่น 1kHz
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5" /> เริ่มทดสอบ 1kHz
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -448,7 +554,7 @@ export function InspectionStandard({
                     {audioBars.map((height, i) => (
                       <div
                         key={i}
-                        className="flex-1 bg-gradient-to-t from-emerald-600 via-teal-400 to-cyan-300 rounded-t transition-all duration-150"
+                        className={`flex-1 bg-gradient-to-t from-slate-900 ${theme.radarSweep} to-slate-100 rounded-t transition-all duration-150`}
                         style={{ height: `${height}%` }}
                       />
                     ))}
@@ -457,11 +563,11 @@ export function InspectionStandard({
                   <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between">
                       <span className="text-slate-400">ลำโพงสนทนา (Top):</span>
-                      <span className="text-emerald-400 font-semibold">สมดุลเสียงใส 100%</span>
+                      <span className={`${theme.accentText} font-semibold`}>สมดุลเสียงใส 100%</span>
                     </div>
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex justify-between">
                       <span className="text-slate-400">ลำโพงหลัก (Bottom):</span>
-                      <span className="text-emerald-400 font-semibold">เบสแน่น ไม่แตกพร่า</span>
+                      <span className={`${theme.accentText} font-semibold`}>เบสแน่น ไม่แตกพร่า</span>
                     </div>
                   </div>
                 </div>
@@ -479,31 +585,52 @@ export function InspectionStandard({
                         จำลองโครงข่ายแสงเลเซอร์อินฟราเรดตรวจจับมิติใบหน้า
                       </p>
                     </div>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                      Locked &lt; 0.28s
-                    </span>
+                    <button
+                      type="button"
+                      onClick={handleStartFaceScan}
+                      disabled={isScanningFace}
+                      className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-mono font-medium flex items-center gap-1.5 transition-colors border ${
+                        isScanningFace
+                          ? "bg-slate-800 text-slate-400 border-slate-700 opacity-70"
+                          : `${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder} hover:brightness-110`
+                      }`}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>{isScanningFace ? "กำลังสแกนโครงข่าย..." : "ทดสอบสแกนใบหน้า"}</span>
+                    </button>
                   </div>
 
                   <div className="relative h-44 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden">
                     {/* Animated laser matrix dots */}
                     <div
-                      className="absolute inset-0 opacity-40"
+                      className={`absolute inset-0 transition-opacity duration-300 ${isScanningFace ? "opacity-75" : "opacity-35"}`}
                       style={{
-                        backgroundImage: `radial-gradient(circle at 2px 2px, #10b981 1.5px, transparent 0)`,
+                        backgroundImage: `radial-gradient(circle at 2px 2px, ${theme.hex} 1.5px, transparent 0)`,
                         backgroundSize: "16px 16px",
                       }}
                     />
                     {/* Face Silhouette Outline & Crosshair */}
-                    <div className="relative z-10 w-28 h-36 rounded-[2.5rem] border-2 border-dashed border-emerald-400/80 flex items-center justify-center shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-                      <Eye className="h-8 w-8 text-emerald-400 animate-pulse" />
+                    <div
+                      className={`relative z-10 w-28 h-36 rounded-[2.5rem] border-2 border-dashed flex items-center justify-center transition-all duration-300 ${
+                        isScanningFace ? "scale-105" : ""
+                      }`}
+                      style={{ borderColor: `${theme.hex}cc`, boxShadow: `0 0 20px ${theme.hex}4d` }}
+                    >
+                      <Eye className={`h-8 w-8 ${theme.iconColor} ${isScanningFace ? "animate-pulse scale-110" : ""}`} />
                       {/* Scanning crosshair line */}
-                      <div className="absolute inset-x-0 h-0.5 bg-cyan-400 shadow-[0_0_8px_#22d3ee] animate-bounce" />
+                      <div className={`absolute inset-x-0 h-0.5 bg-cyan-400 shadow-[0_0_8px_#22d3ee] ${isScanningFace ? "animate-bounce" : ""}`} />
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between text-xs font-mono">
                     <span className="text-slate-400">Flood Illuminator: ปกติ</span>
-                    <span className="text-emerald-400">30,000 จุด IR ล็อคแม่นยำ</span>
+                    <span className={theme.accentText}>
+                      {faceScanSuccess
+                        ? "✓ 30,000 จุด IR ปลดล็อคสำเร็จ (< 0.25s)"
+                        : isScanningFace
+                        ? "กำลังคำนวณเวกเตอร์ใบหน้า..."
+                        : "พร้อมทำการสแกน"}
+                    </span>
                   </div>
                 </div>
               )}
@@ -511,13 +638,13 @@ export function InspectionStandard({
               {/* Bench Widget 5: Camera OIS Gyro Stabilizer */}
               {activeBench === "camera" && (
                 <div
-                  onMouseMove={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 20;
-                    const y = ((e.clientY - rect.top) / rect.height - 0.5) * 20;
-                    setGyroOffset({ x, y });
+                  onMouseMove={(e) => handleGyroMove(e.clientX, e.clientY, e.currentTarget)}
+                  onPointerMove={(e) => handleGyroMove(e.clientX, e.clientY, e.currentTarget)}
+                  onTouchMove={(e) => {
+                    const touch = e.touches[0];
+                    if (touch) handleGyroMove(touch.clientX, touch.clientY, e.currentTarget);
                   }}
-                  className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4 cursor-crosshair"
+                  className="p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4 cursor-crosshair touch-none"
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -525,12 +652,16 @@ export function InspectionStandard({
                         Optical Image Stabilization (OIS 6-Axis Test)
                       </h4>
                       <p className="text-xs text-slate-400">
-                        ขยับเมาส์ในกล่องเพื่อดูมอเตอร์ OIS ชดเชยแรงสั่นสะเทือนแบบ Real-time
+                        ขยับเมาส์หรือใช้นิ้วเลื่อนในกล่องเพื่อดูมอเตอร์ OIS ชดเชยแรงสั่นไหว
                       </p>
                     </div>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                      OIS Compensating
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setGyroOffset({ x: 0, y: 0 })}
+                      className="min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 transition-colors flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="h-3 w-3" /> รีเซ็ตศูนย์
+                    </button>
                   </div>
 
                   <div className="relative h-44 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden">
@@ -542,16 +673,18 @@ export function InspectionStandard({
 
                     {/* Stabilized floating Lens Reticle */}
                     <div
-                      className="relative z-10 w-20 h-20 rounded-full border-2 border-emerald-400 bg-emerald-950/30 flex items-center justify-center shadow-[0_0_15px_#10b981] transition-transform duration-75"
+                      className={`relative z-10 w-20 h-20 rounded-full border-2 ${theme.darkBg}/30 flex items-center justify-center transition-transform duration-75`}
                       style={{
+                        borderColor: theme.hex,
+                        boxShadow: `0 0 15px ${theme.radarShadow}`,
                         transform: `translate(${-gyroOffset.x * 1.5}px, ${-gyroOffset.y * 1.5}px)`,
                       }}
                     >
-                      <Camera className="h-6 w-6 text-emerald-300" />
-                      <div className="absolute -top-1 w-2 h-0.5 bg-emerald-400" />
-                      <div className="absolute -bottom-1 w-2 h-0.5 bg-emerald-400" />
-                      <div className="absolute -left-1 h-2 w-0.5 bg-emerald-400" />
-                      <div className="absolute -right-1 h-2 w-0.5 bg-emerald-400" />
+                      <Camera className={`h-6 w-6 ${theme.iconColor}`} />
+                      <div className="absolute -top-1 w-2 h-0.5" style={{ backgroundColor: theme.hex }} />
+                      <div className="absolute -bottom-1 w-2 h-0.5" style={{ backgroundColor: theme.hex }} />
+                      <div className="absolute -left-1 h-2 w-0.5" style={{ backgroundColor: theme.hex }} />
+                      <div className="absolute -right-1 h-2 w-0.5" style={{ backgroundColor: theme.hex }} />
                     </div>
                   </div>
 
@@ -559,7 +692,7 @@ export function InspectionStandard({
                     <span className="text-slate-400">
                       Gyro Compensation: X: {(-gyroOffset.x).toFixed(1)}° | Y: {(-gyroOffset.y).toFixed(1)}°
                     </span>
-                    <span className="text-emerald-400">Dual Pixel AF: คมชัด 100%</span>
+                    <span className={theme.accentText}>Dual Pixel AF: คมชัด 100%</span>
                   </div>
                 </div>
               )}
@@ -610,10 +743,19 @@ export function InspectionStandard({
             return (
               <div
                 key={item.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`ดูผลทดสอบ ${item.title}`}
                 onClick={() => {
                   if (item.benchType) setActiveBench(item.benchType);
                 }}
-                className={`p-5 rounded-2xl bg-slate-50 border transition-all duration-150 flex flex-col justify-between cursor-pointer ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    if (item.benchType) setActiveBench(item.benchType);
+                  }
+                }}
+                className={`p-5 rounded-2xl bg-slate-50 border transition-all duration-150 flex flex-col justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
                   item.benchType === activeBench
                     ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/20"
                     : "border-slate-200 hover:border-slate-300"

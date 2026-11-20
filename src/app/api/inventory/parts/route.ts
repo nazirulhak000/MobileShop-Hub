@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { safeError, takeParam, withStaff } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 
 async function handleGET(request: NextRequest) {
   try {
+    const actor = staffContext();
+    const isStaffMarginRole = actor.role === "ADMIN" || actor.role === "MANAGER";
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get("branchId");
     const search = searchParams.get("search") || "";
@@ -51,19 +53,15 @@ async function handleGET(request: NextRequest) {
         brand: p.brand,
         model: p.model,
         compatibleModels: p.compatibleModels,
-        costPrice: p.costPrice,
+        ...(isStaffMarginRole ? { costPrice: p.costPrice } : {}),
         sellPrice: p.sellPrice,
         stock,
       };
     });
 
     return NextResponse.json({ success: true, data: mapped });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to fetch spare parts" },
-      { status: 500 }
-    );
+  } catch (error) {
+    return safeError(error);
   }
 }
 

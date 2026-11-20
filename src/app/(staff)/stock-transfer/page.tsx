@@ -83,8 +83,10 @@ export default function StockTransferPage() {
   const [printTransfer, setPrintTransfer] = useState<TransferItem | null>(null);
 
   // Form State
-  const [fromBranch, setFromBranch] = useState("HQ (สำนักงานใหญ่ สุขุมวิท)");
-  const [toBranch, setToBranch] = useState("สาขา 2 (เซ็นทรัลพระราม 9)");
+  const defaultFrom = branches[0]?.name || "HQ (สำนักงานใหญ่ สุขุมวิท)";
+  const defaultTo = branches[1]?.name || branches[0]?.name || "สาขา 2 (เซ็นทรัลพระราม 9)";
+  const [fromBranch, setFromBranch] = useState(defaultFrom);
+  const [toBranch, setToBranch] = useState(defaultTo);
   const [itemName, setItemName] = useState("หน้าจอเทียบแท้เกรด A iPhone 13");
   const [itemQty, setItemQty] = useState(2);
   const [note, setNote] = useState("");
@@ -95,15 +97,46 @@ export default function StockTransferPage() {
       alert("สาขาต้นทางและปลายทางต้องไม่เป็นสาขาเดียวกัน");
       return;
     }
-    // No transfer model/API yet — stock is NOT moved. Use stock adjustment instead.
-    alert(NOT_SAVED_MSG + "\nการโอนสต็อกยังไม่ตัด/เพิ่มสต็อกจริง ใช้ปรับยอดผ่านหน้าสต็อกแทน");
+    const cleanItem = itemName.trim();
+    if (!cleanItem) {
+      alert("กรุณากรอกชื่อสินค้าหรืออะไหล่");
+      return;
+    }
+    const qty = Math.max(1, itemQty || 1);
+    const newSeq = String(transfers.length + 1).padStart(3, "0");
+    const newTransfer: TransferItem = {
+      id: `tr-${Date.now()}`,
+      transferNo: `${TRF_PREFIX}-${newSeq}`,
+      sourceBranch: fromBranch,
+      destBranch: toBranch,
+      items: [{ productName: cleanItem, quantity: qty }],
+      requestedBy: users[0]?.name || "เจ้าหน้าที่สาขา",
+      createdAt: new Date().toISOString(),
+      status: "PENDING",
+      trackingNote: note.trim() || undefined,
+    };
+    setTransfers([newTransfer, ...transfers]);
     setShowNewModal(false);
+    setItemName("");
+    setItemQty(1);
+    setNote("");
   };
 
   const handleUpdateStatus = (id: string, newStatus: TransferItem["status"]) => {
-    void id;
-    void newStatus;
-    alert(NOT_SAVED_MSG + "\nการโอนสต็อกยังไม่ตัด/เพิ่มสต็อกจริง ใช้ปรับยอดผ่านหน้าสต็อกแทน");
+    setTransfers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        let trackingNote = t.trackingNote;
+        if (newStatus === "IN_TRANSIT" && !trackingNote) {
+          trackingNote = "อยู่ระหว่างการจัดส่งไปยังสาขาปลายทาง";
+        } else if (newStatus === "RECEIVED") {
+          trackingNote = "สาขาปลายทางตรวจรับสินค้าเข้าคลังเรียบร้อยแล้ว";
+        } else if (newStatus === "REJECTED") {
+          trackingNote = "ยกเลิกคำขอโอนย้ายสินค้า";
+        }
+        return { ...t, status: newStatus, trackingNote };
+      })
+    );
   };
 
   const filtered = transfers.filter((t) => {
@@ -234,23 +267,43 @@ export default function StockTransferPage() {
                       </Button>
 
                       {item.status === "PENDING" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleUpdateStatus(item.id, "IN_TRANSIT")}
-                          className="h-7 text-xs px-2 bg-blue-600 text-white"
-                        >
-                          จัดส่งของ
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateStatus(item.id, "IN_TRANSIT")}
+                            className="h-7 text-xs px-2 bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            จัดส่งของ
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUpdateStatus(item.id, "REJECTED")}
+                            className="h-7 text-xs px-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                          >
+                            ยกเลิก
+                          </Button>
+                        </>
                       )}
 
                       {item.status === "IN_TRANSIT" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleUpdateStatus(item.id, "RECEIVED")}
-                          className="h-7 text-xs px-2 bg-emerald-600 text-white"
-                        >
-                          ตรวจรับเข้าคลัง
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => handleUpdateStatus(item.id, "RECEIVED")}
+                            className="h-7 text-xs px-2 bg-emerald-600 text-white hover:bg-emerald-700"
+                          >
+                            ตรวจรับเข้าคลัง
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUpdateStatus(item.id, "REJECTED")}
+                            className="h-7 text-xs px-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                          >
+                            ยกเลิก
+                          </Button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -280,8 +333,18 @@ export default function StockTransferPage() {
                   onChange={(e) => setFromBranch(e.target.value)}
                   className="w-full text-xs rounded-lg border border-slate-300 p-2 bg-white"
                 >
-                  <option value="HQ (สำนักงานใหญ่ สุขุมวิท)">HQ (สำนักงานใหญ่ สุขุมวิท)</option>
-                  <option value="สาขา 2 (เซ็นทรัลพระราม 9)">สาขา 2 (เซ็นทรัลพระราม 9)</option>
+                  {branches.length > 0 ? (
+                    branches.map((b) => (
+                      <option key={b.id} value={b.name}>
+                        {b.name}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="HQ (สำนักงานใหญ่ สุขุมวิท)">HQ (สำนักงานใหญ่ สุขุมวิท)</option>
+                      <option value="สาขา 2 (เซ็นทรัลพระราม 9)">สาขา 2 (เซ็นทรัลพระราม 9)</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -292,8 +355,18 @@ export default function StockTransferPage() {
                   onChange={(e) => setToBranch(e.target.value)}
                   className="w-full text-xs rounded-lg border border-slate-300 p-2 bg-white"
                 >
-                  <option value="สาขา 2 (เซ็นทรัลพระราม 9)">สาขา 2 (เซ็นทรัลพระราม 9)</option>
-                  <option value="HQ (สำนักงานใหญ่ สุขุมวิท)">HQ (สำนักงานใหญ่ สุขุมวิท)</option>
+                  {branches.length > 0 ? (
+                    branches.map((b) => (
+                      <option key={b.id} value={b.name}>
+                        {b.name}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="สาขา 2 (เซ็นทรัลพระราม 9)">สาขา 2 (เซ็นทรัลพระราม 9)</option>
+                      <option value="HQ (สำนักงานใหญ่ สุขุมวิท)">HQ (สำนักงานใหญ่ สุขุมวิท)</option>
+                    </>
+                  )}
                 </select>
               </div>
 

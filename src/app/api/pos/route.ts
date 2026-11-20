@@ -1,8 +1,9 @@
 import { staffContext } from "@/lib/staff-context";
 import { AccessError } from "@/lib/staff-context";
-import { safeError } from "@/lib/staff-http";
+import { readJson, safeError } from "@/lib/staff-http";
 import { withStaff } from "@/lib/staff-http";
 import { reqId, optId, reqInt, reqMoney, reqEnum, bangkokYYYYMM } from "@/lib/staff-http";
+import { calculateVAT } from "@/lib/tax";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -25,7 +26,7 @@ interface LineInput {
 async function handlePOST(request: NextRequest) {
   try {
     const actor = staffContext();
-    const body = await request.json();
+    const body = await readJson(request);
     const {
       branchCode,
       customerData,
@@ -150,9 +151,8 @@ async function handlePOST(request: NextRequest) {
       }
       const numDiscount = requestedDiscount;
       const netAmount = round2(totalAmount - numDiscount);
-      // VAT 7% inclusive: net before VAT = net / 1.07, VAT = net - net before VAT
-      const netBeforeVat = round2(netAmount / 1.07);
-      const vatAmount = round2(netAmount - netBeforeVat);
+      // VAT 7% inclusive from central tax engine
+      const { base: netBeforeVat, vat: vatAmount } = calculateVAT(netAmount, true);
 
       const counter = await tx.sequenceCounter.upsert({
         where: { id: `INV-${yyyymm}` },
@@ -244,10 +244,8 @@ async function handlePOST(request: NextRequest) {
       sale: fullSale,
       taxCalculation: result.taxCalculation,
     });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("POST /api/pos error:", error?.message);
-    return NextResponse.json({ success: false, error: "ไม่สามารถทำรายการได้ กรุณาลองใหม่" }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

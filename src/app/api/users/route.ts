@@ -1,5 +1,5 @@
 import { AccessError, staffContext } from "@/lib/staff-context";
-import { reqEnum, reqId, safeError, takeParam, withStaff } from "@/lib/staff-http";
+import { reqEnum, reqId, safeError, takeParam, withStaff, readJson } from "@/lib/staff-http";
 import { db } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
@@ -71,7 +71,8 @@ async function handleGET(request: NextRequest) {
 
 async function handlePOST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await readJson<Record<string, any>>(req);
+    if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const name = reqText(body.name, "name", 100);
     const username = reqText(body.username, "username", 100);
     const password = reqPassword(body.password);
@@ -103,7 +104,8 @@ async function handlePOST(req: Request) {
 async function handlePUT(req: Request) {
   try {
     const actor = staffContext();
-    const body = await req.json();
+    const body = await readJson<Record<string, any>>(req);
+    if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
     const id = reqId(body.id, "id");
 
     const target = await prisma.user.findFirst({ where: { id }, select: { id: true, username: true, role: true, isActive: true, branchId: true } });

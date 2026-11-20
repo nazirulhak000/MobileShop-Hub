@@ -91,10 +91,18 @@ function amountsOf(s: SlipAmounts): SlipAmounts {
 }
 
 async function handleGET(req: NextRequest) {
+  const actor = staffContext();
   const month = reqMonth(new URL(req.url).searchParams.get("month") ?? bangkokDateString().slice(0, 7));
   const [slips, activeUsers] = await Promise.all([
-    prisma.payrollSlip.findMany({ where: { month }, select: slipSelect, orderBy: [{ branchId: "asc" }, { createdAt: "asc" }] }),
-    prisma.user.findMany({ where: { isActive: true }, select: { id: true, name: true, role: true, branchId: true } }),
+    prisma.payrollSlip.findMany({
+      where: { month, branchId: { in: actor.branchIds } },
+      select: slipSelect,
+      orderBy: [{ branchId: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.user.findMany({
+      where: { isActive: true, branchId: { in: actor.branchIds } },
+      select: { id: true, name: true, role: true, branchId: true },
+    }),
   ]);
   const withSlip = new Set(slips.map(s => s.userId));
   const data = slips.map(serialize);
@@ -146,12 +154,12 @@ async function handlePOST(req: NextRequest) {
   }
 
   const result = await prisma.$transaction(async tx => {
-    const users = await tx.user.findMany({ where: { isActive: true }, select: { id: true, name: true, branchId: true } });
+    const users = await tx.user.findMany({ where: { isActive: true, branchId: { in: actor.branchIds } }, select: { id: true, name: true, branchId: true } });
     for (const id of entries.keys()) if (!users.some(u => u.id === id)) throw new AccessError(404, "ไม่พบพนักงานในสาขาที่มีสิทธิ์");
     const ids = users.map(u => u.id);
     const [existing, previous] = await Promise.all([
-      tx.payrollSlip.findMany({ where: { month, userId: { in: ids } }, select: slipSelect }),
-      tx.payrollSlip.findMany({ where: { month: prevMonth(month), userId: { in: ids } }, select: slipSelect }),
+      tx.payrollSlip.findMany({ where: { month, branchId: { in: actor.branchIds }, userId: { in: ids } }, select: slipSelect }),
+      tx.payrollSlip.findMany({ where: { month: prevMonth(month), branchId: { in: actor.branchIds }, userId: { in: ids } }, select: slipSelect }),
     ]);
     const existingBy = new Map(existing.map(s => [s.userId, s]));
     const prevBy = new Map(previous.map(s => [s.userId, s]));
@@ -186,7 +194,7 @@ async function handlePOST(req: NextRequest) {
         ...entry,
       };
       const { ssoDeduction, netPayout } = computeSlip(amounts);
-      await tx.payrollSlip.create({ data: { userId: user.id, branchId: user.branchId, month, ...amounts, ssoDeduction, netPayout, status: "PENDING" } });
+      await tx.payrollSlip.create({ data: { tenantId: actor.tenantId, userId: user.id, branchId: user.branchId, month, ...amounts, ssoDeduction, netPayout, status: "PENDING" } });
       created += 1;
     }
 
@@ -222,7 +230,7 @@ async function handlePATCH(req: NextRequest) {
   if (action === "PAY" && actor.role !== "ADMIN") throw new AccessError(403, "เฉพาะผู้ดูแลระบบเท่านั้นที่บันทึกการจ่ายเงินเดือนได้");
 
   const saved = await prisma.$transaction(async tx => {
-    const slip = await tx.payrollSlip.findFirst({ where: { id }, select: slipSelect });
+    const slip = await tx.payrollSlip.findFirst({ where: { id, branchId: { in: actor.branchIds } }, select: slipSelect });
     if (!slip) throw new AccessError(404, "ไม่พบสลิปเงินเดือน");
     if (slip.status === "PAID") throw new AccessError(409, "สลิปที่จ่ายแล้วไม่สามารถแก้ไขได้");
     // Payroll staff cannot change their own slip (except ADMIN, who is the final authority).

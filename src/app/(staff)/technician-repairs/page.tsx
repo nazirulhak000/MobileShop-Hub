@@ -38,7 +38,8 @@ const KANBAN_COLUMNS = [
 ];
 
 export default function TechnicianRepairsKanbanPage() {
-  const { users } = useApp();
+  const { users, currentUser } = useApp();
+  const isTechnician = currentUser.role === "TECHNICIAN";
   const [repairs, setRepairs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState<string>("ALL");
@@ -75,9 +76,16 @@ export default function TechnicianRepairsKanbanPage() {
   };
 
   const handleStatusChange = async (jobId: string, newStatus: string) => {
+    const repair = repairs.find((r) => r.id === jobId);
+    const APPROVAL_REQUIRED = ["REPAIRING", "QC_PASSED", "READY", "COMPLETED"];
+    if (APPROVAL_REQUIRED.includes(newStatus) && !repair?.customerApproved) {
+      alert("กรุณารอการอนุมัติใบเสนอราคาจากลูกค้าก่อนดำเนินการขั้นตอนนี้");
+      return;
+    }
+
     // The API only allows one step at a time (REPAIRING -> QC_PASSED -> READY -> COMPLETED),
     // while the kanban merges QC_PASSED and READY into one column; walk the intermediate steps.
-    const current = repairs.find((r) => r.id === jobId)?.status;
+    const current = repair?.status;
     const steps =
       newStatus === "READY" && current === "REPAIRING"
         ? ["QC_PASSED", "READY"]
@@ -113,14 +121,17 @@ export default function TechnicianRepairsKanbanPage() {
     if (!activeJob) return;
     setUpdating(true);
     try {
+      const payload: any = {
+        notes: techNotes,
+      };
+      if (!isTechnician && Number(laborFeeInput) !== Number(activeJob.laborFee || 0)) {
+        payload.laborFee = Number(laborFeeInput);
+      }
+
       const res = await fetch(`/api/repairs/${activeJob.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: techNotes,
-          // Only send laborFee when edited: technicians may not change it (API returns 403).
-          ...(Number(laborFeeInput) !== Number(activeJob.laborFee || 0) ? { laborFee: Number(laborFeeInput) } : {}),
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (json.success) {
@@ -162,6 +173,8 @@ export default function TechnicianRepairsKanbanPage() {
   const partsCost = activeJob?.partUsages?.reduce((sum: number, p: any) => sum + p.costPrice * p.quantity, 0) || 0;
   const totalCost = Number(laborFeeInput) + partsSell;
   const grossProfit = totalCost - partsCost;
+  const partsGrossProfit = Math.max(0, partsSell - partsCost);
+  const techCommission = Number(laborFeeInput) * 0.30 + partsGrossProfit * 0.10;
 
   return (
     <div className="space-y-6 w-full pb-16">
@@ -353,7 +366,7 @@ export default function TechnicianRepairsKanbanPage() {
                   </Button>
                 </div>
 
-                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden text-xs">
+                <div className="border border-slate-200 rounded-lg bg-white overflow-x-auto text-xs">
                   <table className="w-full text-left">
                     <thead className="bg-slate-100 text-[10px] uppercase text-slate-600">
                       <tr>
@@ -395,14 +408,17 @@ export default function TechnicianRepairsKanbanPage() {
                 </div>
 
                 {/* Live Profit Box */}
-                <div className="grid grid-cols-4 gap-2 pt-2 border-t border-slate-200 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200 text-xs">
                   <div>
-                    <span className="text-slate-500 text-[10px]">ค่าแรงช่าง</span>
+                    <span className="text-slate-500 text-[10px]">
+                      ค่าแรงช่าง {isTechnician && <span className="text-amber-600">(อ่านอย่างเดียว)</span>}
+                    </span>
                     <Input
                       type="number"
+                      disabled={isTechnician}
                       value={laborFeeInput}
                       onChange={(e) => setLaborFeeInput(Number(e.target.value))}
-                      className="text-xs h-7 font-bold font-mono"
+                      className="text-xs h-7 font-bold font-mono disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </div>
                   <div>
@@ -416,6 +432,11 @@ export default function TechnicianRepairsKanbanPage() {
                   <div className="bg-emerald-100/70 p-1.5 rounded-lg text-emerald-900">
                     <span className="text-[10px] font-bold">กำไรสุทธิ (GP)</span>
                     <div className="font-black text-emerald-700 text-sm">{formatTHB(grossProfit)}</div>
+                  </div>
+                  <div className="bg-indigo-100/70 p-1.5 rounded-lg text-indigo-900">
+                    <span className="text-[10px] font-bold">คอมมิชชั่นช่าง</span>
+                    <div className="font-black text-indigo-700 text-sm">{formatTHB(techCommission)}</div>
+                    <div className="text-[8px] text-indigo-600">30% ค่าแรง + 10% GP อะไหล่</div>
                   </div>
                 </div>
               </div>

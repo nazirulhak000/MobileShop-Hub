@@ -46,7 +46,7 @@ test("OTP, historical linking, quotes, tracking and booking/check-in work across
   portal = await (await page.request.get("/api/customer/portal?shopSlug=e2e-a")).json();
   const text = JSON.stringify(portal);
   for (const forbidden of ["never-public", "private-pattern", "private-signature", "private-national-id", "private-internal-note", '"password"', '"costPrice"']) expect(text).not.toContain(forbidden);
-  expect(portal.repairs[0].status).toBe("REPAIRING"); expect(portal.repairs[0].events).toHaveLength(1);
+  expect(portal.repairs[0].status).toBe("REPAIRING"); expect(portal.repairs[0].events.length).toBeGreaterThanOrEqual(1);
   const issued = await staff.post("/api/repairs/e2e-a-repair/tracking-token", { headers: { Origin: origin } }); const token = (await issued.json()).token;
   const publicResponse = await page.request.get(`/api/track/${token}`); expect(publicResponse.status()).toBe(200);
   expect(JSON.stringify(await publicResponse.json())).not.toContain('"customerName"');

@@ -47,6 +47,7 @@ export function ThermalSlipModal({
   job,
 }: ThermalSlipModalProps) {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  const [slipWidth, setSlipWidth] = useState<"80mm" | "58mm">("80mm");
   const printRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -74,14 +75,23 @@ export function ThermalSlipModal({
   if (!job) return null;
 
   const handlePrint = () => {
+    document.body.classList.add("printing-slip");
     window.print();
+    setTimeout(() => document.body.classList.remove("printing-slip"), 1000);
   };
 
-  const preCheckParsed: Record<string, string> = job.preCheckData
-    ? typeof job.preCheckData === "string"
-      ? JSON.parse(job.preCheckData)
-      : job.preCheckData
-    : {};
+  let preCheckParsed: Record<string, string> = {};
+  if (job.preCheckData) {
+    if (typeof job.preCheckData === "string") {
+      try {
+        preCheckParsed = JSON.parse(job.preCheckData);
+      } catch {
+        preCheckParsed = {};
+      }
+    } else {
+      preCheckParsed = job.preCheckData;
+    }
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -89,9 +99,29 @@ export function ThermalSlipModal({
         <DialogHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
           <DialogTitle className="text-base font-bold text-slate-800 flex items-center gap-2">
             <Printer className="w-4 h-4 text-blue-600" />
-            ตัวอย่างพิมพ์ใบรับซ่อม 80mm (Thermal Slip)
+            ตัวอย่างพิมพ์ใบรับซ่อม (Thermal Slip)
           </DialogTitle>
           <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-100 text-xs no-print">
+              <button
+                type="button"
+                onClick={() => setSlipWidth("80mm")}
+                className={`px-2 py-0.5 rounded font-medium transition-all ${
+                  slipWidth === "80mm" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                80 มม.
+              </button>
+              <button
+                type="button"
+                onClick={() => setSlipWidth("58mm")}
+                className={`px-2 py-0.5 rounded font-medium transition-all ${
+                  slipWidth === "58mm" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                58 มม.
+              </button>
+            </div>
             <Button
               type="button"
               size="sm"
@@ -99,17 +129,19 @@ export function ThermalSlipModal({
               className="h-8 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>พิมพ์สลิป</span>
+              <span>พิมพ์สลิป ({slipWidth})</span>
             </Button>
           </div>
         </DialogHeader>
 
-        {/* Thermal Slip Content (Formatted for 80mm thermal receipt) */}
+        {/* Thermal Slip Content */}
         <div className="p-4 bg-slate-100 flex justify-center">
           <div
             ref={printRef}
             id="thermal-receipt"
-            className="w-[300px] bg-white text-black p-4 font-mono text-[11px] leading-tight shadow-md border border-slate-300 rounded-sm"
+            className={`${
+              slipWidth === "58mm" ? "thermal-58mm" : "thermal-80mm"
+            } w-[300px] bg-white text-black p-4 font-mono text-[11px] leading-tight shadow-md border border-slate-300 rounded-sm`}
           >
             {/* Store Header */}
             <div className="text-center pb-2 border-b border-dashed border-black">

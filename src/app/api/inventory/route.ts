@@ -1,5 +1,5 @@
 import { AccessError, staffContext } from "@/lib/staff-context";
-import { safeError, withStaff, reqInt, reqMoney, takeParam } from "@/lib/staff-http";
+import { readJson, safeError, withStaff, reqInt, reqMoney, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -80,7 +80,10 @@ async function handleGET(request: NextRequest) {
         category: p.category,
         brand: p.brand || "",
         model: p.model || "",
-        compatibleModels: p.compatibleModels ? JSON.parse(p.compatibleModels) : [],
+        compatibleModels: (() => {
+          if (!p.compatibleModels) return [];
+          try { return JSON.parse(p.compatibleModels); } catch { return []; }
+        })(),
         costPrice: p.costPrice,
         sellPrice: p.sellPrice,
         minStock: p.minStock,
@@ -108,17 +111,15 @@ async function handleGET(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, products: formatted });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("GET /api/inventory error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
 // POST /api/inventory - Create a new product
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const {
       code,
       name,
@@ -147,6 +148,8 @@ async function handlePOST(request: NextRequest) {
     const hasInitial = initialStock !== undefined && initialStock !== null && initialStock !== "";
     const initialQty = hasInitial ? reqInt(initialStock, "initialStock", 0, 100_000) : 0;
 
+    const actor = staffContext();
+
     // Product + initial stock are created atomically.
     const newProduct = await prisma.$transaction(async (tx) => {
       let branch = null;
@@ -155,10 +158,12 @@ async function handlePOST(request: NextRequest) {
           where: { OR: [{ id: branchId }, { code: branchId }] },
         });
         if (!branch) throw new AccessError(404, "ไม่พบสาขาสำหรับสต็อกเริ่มต้น");
+        if (!actor.branchIds.includes(branch.id)) throw new AccessError(403, "ไม่มีสิทธิ์จัดการสต็อกสาขานี้");
       }
 
       const product = await tx.product.create({
         data: {
+          tenantId: actor.tenantId ?? branch?.tenantId,
           code,
           name,
           category,
@@ -174,6 +179,7 @@ async function handlePOST(request: NextRequest) {
       if (branch) {
         await tx.stockItem.create({
           data: {
+            tenantId: actor.tenantId ?? branch.tenantId,
             productId: product.id,
             branchId: branch.id,
             quantity: initialQty,
@@ -184,10 +190,8 @@ async function handlePOST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, product: newProduct });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("POST /api/inventory error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

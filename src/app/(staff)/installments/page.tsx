@@ -444,7 +444,7 @@ export default function InstallmentsPage() {
                 {actionError && (
                   <div className="mb-2 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">{actionError}</div>
                 )}
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-100 text-slate-700 text-[11px] font-semibold">
                       <tr>

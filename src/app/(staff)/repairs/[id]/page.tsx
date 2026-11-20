@@ -68,8 +68,9 @@ const POST_QC_ITEMS = [
 export default function TechnicianWorkspacePage() {
   const params = useParams();
   const router = useRouter();
-  const { users } = useApp();
+  const { users, currentUser } = useApp();
   const id = params.id as string;
+  const isTechnician = currentUser.role === "TECHNICIAN";
 
   const [job, setJob] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,6 +122,11 @@ export default function TechnicianWorkspacePage() {
   // Transition state
   const handleTransitionState = async (newStatus: RepairStatusType) => {
     if (!job) return;
+    const APPROVAL_REQUIRED: RepairStatusType[] = ["REPAIRING", "QC_PASSED", "READY", "COMPLETED"];
+    if (APPROVAL_REQUIRED.includes(newStatus) && !job.customerApproved) {
+      alert("กรุณารอการอนุมัติใบเสนอราคาจากลูกค้าก่อนดำเนินการขั้นตอนนี้ (หรือยืนยันใบเสนอราคาในส่วนด้านบน)");
+      return;
+    }
     setUpdating(true);
     try {
       const res = await fetch(`/api/repairs/${job.id}`, {
@@ -149,20 +155,26 @@ export default function TechnicianWorkspacePage() {
     if (!job) return;
     setUpdating(true);
     try {
+      const payload: any = {
+        notes: technicianNotes,
+        postCheckData: postQcState,
+      };
+      if (!isTechnician) {
+        payload.laborFee = Number(laborFeeInput);
+        payload.warrantyDays = Number(warrantyDaysInput);
+      }
+
       const res = await fetch(`/api/repairs/${job.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: technicianNotes,
-          laborFee: Number(laborFeeInput),
-          warrantyDays: Number(warrantyDaysInput),
-          postCheckData: postQcState,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (json.success) {
         setJob(json.data);
         alert("บันทึกการปรับปรุงข้อมูลเรียบร้อยแล้ว");
+      } else {
+        alert(json.error || "Failed to save workspace");
       }
     } catch (err: any) {
       alert(err.message);
@@ -268,12 +280,22 @@ export default function TechnicianWorkspacePage() {
   const currentLaborFee = Number(laborFeeInput);
   const totalCustomerCost = currentLaborFee + partsSellTotal;
   const grossProfit = totalCustomerCost - partsCostTotal;
+  const partsGrossProfit = Math.max(0, partsSellTotal - partsCostTotal);
+  // Technician Commission: 30% on labor fee + 10% on spare parts GP
+  const techCommission = currentLaborFee * 0.30 + partsGrossProfit * 0.10;
 
-  const preCheckParsed: Record<string, string> = job.preCheckData
-    ? typeof job.preCheckData === "string"
-      ? JSON.parse(job.preCheckData)
-      : job.preCheckData
-    : {};
+  let preCheckParsed: Record<string, string> = {};
+  if (job.preCheckData) {
+    if (typeof job.preCheckData === "string") {
+      try {
+        preCheckParsed = JSON.parse(job.preCheckData);
+      } catch {
+        preCheckParsed = {};
+      }
+    } else {
+      preCheckParsed = job.preCheckData;
+    }
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
@@ -356,15 +378,21 @@ export default function TechnicianWorkspacePage() {
                 const nextInfo = RepairStatusMap[nextStatus];
                 const isComplete = nextStatus === "COMPLETED";
                 const isCancel = nextStatus === "CANCELLED";
+                const requiresApproval =
+                  ["REPAIRING", "QC_PASSED", "READY", "COMPLETED"].includes(nextStatus) &&
+                  !job.customerApproved;
 
                 return (
                   <Button
                     key={nextStatus}
                     size="sm"
-                    disabled={updating}
+                    disabled={updating || requiresApproval}
                     onClick={() => handleTransitionState(nextStatus)}
+                    title={requiresApproval ? "ต้องรอการอนุมัติใบเสนอราคาจากลูกค้าก่อนดำเนินการ" : undefined}
                     className={`h-8 text-xs font-semibold gap-1.5 shadow-xs ${
-                      isComplete
+                      requiresApproval
+                        ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                        : isComplete
                         ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                         : isCancel
                         ? "bg-rose-600 hover:bg-rose-700 text-white"
@@ -373,6 +401,7 @@ export default function TechnicianWorkspacePage() {
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>&rarr; {nextInfo?.label || nextStatus}</span>
+                    {requiresApproval && <span className="text-[10px] font-normal">(รออนุมัติราคา)</span>}
                   </Button>
                 );
               })}
@@ -496,16 +525,19 @@ export default function TechnicianWorkspacePage() {
               </div>
 
               {/* Financial Live Calculation Summary Card */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                 <div>
-                  <div className="text-[11px] text-slate-500">ค่าแรงช่าง (บริการ)</div>
+                  <div className="text-[11px] text-slate-500">
+                    ค่าแรงช่าง {isTechnician && <span className="text-amber-600 text-[10px]">(ช่างอ่านอย่างเดียว)</span>}
+                  </div>
                   <div className="flex items-center gap-1 mt-0.5">
                     <Input
                       type="number"
                       min="0"
+                      disabled={isTechnician}
                       value={laborFeeInput}
                       onChange={(e) => setLaborFeeInput(Number(e.target.value))}
-                      className="text-xs font-bold h-8 font-mono bg-white"
+                      className="text-xs font-bold h-8 font-mono bg-white disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </div>
                 </div>
@@ -532,6 +564,17 @@ export default function TechnicianWorkspacePage() {
                   <div className="text-base font-black text-emerald-700 mt-0.5 font-mono">
                     {formatTHB(grossProfit)}
                   </div>
+                </div>
+
+                <div className="bg-indigo-50 p-2 rounded-lg border border-indigo-200">
+                  <div className="text-[10px] font-bold text-indigo-800 uppercase flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-indigo-600" />
+                    คอมมิชชั่นช่าง
+                  </div>
+                  <div className="text-base font-black text-indigo-700 mt-0.5 font-mono">
+                    {formatTHB(techCommission)}
+                  </div>
+                  <div className="text-[9px] text-indigo-600">30% ค่าแรง + 10% GP อะไหล่</div>
                 </div>
               </div>
             </CardContent>
@@ -611,14 +654,15 @@ export default function TechnicianWorkspacePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    ระยะเวลารับประกันงานซ่อม (วัน)
+                    ระยะเวลารับประกันงานซ่อม (วัน) {isTechnician && <span className="text-amber-600 font-normal">(เฉพาะ Admin/Manager กำหนด)</span>}
                   </label>
                   <Input
                     type="number"
                     min="0"
+                    disabled={isTechnician}
                     value={warrantyDaysInput}
                     onChange={(e) => setWarrantyDaysInput(Number(e.target.value))}
-                    className="text-xs font-mono"
+                    className="text-xs font-mono disabled:bg-slate-100 disabled:text-slate-500"
                   />
                   <p className="text-[11px] text-slate-400 mt-1">
                     ค่ามาตรฐาน 90 วัน สำหรับอะไหล่แท้และเกรด A

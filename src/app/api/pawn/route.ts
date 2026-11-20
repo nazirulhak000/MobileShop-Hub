@@ -1,5 +1,6 @@
 import { AccessError, staffContext } from "@/lib/staff-context";
 import {
+  readJson,
   safeError,
   withStaff,
   reqId,
@@ -32,9 +33,8 @@ async function handleGET(request: NextRequest) {
       take: takeParam(new URL(request.url).searchParams.get("take"), 200, 500),
     });
     return NextResponse.json({ success: true, data: contracts });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
@@ -45,7 +45,7 @@ function reqText(value: unknown, label: string, max = 200): string {
 
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const actor = staffContext();
 
     const customerId = optId(body.customerId, "customerId");
@@ -85,6 +85,12 @@ async function handlePOST(request: NextRequest) {
         finalCustId = existingCust.id;
       }
 
+      // IMEI pre-check: a device already in stock, in repair or pawned cannot be taken in again.
+      const existingImei = await tx.deviceIMEI.findFirst({ where: { imei } });
+      if (existingImei && !["SOLD", "RETURNED"].includes(existingImei.status)) {
+        throw new AccessError(409, `IMEI ${imei} อยู่ในระบบแล้ว (สถานะ ${existingImei.status})`);
+      }
+
       const counter = await tx.sequenceCounter.upsert({
         where: { id: `PW-${yyyymm}` },
         update: { current: { increment: 1 } },
@@ -116,6 +122,50 @@ async function handlePOST(request: NextRequest) {
         },
       });
 
+      // Link to product & register DeviceIMEI as collateral
+      let product = await tx.product.findFirst({
+        where: { category: "DEVICE", model: deviceModel },
+      });
+      if (!product) {
+        const productCounter = await tx.sequenceCounter.upsert({
+          where: { id: "DEV-USED" },
+          update: { current: { increment: 1 } },
+          create: { id: "DEV-USED", current: 1 },
+        });
+        product = await tx.product.create({
+          data: {
+            code: `DEV-USED-${String(productCounter.current).padStart(5, "0")}`,
+            name: `${deviceBrand} ${deviceModel} (มือสอง เกรด ${conditionGrade})`,
+            category: "DEVICE",
+            brand: deviceBrand,
+            model: deviceModel,
+            costPrice: agreedPrice,
+            sellPrice: Math.round(agreedPrice * 1.3),
+            minStock: 1,
+          },
+        });
+      }
+
+      const imeiData = {
+        productId: product.id,
+        branchId,
+        conditionGrade,
+        status: "PAWNED",
+        costPrice: agreedPrice,
+        sellPrice: Math.round(agreedPrice * 1.3),
+        tradeInContractId: created.id,
+      };
+
+      if (existingImei) {
+        const reused = await tx.deviceIMEI.updateMany({
+          where: { id: existingImei.id, status: { in: ["SOLD", "RETURNED"] } },
+          data: imeiData,
+        });
+        if (reused.count !== 1) throw new AccessError(409, `IMEI ${imei} ถูกใช้งานโดยรายการอื่นแล้ว`);
+      } else {
+        await tx.deviceIMEI.create({ data: { ...imeiData, imei } });
+      }
+
       await tx.auditLog.create({
         data: {
           tenantId: actor.tenantId,
@@ -131,9 +181,8 @@ async function handlePOST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: contract }, { status: 201 });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
@@ -141,7 +190,7 @@ const PATCH_ACTIONS = ["pay_interest", "redeem", "forfeit"] as const;
 
 async function handlePATCH(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const id = reqId(body.id, "id");
     const action = reqEnum(body.action, "action", PATCH_ACTIONS);
     const actor = staffContext();
@@ -229,9 +278,8 @@ async function handlePATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: updated });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

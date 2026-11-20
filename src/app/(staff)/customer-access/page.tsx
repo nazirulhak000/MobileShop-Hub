@@ -254,11 +254,11 @@ export default function CustomerAccessPage() {
 
                     <div className="sm:col-span-5">
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        บันทึกหลักฐานที่ตรวจสอบต่อหน้า
+                        บันทึกหลักฐานที่ตรวจสอบต่อหน้า (อย่างน้อย 10 ตัวอักษร)
                       </label>
                       <input
                         required
-                        minLength={5}
+                        minLength={10}
                         maxLength={500}
                         name="evidence"
                         placeholder="เช่น ตรวจใบรับซ่อมฉบับจริง หรือตรวจสอบบัตรประชาชนคู่กับเครื่อง"

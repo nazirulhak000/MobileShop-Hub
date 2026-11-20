@@ -63,11 +63,11 @@ export default function RepairWarrantyPage() {
       // Create a warranty RMA repair job
       const payload = {
         customerId: claimJob.customerId,
-        customerName: claimJob.customer.name,
-        customerPhone: claimJob.customer.phone,
+        customerName: claimJob.customer?.name || "ลูกค้าทั่วไป",
+        customerPhone: claimJob.customer?.phone || "-",
         branchId: claimJob.branchId,
-        deviceBrand: claimJob.deviceBrand,
-        deviceModel: claimJob.deviceModel,
+        deviceBrand: claimJob.deviceBrand || "Unknown",
+        deviceModel: claimJob.deviceModel || "Unknown",
         deviceColor: claimJob.deviceColor,
         serialIMEI: claimJob.serialIMEI,
         // Device lock is copied server-side from the original job (not exposed by the list API).
@@ -96,17 +96,26 @@ export default function RepairWarrantyPage() {
     }
   };
 
-  const filtered = repairs.filter((r) => {
-    const s = search.toLowerCase();
-    return (
-      !s ||
-      r.trackingCode.toLowerCase().includes(s) ||
-      r.serialIMEI?.includes(s) ||
-      r.customer?.phone.includes(s) ||
-      r.customer?.name.toLowerCase().includes(s) ||
-      r.deviceModel.toLowerCase().includes(s)
-    );
-  });
+  const filtered = repairs
+    .filter((r) => r.status === "COMPLETED" || r.completedAt)
+    .filter((r) => {
+      const s = search.toLowerCase().trim();
+      if (!s) return true;
+      const tracking = (r.trackingCode || "").toLowerCase();
+      const imei = (r.serialIMEI || "").toLowerCase();
+      const phone = (r.customer?.phone || "").toLowerCase();
+      const name = (r.customer?.name || "").toLowerCase();
+      const model = (r.deviceModel || "").toLowerCase();
+      const brand = (r.deviceBrand || "").toLowerCase();
+      return (
+        tracking.includes(s) ||
+        imei.includes(s) ||
+        phone.includes(s) ||
+        name.includes(s) ||
+        model.includes(s) ||
+        brand.includes(s)
+      );
+    });
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
@@ -169,8 +178,8 @@ export default function RepairWarrantyPage() {
               ) : (
                 filtered.map((job) => {
                   const warrantyDays = job.warrantyDays || 90;
-                  const created = new Date(job.createdAt);
-                  const expiryDate = new Date(created);
+                  const startDate = new Date(job.completedAt || job.createdAt);
+                  const expiryDate = new Date(startDate);
                   expiryDate.setDate(expiryDate.getDate() + warrantyDays);
                   const diffDays = Math.ceil(
                     (expiryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)

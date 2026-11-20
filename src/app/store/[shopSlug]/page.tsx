@@ -2,7 +2,7 @@ import React from "react";
 import { db as prisma } from "@/lib/db";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Store, Sparkles } from "lucide-react";
+import { Store, Sparkles, Phone, MessageCircle, UserRound, Navigation } from "lucide-react";
 import { AnnouncementBar } from "@/components/landing/AnnouncementBar";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { LandingHero } from "@/components/landing/LandingHero";
@@ -19,7 +19,11 @@ import {
   DEFAULT_STOREFRONT_CONFIG,
   StorefrontThemeColor,
   THEME_PALETTES,
+  safeParseBeforeAfterCases,
+  safeParsePricingRates,
+  safeParseFaqs,
 } from "@/lib/storefrontTheme";
+import { resolveTenantBySlug } from "@/lib/storefrontTenant";
 
 interface StorePageProps {
   params: Promise<{
@@ -29,10 +33,7 @@ interface StorePageProps {
 
 export async function generateMetadata({ params }: StorePageProps): Promise<Metadata> {
   const { shopSlug } = await params;
-  const tenant = await prisma.tenant.findFirst({
-    where: { slug: shopSlug, status: { in: ["ACTIVE", "TRIAL"] } },
-    include: { storefrontConfig: true },
-  });
+  const tenant = await resolveTenantBySlug(shopSlug);
 
   const customTitle = tenant?.storefrontConfig?.headline;
   const title = tenant
@@ -51,15 +52,7 @@ export async function generateMetadata({ params }: StorePageProps): Promise<Meta
 
 export default async function TenantStorePage({ params }: StorePageProps) {
   const { shopSlug } = await params;
-  const tenant = await prisma.tenant.findFirst({
-    where: { slug: shopSlug, status: { in: ["ACTIVE", "TRIAL"] } },
-    include: {
-      storefrontConfig: true,
-      branches: {
-        take: 1,
-      },
-    },
-  });
+  const tenant = await resolveTenantBySlug(shopSlug);
 
   // If store doesn't exist, render a clean Storefront Not Found screen
   if (!tenant) {
@@ -139,13 +132,10 @@ export default async function TenantStorePage({ params }: StorePageProps) {
   const themeColor = config.themeColor;
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
-  // Parse custom before/after cases if saved in config
-  let parsedCases: BeforeAfterCase[] | undefined = undefined;
-  if (config.customBeforeAfterCases) {
-    try {
-      parsedCases = JSON.parse(config.customBeforeAfterCases);
-    } catch (_) {}
-  }
+  // Safe-parse custom configurations so corrupted data in DB never crashes storefront
+  const parsedCases = (safeParseBeforeAfterCases(config.customBeforeAfterCases) as BeforeAfterCase[]) || undefined;
+  const parsedPricingRates = safeParsePricingRates(config.customPricingRates) || undefined;
+  const parsedFaqs = safeParseFaqs(config.customFaqs) || undefined;
 
   // Calculate hidden menu anchors for navigation bar and footer
   const hiddenSections: string[] = [];
@@ -171,8 +161,21 @@ export default async function TenantStorePage({ params }: StorePageProps) {
       ? "selection:bg-rose-600 selection:text-white"
       : "selection:bg-emerald-600 selection:text-white";
 
+  const hasAnyOptionalSection = Boolean(
+    config.showServicesBento ||
+    config.showLiveTracking ||
+    config.showInspectionBench ||
+    config.showPriceEstimator ||
+    config.showBeforeAfterSlider ||
+    config.showCustomerReviews ||
+    config.showLocationSection ||
+    config.showFaqSection
+  );
+
+  const mobilePadding = config.showMobileQuickBar ? "pb-20 sm:pb-0" : "";
+
   return (
-    <div className={`min-h-screen bg-white text-slate-900 ${selectionClass} pb-20 sm:pb-0`}>
+    <div className={`min-h-screen bg-white text-slate-900 ${selectionClass} ${mobilePadding}`}>
       {/* 0. Top Announcement Bar */}
       {config.announcementEnabled && config.announcementText && (
         <AnnouncementBar
@@ -206,7 +209,12 @@ export default async function TenantStorePage({ params }: StorePageProps) {
 
         {/* 3. Core Services Bento Grid */}
         {config.showServicesBento && (
-          <ServicesBento lineId={config.lineId} showEstimate={config.showPriceEstimator} />
+          <ServicesBento
+            lineId={config.lineId}
+            showEstimate={config.showPriceEstimator}
+            showLiveTracking={config.showLiveTracking}
+            showLocation={config.showLocationSection}
+          />
         )}
 
         {/* 4. Tracking workflow demo animation */}
@@ -223,7 +231,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
 
         {/* 6. Price & Duration Estimator */}
         {config.showPriceEstimator && (
-          <PriceEstimator phone={config.phone} lineId={config.lineId} />
+          <PriceEstimator phone={config.phone} lineId={config.lineId} themeColor={themeColor} customRates={parsedPricingRates} />
         )}
 
         {/* 7. Interactive Draggable Before / After Split Slider & Customer Reviews */}
@@ -250,13 +258,76 @@ export default async function TenantStorePage({ params }: StorePageProps) {
 
         {/* 9. Technical FAQ Accordion */}
         {config.showFaqSection && (
-          <LandingFaq lineId={config.lineId} />
+          <LandingFaq lineId={config.lineId} themeColor={themeColor} customFaqs={parsedFaqs} />
+        )}
+
+        {/* Edge Case Fallback: When shop turns off ALL optional sections, render a clean contact & overview card so the page remains informative and functional without awkward white spaces */}
+        {!hasAnyOptionalSection && (
+          <section className="py-16 sm:py-20 bg-slate-50 border-b border-slate-200">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-8">
+              <div className="space-y-3">
+                <div className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full ${theme.lightBg} ${theme.lightText} border ${theme.lightBorder} text-xs font-semibold shadow-2xs`}>
+                  <Store className="h-4 w-4" />
+                  <span>ข้อมูลติดต่อและที่ตั้งศูนย์บริการ</span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+                  {branchName}
+                </h2>
+                <p className="text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
+                  {address || "ศูนย์บริการเปิดให้บริการตามปกติ ติดต่อสอบถามหรือนัดหมายเข้ารับบริการได้ทันที"}
+                </p>
+              </div>
+
+              {/* Quick Contact & Action Buttons */}
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                {config.phone && (
+                  <a
+                    href={`tel:${config.phone.replace(/[^0-9+]/g, "")}`}
+                    className="min-h-[44px] px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs"
+                  >
+                    <Phone className="h-4 w-4 text-emerald-400" />
+                    <span>โทร {config.phone}</span>
+                  </a>
+                )}
+                {config.lineId && (
+                  <a
+                    href={`https://line.me/R/ti/p/${encodeURIComponent(config.lineId.trim().startsWith("@") ? config.lineId.trim() : `@${config.lineId.trim()}`)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="min-h-[44px] px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors shadow-xs"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    <span>ติดต่อทาง LINE ({config.lineId})</span>
+                  </a>
+                )}
+                <Link
+                  href={shopSlug ? `/s/${shopSlug}` : "/customer"}
+                  className="min-h-[44px] px-6 py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-900 border border-teal-200 text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors"
+                >
+                  <UserRound className="h-4 w-4 text-teal-700" />
+                  <span>พอร์ทัลลูกค้า / จองคิว</span>
+                </Link>
+                {config.googleMapsUrl && (
+                  <a
+                    href={config.googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="min-h-[44px] px-6 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs sm:text-sm font-semibold inline-flex items-center gap-2 transition-colors"
+                  >
+                    <Navigation className="h-4 w-4 text-emerald-600" />
+                    <span>แผนที่ Google Maps</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          </section>
         )}
       </main>
 
       {/* 10. Footer */}
       <LandingFooter
         shopName={shopName}
+        shopSlug={shopSlug}
         address={address}
         phone={config.phone}
         hiddenSections={hiddenSections}
@@ -265,6 +336,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
       {/* 11. Mobile Sticky Action Bar */}
       {config.showMobileQuickBar && (
         <MobileQuickBar
+          shopSlug={shopSlug}
           phone={config.phone}
           lineId={config.lineId}
           showEstimate={config.showPriceEstimator}

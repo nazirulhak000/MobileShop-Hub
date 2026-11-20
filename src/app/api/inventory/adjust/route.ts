@@ -26,6 +26,7 @@ async function handlePOST(request: NextRequest) {
       where: { OR: [{ code: branchCode }, { id: branchCode }] },
     });
     if (!branch) throw new AccessError(404, `ไม่พบสาขา ${branchCode}`);
+    if (!actor.branchIds.includes(branch.id)) throw new AccessError(403, "ไม่มีสิทธิ์ปรับสต็อกสาขานี้");
 
     const product = await tx.product.findFirst({ where: { id: productId }, select: { id: true } });
     if (!product) throw new AccessError(404, "ไม่พบสินค้า");
@@ -38,7 +39,7 @@ async function handlePOST(request: NextRequest) {
       await tx.stockItem.upsert({
         where: key,
         update: { quantity: { increment: quantity } },
-        create: { productId, branchId: branch.id, quantity },
+        create: { tenantId: actor.tenantId ?? branch.tenantId, productId, branchId: branch.id, quantity },
       });
     } else if (type === "DEDUCT") {
       // Atomic guarded decrement: only succeeds if enough stock remains.
@@ -51,7 +52,7 @@ async function handlePOST(request: NextRequest) {
       await tx.stockItem.upsert({
         where: key,
         update: { quantity },
-        create: { productId, branchId: branch.id, quantity },
+        create: { tenantId: actor.tenantId ?? branch.tenantId, productId, branchId: branch.id, quantity },
       });
     }
 

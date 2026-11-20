@@ -19,10 +19,16 @@ export async function POST(req: NextRequest) {
       await throttle(`tenant-registration-ip-day:${ip}`, LIMITS.ipDaily, 24 * HOUR);
     }
     await throttle("tenant-registration", LIMITS.globalPerMinute, 60_000);
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "รูปแบบข้อมูล JSON ไม่ถูกต้อง" },
+        { status: 400 }
+      );
+    }
     const { shopName, shopSlug, ownerName, username, password, phone } = body;
 
-    if (![shopName, shopSlug, ownerName, username, password].every(value => typeof value === "string" && value.trim().length > 0 && value.length <= 100) || password.length < 12) {
+    if (![shopName, shopSlug, ownerName, username, password].every(value => typeof value === "string" && value.trim().length > 0 && value.length <= 100) || typeof password !== "string" || password.length < 12) {
       return NextResponse.json(
         { error: "กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน" },
         { status: 400 }

@@ -35,6 +35,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { formatTHB, formatDateThai } from "@/lib/utils";
+import QRCode from "qrcode";
+import { generatePromptPayPayload } from "@/lib/promptpay";
 
 interface CartItem {
   productId: string;
@@ -44,6 +46,7 @@ interface CartItem {
   unitPrice: number;
   costPrice: number;
   quantity: number;
+  discount?: number; // Line item discount in THB
   deviceImeiId?: string;
   imeiNumber?: string;
   conditionGrade?: string;
@@ -82,6 +85,9 @@ export default function PosPage() {
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [discountMode, setDiscountMode] = useState<"BAHT" | "PERCENT">("BAHT");
+  const [vatMode, setVatMode] = useState<"INCLUSIVE" | "EXCLUSIVE" | "EXEMPT">("INCLUSIVE");
+  const [editingLineDiscountIndex, setEditingLineDiscountIndex] = useState<number | null>(null);
+  const [lineDiscountInput, setLineDiscountInput] = useState<string>("");
 
   // Customer Info for Tax Invoice
   const [customerName, setCustomerName] = useState("ลูกค้าทั่วไป (Walk-in)");
@@ -101,6 +107,7 @@ export default function PosPage() {
   const [selectedBank, setSelectedBank] = useState("กสิกรไทย (KBank)");
   const [cardApprovalCode, setCardApprovalCode] = useState("");
   const [cardLastDigits, setCardLastDigits] = useState("");
+  const [promptPayQrUrl, setPromptPayQrUrl] = useState<string>("");
 
   // Split payment state
   const [splitCash, setSplitCash] = useState<string>("");
@@ -109,9 +116,17 @@ export default function PosPage() {
 
   // Receipt & Print Modal State
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
-  const [printFormat, setPrintFormat] = useState<"80MM" | "A4">("80MM");
+  const [printFormat, setPrintFormat] = useState<"80MM" | "58MM" | "A4">("80MM");
   const [lastSaleResult, setLastSaleResult] = useState<any>(null);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  // Helper to parse numbers safely removing any commas
+  const parseSafeMoney = (val: string | number) => {
+    if (typeof val === "number") return isNaN(val) ? 0 : val;
+    const clean = String(val || "").replace(/,/g, "").trim();
+    const parsed = parseFloat(clean);
+    return isNaN(parsed) ? 0 : parsed;
+  };
 
   // Barcode input ref
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -153,23 +168,75 @@ export default function PosPage() {
     });
   }, [products, categoryFilter, searchQuery]);
 
-  // Cart Calculations
+  // Cart Calculations (Including Line Item Discounts and VAT Mode)
   const subtotal = useMemo(() => {
     return cart.reduce((acc, item) => acc + item.unitPrice * item.quantity, 0);
   }, [cart]);
 
-  const effectiveDiscount = useMemo(() => {
+  const lineDiscountsTotal = useMemo(() => {
+    return cart.reduce((acc, item) => acc + (item.discount || 0), 0);
+  }, [cart]);
+
+  const subtotalAfterLineDiscounts = Math.max(0, subtotal - lineDiscountsTotal);
+
+  const effectiveBillDiscount = useMemo(() => {
     if (discountMode === "PERCENT") {
-      return (subtotal * (discountPercent || 0)) / 100;
+      return (subtotalAfterLineDiscounts * (discountPercent || 0)) / 100;
     }
     return discountAmount || 0;
-  }, [subtotal, discountMode, discountPercent, discountAmount]);
+  }, [subtotalAfterLineDiscounts, discountMode, discountPercent, discountAmount]);
 
-  const grandTotal = Math.max(0, subtotal - effectiveDiscount);
+  const totalDiscount = Math.min(subtotal, Math.round((lineDiscountsTotal + effectiveBillDiscount) * 100) / 100);
 
-  // ภ.พ.30 VAT 7% Inclusive Calculation
-  const netBeforeVat = +(grandTotal / 1.07).toFixed(2);
-  const vatAmount = +(grandTotal - netBeforeVat).toFixed(2);
+  // VAT (Inclusive 7%, Exclusive 7%, or Exempt 0%)
+  const { netBeforeVat, vatAmount, grandTotal } = useMemo(() => {
+    const afterDiscount = Math.max(0, subtotal - totalDiscount);
+    if (vatMode === "INCLUSIVE") {
+      const netBefore = +(afterDiscount / 1.07).toFixed(2);
+      const vat = +(afterDiscount - netBefore).toFixed(2);
+      return { netBeforeVat: netBefore, vatAmount: vat, grandTotal: afterDiscount };
+    } else if (vatMode === "EXCLUSIVE") {
+      const netBefore = afterDiscount;
+      const vat = +(netBefore * 0.07).toFixed(2);
+      const total = +(netBefore + vat).toFixed(2);
+      return { netBeforeVat: netBefore, vatAmount: vat, grandTotal: total };
+    } else {
+      // EXEMPT
+      return { netBeforeVat: afterDiscount, vatAmount: 0, grandTotal: afterDiscount };
+    }
+  }, [subtotal, totalDiscount, vatMode]);
+
+  // Generate authentic PromptPay QR code data URL whenever amount or method changes
+  useEffect(() => {
+    if (paymentMethod === "PROMPTPAY" || paymentMethod === "SPLIT") {
+      const taxIdOrPhone = currentBranch.code === "HQ" ? "0105561234567" : "010556123456702";
+      const ppAmount =
+        paymentMethod === "SPLIT"
+          ? parseSafeMoney(splitSecondaryAmount)
+          : grandTotal;
+      const payload = generatePromptPayPayload(taxIdOrPhone, ppAmount > 0 ? ppAmount : undefined);
+      QRCode.toDataURL(payload, {
+        width: 200,
+        margin: 1,
+        color: { dark: "#0f172a", light: "#ffffff" },
+      })
+        .then(setPromptPayQrUrl)
+        .catch((err) => console.error("PromptPay QR generation error:", err));
+    }
+  }, [paymentMethod, grandTotal, splitSecondaryAmount, currentBranch.code]);
+
+  // Line item discount handlers
+  const handleSetLineDiscount = (index: number, disc: number) => {
+    setCart((prev) => {
+      const updated = [...prev];
+      const item = updated[index];
+      const maxDisc = item.unitPrice * item.quantity;
+      item.discount = Math.max(0, Math.min(maxDisc, disc));
+      return updated;
+    });
+    setEditingLineDiscountIndex(null);
+    setLineDiscountInput("");
+  };
 
   // Add standard product to cart
   const addToCart = (product: ProductItem, specificImei?: any) => {
@@ -301,20 +368,20 @@ export default function PosPage() {
   const handleConfirmPayment = async () => {
     if (cart.length === 0 || processingPayment) return;
 
-    // Validate Cash Amount if Cash method
-    const cashNum = parseFloat(cashReceived);
-    if (paymentMethod === "CASH" && (isNaN(cashNum) || cashNum < grandTotal)) {
+    // Validate Cash Amount if Cash method (safe against commas e.g. 1,000)
+    const cashNum = parseSafeMoney(cashReceived);
+    if (paymentMethod === "CASH" && (cashNum < grandTotal || cashNum <= 0)) {
       alert("ยอดเงินสดที่รับมาต้องไม่น้อยกว่ายอดรวมที่ต้องชำระ");
       return;
     }
 
     // Validate Split Payment if Split method
     if (paymentMethod === "SPLIT") {
-      const sCash = parseFloat(splitCash) || 0;
-      const sSec = parseFloat(splitSecondaryAmount) || 0;
+      const sCash = parseSafeMoney(splitCash);
+      const sSec = parseSafeMoney(splitSecondaryAmount);
       if (Math.abs(sCash + sSec - grandTotal) > 0.05) {
         alert(
-          `ยอดเงินสด (${sCash}) รวมกับยอด ${splitSecondaryMethod} (${sSec}) ไม่ตรงกับยอดชำระ (${grandTotal})`
+          `ยอดเงินสด (${formatTHB(sCash)}) รวมกับยอด ${splitSecondaryMethod} (${formatTHB(sSec)}) ไม่ตรงกับยอดชำระ (${formatTHB(grandTotal)})`
         );
         return;
       }
@@ -339,9 +406,9 @@ export default function PosPage() {
               approvalCode: cardApprovalCode.trim() || null,
             }
           : {
-              cashPart: parseFloat(splitCash) || 0,
+              cashPart: parseSafeMoney(splitCash),
               secondaryMethod: splitSecondaryMethod,
-              secondaryPart: parseFloat(splitSecondaryAmount) || 0,
+              secondaryPart: parseSafeMoney(splitSecondaryAmount),
             };
 
       const payload = {
@@ -363,8 +430,8 @@ export default function PosPage() {
           unitPrice: it.unitPrice,
           costPrice: it.costPrice,
         })),
-        // Server recomputes prices/totals; clamp and round discount to satang
-        discount: Math.round(Math.min(effectiveDiscount, subtotal) * 100) / 100,
+        // Server recomputes prices/totals; clamp and round discount to satang (includes line item discounts)
+        discount: Math.round(Math.min(totalDiscount, subtotal) * 100) / 100,
         paymentMethod,
         paymentDetails,
       };
@@ -406,7 +473,11 @@ export default function PosPage() {
   };
 
   const handlePrint = () => {
+    document.body.classList.add("printing-slip");
     window.print();
+    setTimeout(() => {
+      document.body.classList.remove("printing-slip");
+    }, 1000);
   };
 
   return (
@@ -651,67 +722,142 @@ export default function PosPage() {
                   </p>
                 </div>
               ) : (
-                cart.map((item, index) => (
-                  <div key={`${item.productId}-${item.deviceImeiId || index}`} className="py-2.5 space-y-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h5 className="font-semibold text-xs text-slate-900 leading-snug">
-                          {item.name}
-                        </h5>
-                        {item.imeiNumber && (
-                          <div className="font-mono text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded inline-block mt-0.5">
-                            IMEI: {item.imeiNumber} ({item.conditionGrade})
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => removeFromCart(index)}
-                        className="text-slate-400 hover:text-rose-600 transition-colors p-0.5"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                cart.map((item, index) => {
+                  const lineGross = item.unitPrice * item.quantity;
+                  const lineNet = Math.max(0, lineGross - (item.discount || 0));
+                  const isEditingDiscount = editingLineDiscountIndex === index;
 
-                    <div className="flex items-center justify-between pt-1">
-                      {/* Quantity Controls */}
-                      {item.deviceImeiId ? (
-                        <span className="text-[11px] font-mono text-slate-500 font-semibold">
-                          จำนวน: 1 เครื่อง
-                        </span>
-                      ) : (
-                        <div className="flex items-center border border-slate-200 rounded-md bg-white">
-                          <button
-                            onClick={() => updateQuantity(index, -1)}
-                            className="p-1 text-slate-500 hover:bg-slate-100 rounded-l"
-                          >
-                            <Minus className="h-3 w-3" />
-                          </button>
-                          <span className="px-2 font-mono text-xs font-bold text-slate-800">
-                            {item.quantity}
-                          </span>
-                          <button
-                            onClick={() => updateQuantity(index, 1)}
-                            className="p-1 text-slate-500 hover:bg-slate-100 rounded-r"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
+                  return (
+                    <div key={`${item.productId}-${item.deviceImeiId || index}`} className="py-2.5 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h5 className="font-semibold text-xs text-slate-900 leading-snug">
+                            {item.name}
+                          </h5>
+                          {item.imeiNumber && (
+                            <div className="font-mono text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded inline-block mt-0.5">
+                              IMEI: {item.imeiNumber} ({item.conditionGrade})
+                            </div>
+                          )}
+                          {item.discount && item.discount > 0 && (
+                            <span className="ml-1.5 text-[10px] font-mono font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded inline-block">
+                              ลด -{formatTHB(item.discount)}
+                            </span>
+                          )}
                         </div>
-                      )}
+                        <button
+                          onClick={() => removeFromCart(index)}
+                          className="text-slate-400 hover:text-rose-600 transition-colors p-0.5"
+                          title="ลบรายการ"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
 
-                      {/* Line Subtotal */}
-                      <div className="text-right">
-                        <span className="font-bold font-mono text-xs text-slate-900">
-                          {formatTHB(item.unitPrice * item.quantity)}
-                        </span>
-                        {item.quantity > 1 && (
-                          <div className="text-[10px] text-slate-400">
-                            @{formatTHB(item.unitPrice)}
+                      <div className="flex items-center justify-between pt-1">
+                        {/* Quantity Controls */}
+                        {item.deviceImeiId ? (
+                          <span className="text-[11px] font-mono text-slate-500 font-semibold">
+                            จำนวน: 1 เครื่อง
+                          </span>
+                        ) : (
+                          <div className="flex items-center border border-slate-200 rounded-md bg-white">
+                            <button
+                              onClick={() => updateQuantity(index, -1)}
+                              className="p-1 text-slate-500 hover:bg-slate-100 rounded-l"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <span className="px-2 font-mono text-xs font-bold text-slate-800">
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => updateQuantity(index, 1)}
+                              className="p-1 text-slate-500 hover:bg-slate-100 rounded-r"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Line Subtotal and Discount Trigger */}
+                        <div className="text-right">
+                          <div className="flex items-baseline justify-end gap-1.5">
+                            {item.discount && item.discount > 0 ? (
+                              <>
+                                <span className="font-mono text-[11px] text-slate-400 line-through">
+                                  {formatTHB(lineGross)}
+                                </span>
+                                <span className="font-bold font-mono text-xs text-rose-700">
+                                  {formatTHB(lineNet)}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="font-bold font-mono text-xs text-slate-900">
+                                {formatTHB(lineGross)}
+                              </span>
+                            )}
+                          </div>
+                          {item.quantity > 1 && (
+                            <div className="text-[10px] text-slate-400">
+                              @{formatTHB(item.unitPrice)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Line Discount Quick Bar */}
+                      <div className="flex items-center justify-between text-[11px] pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isEditingDiscount) {
+                              setEditingLineDiscountIndex(null);
+                            } else {
+                              setEditingLineDiscountIndex(index);
+                              setLineDiscountInput(String(item.discount || ""));
+                            }
+                          }}
+                          className="text-[10px] text-blue-600 hover:underline font-medium"
+                        >
+                          {item.discount && item.discount > 0
+                            ? `แก้ไขส่วนลดรายชิ้น`
+                            : `+ ส่วนลดรายชิ้น`}
+                        </button>
+
+                        {isEditingDiscount && (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              min="0"
+                              max={lineGross}
+                              placeholder="จำนวนเงินลด"
+                              value={lineDiscountInput}
+                              onChange={(e) => setLineDiscountInput(e.target.value)}
+                              className="h-6 w-20 text-[11px] font-mono text-right p-1"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSetLineDiscount(index, parseSafeMoney(lineDiscountInput))}
+                              className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700"
+                            >
+                              ตกลง
+                            </button>
+                            {item.discount && item.discount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetLineDiscount(index, 0)}
+                                className="rounded bg-rose-100 px-1 py-0.5 text-[10px] text-rose-700 hover:bg-rose-200"
+                              >
+                                ล้าง
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -723,11 +869,19 @@ export default function PosPage() {
                 <span className="font-mono font-semibold">{formatTHB(subtotal)}</span>
               </div>
 
-              {/* Discount Input Row */}
+              {/* Line items discount total if any */}
+              {lineDiscountsTotal > 0 && (
+                <div className="flex items-center justify-between text-xs text-rose-600">
+                  <span>ส่วนลดรายชิ้น (Line Discounts)</span>
+                  <span className="font-mono font-semibold">-{formatTHB(lineDiscountsTotal)}</span>
+                </div>
+              )}
+
+              {/* Bill Discount Input Row */}
               <div className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-1 text-slate-600">
                   <Percent className="h-3.5 w-3.5 text-blue-600" />
-                  <span>ส่วนลด (Discount)</span>
+                  <span>ส่วนลดท้ายบิล (Bill Discount)</span>
                 </div>
                 <div className="flex items-center gap-1 w-36">
                   <Input
@@ -736,7 +890,7 @@ export default function PosPage() {
                     placeholder="0"
                     value={discountMode === "BAHT" ? discountAmount || "" : discountPercent || ""}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 0;
+                      const val = parseSafeMoney(e.target.value);
                       if (discountMode === "BAHT") setDiscountAmount(val);
                       else setDiscountPercent(val);
                     }}
@@ -752,14 +906,48 @@ export default function PosPage() {
                 </div>
               </div>
 
-              {/* VAT ภ.พ.30 Breakdown (7% inclusive) */}
-              <div className="pt-2 border-t border-slate-200 space-y-1 text-[11px] text-slate-500">
+              {/* VAT Mode Toggle (Inclusive, Exclusive, Exempt) */}
+              <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[11px]">
+                <span className="text-slate-600 font-medium">รูปแบบภาษี:</span>
+                <div className="flex rounded-md bg-slate-200/80 p-0.5 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setVatMode("INCLUSIVE")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      vatMode === "INCLUSIVE" ? "bg-white text-blue-700 shadow-2xs font-extrabold" : "text-slate-600"
+                    }`}
+                  >
+                    รวมในราคา (7%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVatMode("EXCLUSIVE")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      vatMode === "EXCLUSIVE" ? "bg-white text-blue-700 shadow-2xs font-extrabold" : "text-slate-600"
+                    }`}
+                  >
+                    บวกแยก (7%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVatMode("EXEMPT")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      vatMode === "EXEMPT" ? "bg-white text-blue-700 shadow-2xs font-extrabold" : "text-slate-600"
+                    }`}
+                  >
+                    ยกเว้น (0%)
+                  </button>
+                </div>
+              </div>
+
+              {/* VAT Breakdown Display */}
+              <div className="space-y-1 text-[11px] text-slate-500 pt-1">
                 <div className="flex justify-between">
                   <span>มูลค่าสินค้าก่อนภาษี (Net before VAT):</span>
                   <span className="font-mono">{formatTHB(netBeforeVat)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>ภาษีมูลค่าเพิ่ม 7% (VAT ภ.พ.30):</span>
+                  <span>ภาษีมูลค่าเพิ่ม ({vatMode === "EXEMPT" ? "0%" : "7% ภ.พ.30"}):</span>
                   <span className="font-mono">{formatTHB(vatAmount)}</span>
                 </div>
               </div>
@@ -1020,16 +1208,16 @@ export default function PosPage() {
                 </div>
 
                 {/* Live Change Calculator */}
-                {parseFloat(cashReceived) >= grandTotal ? (
+                {parseSafeMoney(cashReceived) >= grandTotal ? (
                   <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 flex items-center justify-between text-emerald-800">
                     <span className="font-semibold text-xs">เงินทอน (Change):</span>
                     <span className="font-mono font-extrabold text-lg text-emerald-900">
-                      {formatTHB(parseFloat(cashReceived) - grandTotal)}
+                      {formatTHB(Math.max(0, +(parseSafeMoney(cashReceived) - grandTotal).toFixed(2)))}
                     </span>
                   </div>
                 ) : (
                   <div className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-700 font-medium text-center">
-                    จำนวนเงินยังขาดอีก: {formatTHB(grandTotal - (parseFloat(cashReceived) || 0))}
+                    จำนวนเงินยังขาดอีก: {formatTHB(Math.max(0, +(grandTotal - parseSafeMoney(cashReceived)).toFixed(2)))}
                   </div>
                 )}
               </div>
@@ -1045,25 +1233,33 @@ export default function PosPage() {
                     </span>
                     <span>PROMPTPAY PAYMENT</span>
                   </div>
-                  {/* Generated QR Mock Card */}
-                  <div className="h-44 w-44 bg-slate-900 rounded-lg p-2 flex items-center justify-center text-white font-mono text-center relative overflow-hidden">
-                    <div className="absolute inset-0 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:8px_8px] opacity-90" />
-                    <div className="relative z-10 bg-white p-2 rounded text-slate-900 flex flex-col items-center">
-                      <QrCode className="h-28 w-28 text-slate-900" />
-                      <span className="text-[10px] font-bold mt-1">MobileShop Hub</span>
-                    </div>
+                  {/* Real Generated PromptPay QR */}
+                  <div className="h-44 w-44 bg-white rounded-lg p-2 flex items-center justify-center text-slate-900 font-mono text-center relative overflow-hidden border border-slate-200 shadow-2xs">
+                    {promptPayQrUrl ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={promptPayQrUrl}
+                        alt="Thai QR PromptPay"
+                        className="h-40 w-40 object-contain"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center text-slate-400">
+                        <QrCode className="h-24 w-24 text-slate-300 animate-pulse" />
+                        <span className="text-[10px] mt-1">กำลังสร้าง QR...</span>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-2 text-center">
                     <div className="font-bold text-base text-slate-900 font-mono">
                       {formatTHB(grandTotal)}
                     </div>
                     <div className="text-[10px] text-slate-500 font-mono">
-                      Tax ID: {currentBranch.code === "HQ" ? "0105561234567" : "0105561234567-0002"}
+                      PromptPay: {currentBranch.code === "HQ" ? "0105561234567" : "010556123456702"}
                     </div>
                   </div>
                 </div>
                 <Badge variant="success" className="text-xs">
-                  ระบบจำลองสแกนพร้อมเพย์พร้อมบันทึกทันที
+                  สแกนผ่านแอปธนาคารได้ทุกธนาคาร ยอดเงินตรงตามบิล
                 </Badge>
               </div>
             )}
@@ -1223,22 +1419,31 @@ export default function PosPage() {
               <DialogTitle onClose={() => setReceiptModalOpen(false)}>
                 ใบเสร็จรับเงิน / ใบกำกับภาษี (Receipt & Tax Invoice)
               </DialogTitle>
-              {/* Toggle 80mm vs A4 format */}
+              {/* Toggle 80mm vs 58mm vs A4 format */}
               <div className="flex rounded-lg bg-slate-100 p-0.5 text-xs font-semibold mr-8">
                 <button
                   type="button"
                   onClick={() => setPrintFormat("80MM")}
                   className={`rounded-md px-2.5 py-1 transition-all ${
-                    printFormat === "80MM" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600"
+                    printFormat === "80MM" ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600"
                   }`}
                 >
-                  สลิปความร้อน 80mm
+                  สลิป 80mm
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintFormat("58MM")}
+                  className={`rounded-md px-2.5 py-1 transition-all ${
+                    printFormat === "58MM" ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600"
+                  }`}
+                >
+                  สลิป 58mm
                 </button>
                 <button
                   type="button"
                   onClick={() => setPrintFormat("A4")}
                   className={`rounded-md px-2.5 py-1 transition-all ${
-                    printFormat === "A4" ? "bg-white text-slate-900 shadow-2xs" : "text-slate-600"
+                    printFormat === "A4" ? "bg-white text-slate-900 shadow-2xs font-bold" : "text-slate-600"
                   }`}
                 >
                   เต็มรูป A4 (ภ.พ.30)
@@ -1252,7 +1457,7 @@ export default function PosPage() {
               <div className="w-full flex justify-center">
                 {/* 1. 80MM Thermal Slip */}
                 {printFormat === "80MM" ? (
-                  <div className="thermal-80mm bg-white border border-slate-300 shadow-sm p-4 text-slate-900 text-xs font-mono space-y-2 rounded">
+                  <div id="thermal-print-area" className="thermal-80mm bg-white border border-slate-300 shadow-sm p-4 text-slate-900 text-xs font-mono space-y-2 rounded">
                     {/* Header */}
                     <div className="text-center space-y-0.5 border-b border-dashed border-slate-400 pb-2">
                       <div className="font-extrabold text-sm">MOBILESHOP HUB</div>
@@ -1341,9 +1546,104 @@ export default function PosPage() {
                       <div>อะไหล่เปลี่ยนรับประกัน 90 วันตามเงื่อนไข</div>
                     </div>
                   </div>
+                ) : printFormat === "58MM" ? (
+                  /* 1.1 58MM Thermal Slip */
+                  <div id="thermal-print-area" className="thermal-58mm bg-white border border-slate-300 shadow-sm p-2 text-slate-900 text-[10px] font-mono space-y-1.5 rounded max-w-[220px]">
+                    <div className="text-center space-y-0.5 border-b border-dashed border-slate-400 pb-1.5">
+                      <div className="font-extrabold text-xs">MOBILESHOP HUB</div>
+                      <div className="text-[9px] truncate">{lastSaleResult.sale.branch?.name}</div>
+                      <div className="text-[8px] leading-tight text-slate-600">{lastSaleResult.sale.branch?.address}</div>
+                      <div className="text-[8.5px]">
+                        โทร: {lastSaleResult.sale.branch?.phone}
+                      </div>
+                      <div className="text-[8.5px]">
+                        Tax: {lastSaleResult.sale.branch?.taxId}
+                      </div>
+                      <div className="text-[9px] font-bold mt-0.5">
+                        ใบเสร็จรับเงินอย่างย่อ
+                      </div>
+                    </div>
+
+                    <div className="text-[9px] space-y-0.5 border-b border-dashed border-slate-400 pb-1">
+                      <div className="flex justify-between">
+                        <span>เลขที่:</span>
+                        <span className="font-bold">{lastSaleResult.sale.invoiceNo}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>วันที่:</span>
+                        <span>{formatDateThai(lastSaleResult.sale.createdAt)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>แคชเชียร์:</span>
+                        <span>{lastSaleResult.sale.cashier?.name || "Cashier"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>ลูกค้า:</span>
+                        <span className="truncate max-w-[120px]">{lastSaleResult.sale.customer?.name || "ลูกค้าทั่วไป"}</span>
+                      </div>
+                    </div>
+
+                    <div className="border-b border-dashed border-slate-400 pb-1 text-[9px]">
+                      <div className="flex justify-between font-bold mb-0.5">
+                        <span>รายการ</span>
+                        <span>รวม</span>
+                      </div>
+                      {lastSaleResult.sale.items.map((item: any, idx: number) => (
+                        <div key={idx} className="space-y-0.5 my-1">
+                          <div className="flex justify-between leading-tight">
+                            <span className="truncate max-w-[140px] font-semibold">
+                              {item.product?.name}
+                            </span>
+                            <span>{formatTHB(item.subtotal)}</span>
+                          </div>
+                          <div className="flex justify-between text-[8.5px] text-slate-500">
+                            <span>
+                              {item.quantity}x @{formatTHB(item.unitPrice)}
+                            </span>
+                            {item.deviceImei && (
+                              <span>SN: ..{item.deviceImei.imei.slice(-4)}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="text-[9px] space-y-0.5 border-b border-dashed border-slate-400 pb-1">
+                      <div className="flex justify-between">
+                        <span>รวมสินค้า:</span>
+                        <span>{formatTHB(lastSaleResult.sale.totalAmount)}</span>
+                      </div>
+                      {lastSaleResult.sale.discount > 0 && (
+                        <div className="flex justify-between text-rose-600 font-bold">
+                          <span>ส่วนลด:</span>
+                          <span>-{formatTHB(lastSaleResult.sale.discount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-bold text-[11px] pt-0.5 border-t border-slate-200">
+                        <span>ยอดสุทธิ:</span>
+                        <span>{formatTHB(lastSaleResult.sale.netAmount)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[8px]">
+                        <span>(ก่อน VAT: {formatTHB(lastSaleResult.taxCalculation?.netBeforeVat)})</span>
+                        <span>(VAT 7%: {formatTHB(lastSaleResult.sale.vatAmount)})</span>
+                      </div>
+                    </div>
+
+                    <div className="text-[8.5px] space-y-0.5 border-b border-dashed border-slate-400 pb-1">
+                      <div className="flex justify-between">
+                        <span>ชำระโดย:</span>
+                        <span className="font-bold">{lastSaleResult.sale.paymentMethod}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-center text-[8px] text-slate-500 pt-0.5 space-y-0.5">
+                      <div>*** ขอบคุณที่ใช้บริการ ***</div>
+                      <div>เปลี่ยนตัวใหม่ใน 7 วัน (ตามเงื่อนไข)</div>
+                    </div>
+                  </div>
                 ) : (
                   /* 2. Full A4 Tax Invoice (ภ.พ.30) */
-                  <div className="invoice-a4 bg-white border border-slate-300 shadow-md p-6 text-slate-900 text-xs space-y-4 rounded w-full">
+                  <div id="thermal-print-area" className="invoice-a4 bg-white border border-slate-300 shadow-md p-6 text-slate-900 text-xs space-y-4 rounded w-full">
                     {/* Header */}
                     <div className="flex justify-between items-start border-b border-slate-300 pb-4">
                       <div>
@@ -1402,6 +1702,7 @@ export default function PosPage() {
                     </div>
 
                     {/* Items Table */}
+                    <div className="overflow-x-auto">
                     <table className="w-full text-xs border border-slate-200">
                       <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                         <tr>
@@ -1432,6 +1733,7 @@ export default function PosPage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
 
                     {/* Tax Breakdown Summary */}
                     <div className="flex justify-end pt-2">

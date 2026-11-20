@@ -34,6 +34,12 @@ export default function ReceptionIntakePage() {
   const [branchId, setBranchId] = useState(currentBranch.id);
   const [technicianId, setTechnicianId] = useState("");
 
+  useEffect(() => {
+    if (currentBranch.id && (!branchId || branchId === "")) {
+      setBranchId(currentBranch.id);
+    }
+  }, [currentBranch.id, branchId]);
+
   // Customer
   const [customerSearch, setCustomerSearch] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]);

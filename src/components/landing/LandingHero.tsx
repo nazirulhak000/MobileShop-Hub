@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 import {
@@ -25,6 +26,8 @@ import {
   Radio,
   Play,
   Pause,
+  CalendarDays,
+  UserRound,
 } from "lucide-react";
 
 interface HardwareComponent {
@@ -98,30 +101,12 @@ const HARDWARE_COMPONENTS: HardwareComponent[] = [
   },
   {
     id: 4,
-    key: "faceid",
-    nameTh: "เซนเซอร์ Face ID / True Tone",
-    nameEn: "TrueDepth & Dot Projector",
-    tag: "30,000 จุด IR",
-    icon: Eye,
-    hotspotPos: { x: 50, y: 14 },
-    readings: [
-      { label: "Dot Projector", value: "30,000 จุด IR", status: "verified" },
-      { label: "Flood Illuminator", value: "Active พร้อมใช้", status: "normal" },
-      { label: "ความเร็วสแกน", value: "< 0.28 วินาที", status: "ideal" },
-      { label: "Flex Cable", value: "ไม่ขาด ไม่ช็อต", status: "verified" },
-    ],
-    priceRange: "฿1,500 - ฿2,200",
-    repairTime: "45 นาที",
-    techDetail: "ซ่อมแซมเส้นพริ้นท์ Face ID เดิม ไม่ต้องเปลี่ยนยกชุด เซฟค่าใช้จ่ายและคงฟังก์ชันสแกนหน้าเดิม",
-  },
-  {
-    id: 5,
     key: "camera",
     nameTh: "ชุดกล้อง Dual/Triple Lens & OIS",
     nameEn: "Camera Module & Optical Stabilization",
     tag: "OIS 6-Axis",
     icon: Camera,
-    hotspotPos: { x: 32, y: 22 },
+    hotspotPos: { x: 32, y: 18 },
     readings: [
       { label: "ระบบกันสั่น", value: "OIS 6-Axis นิ่ง", status: "ideal" },
       { label: "Dual Pixel AF", value: "โฟกัสแม่นยำ 100%", status: "verified" },
@@ -131,6 +116,24 @@ const HARDWARE_COMPONENTS: HardwareComponent[] = [
     priceRange: "฿1,250 - ฿2,100",
     repairTime: "30 นาที",
     techDetail: "เปลี่ยนเฉพาะชิ้นเลนส์หรือโมดูลกล้องแท้ ทดสอบในกล่องแสงควบคุมความเข้ม ไม่มีจุดด่างดำหรือสั่นค้าง",
+  },
+  {
+    id: 5,
+    key: "charging",
+    nameTh: "พอร์ตชาร์จ USB-C / Lightning & IC คุมไฟ",
+    nameEn: "Charging Port Flex & Power Delivery IC",
+    tag: "PD 20W - 65W",
+    icon: Zap,
+    hotspotPos: { x: 50, y: 88 },
+    readings: [
+      { label: "กระแสชาร์จ", value: "9.0V / 2.22A Fast", status: "ideal" },
+      { label: "CC Line PD", value: "ตรวจจับโปรโตคอลครบ", status: "verified" },
+      { label: "ความต้านทานพอร์ต", value: "0.02Ω ปกติ", status: "normal" },
+      { label: "ไมค์สนทนาล่าง", value: "เสียงคมชัด ไม่มีนอยส์", status: "verified" },
+    ],
+    priceRange: "฿890 - ฿1,490",
+    repairTime: "25 นาที",
+    techDetail: "เปลี่ยนชุดแพรชาร์จแท้ตรงรุ่น ไมค์สนทนาและเสาสัญญาณครบ ไม่ต้องแปลงสายชาร์จ ชาร์จเร็วเต็มสปีด",
   },
 ];
 
@@ -165,6 +168,7 @@ export function LandingHero({
   const [isAutoScan, setIsAutoScan] = useState<boolean>(true);
   const [isScanningAnim, setIsScanningAnim] = useState<boolean>(false);
   const autoScanTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const animTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const activeComp =
     HARDWARE_COMPONENTS.find((c) => c.id === activeComponentId) || HARDWARE_COMPONENTS[0];
@@ -175,21 +179,42 @@ export function LandingHero({
 
     autoScanTimerRef.current = setInterval(() => {
       setIsScanningAnim(true);
-      setTimeout(() => {
+      if (animTimeoutRef.current) clearTimeout(animTimeoutRef.current);
+      animTimeoutRef.current = setTimeout(() => {
         setActiveComponentId((prev) => (prev >= 5 ? 1 : prev + 1));
         setIsScanningAnim(false);
       }, 350);
     }, 4500);
 
     return () => {
-      if (autoScanTimerRef.current) clearInterval(autoScanTimerRef.current);
+      if (autoScanTimerRef.current) {
+        clearInterval(autoScanTimerRef.current);
+        autoScanTimerRef.current = null;
+      }
+      if (animTimeoutRef.current) {
+        clearTimeout(animTimeoutRef.current);
+        animTimeoutRef.current = null;
+      }
     };
   }, [isAutoScan]);
 
+  // Clean up all timers on unmount
+  useEffect(() => {
+    return () => {
+      if (autoScanTimerRef.current) clearInterval(autoScanTimerRef.current);
+      if (animTimeoutRef.current) clearTimeout(animTimeoutRef.current);
+    };
+  }, []);
+
   const handleSelectComponent = (id: number) => {
     setIsAutoScan(false); // User interaction pauses auto scan
+    if (autoScanTimerRef.current) {
+      clearInterval(autoScanTimerRef.current);
+      autoScanTimerRef.current = null;
+    }
     setIsScanningAnim(true);
-    setTimeout(() => {
+    if (animTimeoutRef.current) clearTimeout(animTimeoutRef.current);
+    animTimeoutRef.current = setTimeout(() => {
       setActiveComponentId(id);
       setIsScanningAnim(false);
     }, 180);
@@ -218,13 +243,19 @@ export function LandingHero({
       <div
         className="absolute inset-0 opacity-15 pointer-events-none"
         style={{
-          backgroundImage: `radial-gradient(circle at 1px 1px, rgba(16, 185, 129, 0.4) 1px, transparent 0)`,
+          backgroundImage: `radial-gradient(circle at 1px 1px, ${theme.hex}66 1px, transparent 0)`,
           backgroundSize: "28px 28px",
         }}
       />
       {/* Ambient background glow */}
-      <div className="absolute -top-32 left-1/4 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/2 -right-20 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div
+        className="absolute -top-32 left-1/4 w-96 h-96 rounded-full blur-3xl pointer-events-none"
+        style={{ backgroundColor: `${theme.hex}1a` }}
+      />
+      <div
+        className="absolute top-1/2 -right-20 w-80 h-80 rounded-full blur-3xl pointer-events-none"
+        style={{ backgroundColor: `${theme.hex}14` }}
+      />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
@@ -287,8 +318,8 @@ export function LandingHero({
                             if (inputError) setInputError("");
                           }}
                           placeholder="วางลิงก์ติดตามจากใบรับเครื่อง"
-                          className={`w-full min-h-[44px] pl-10 pr-10 text-xs sm:text-sm font-mono rounded-xl border bg-slate-950 text-white placeholder-slate-500 tabular-nums focus:outline-none focus:ring-2 ${theme.accentRing} focus:border-emerald-500 transition-all duration-150 ${
-                            inputError ? "border-rose-400 focus:ring-rose-500" : "border-slate-700"
+                          className={`w-full min-h-[44px] pl-10 pr-10 text-xs sm:text-sm font-mono rounded-xl border bg-slate-950 text-white placeholder-slate-500 tabular-nums focus:outline-none focus:ring-2 ${theme.accentRing} transition-all duration-150 ${
+                            inputError ? "border-rose-400 focus:ring-rose-500" : "border-slate-700 focus:border-slate-500"
                           }`}
                           aria-label="ลิงก์ติดตามงานซ่อมจากใบรับเครื่อง"
                         />
@@ -335,6 +366,26 @@ export function LandingHero({
                   <p className="text-xs text-slate-400 text-left leading-relaxed">
                     ลิงก์ติดตามงานซ่อมจะพิมพ์เป็น QR Code บนใบรับเครื่องทุกใบ สแกนด้วยกล้องมือถือเพื่อดูสถานะได้ทันที
                   </p>
+
+                  <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-400">บริการสำหรับลูกค้า:</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={shopSlug ? `/s/${shopSlug}?tab=bookings` : "/customer"}
+                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-950/60 text-teal-300 border border-teal-800 hover:bg-teal-900/60 transition-colors font-medium"
+                      >
+                        <CalendarDays className="h-3.5 w-3.5 text-teal-400" />
+                        <span>จองคิวซ่อมล่วงหน้า</span>
+                      </Link>
+                      <Link
+                        href={shopSlug ? `/s/${shopSlug}` : "/customer"}
+                        className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800/90 text-slate-300 border border-slate-700/80 hover:bg-slate-700/90 hover:text-white transition-colors"
+                      >
+                        <UserRound className="h-3.5 w-3.5 text-slate-400" />
+                        <span>เข้าบัญชีลูกค้า</span>
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -342,7 +393,7 @@ export function LandingHero({
             {/* 3 Trust Badges Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
               <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-left">
-                <div className="h-9 w-9 rounded-lg bg-emerald-950/60 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-800/60">
+                <div className={`h-9 w-9 rounded-lg ${theme.darkBg}/60 ${theme.accentText} flex items-center justify-center shrink-0 border ${theme.darkBorder}/60`}>
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
@@ -353,7 +404,7 @@ export function LandingHero({
 
               <div className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-left">
                 <div className="h-9 w-9 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center shrink-0 border border-slate-700">
-                  <Clock className="h-5 w-5 text-emerald-400" />
+                  <Clock className={`h-5 w-5 ${theme.iconColor}`} />
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-white">ตรวจเช็ควิเคราะห์ฟรี</div>
@@ -381,11 +432,11 @@ export function LandingHero({
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div className="flex items-center gap-2.5">
                   <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${theme.badge.radarPing} opacity-75`} />
+                    <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${theme.badge.radarDot}`} />
                   </span>
                   <div>
-                    <span className="text-xs font-mono tracking-wider uppercase text-emerald-400 font-semibold flex items-center gap-1.5">
+                    <span className={`text-xs font-mono tracking-wider uppercase ${theme.accentText} font-semibold flex items-center gap-1.5`}>
                       <Activity className="h-3.5 w-3.5" />
                       Hardware Teardown & Diagnostic Scanner
                     </span>
@@ -398,20 +449,21 @@ export function LandingHero({
                 <button
                   type="button"
                   onClick={() => setIsAutoScan(!isAutoScan)}
-                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5 transition-colors border ${
+                  className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono font-medium flex items-center gap-1.5 transition-colors border ${
                     isAutoScan
-                      ? "bg-emerald-950 text-emerald-300 border-emerald-800"
+                      ? `${theme.darkBg} ${theme.badge.text} ${theme.darkBorder}`
                       : "bg-slate-800 text-slate-400 border-slate-700 hover:text-white"
                   }`}
                   title="เปิด/ปิดการสแกนอัตโนมัติ"
+                  aria-label={isAutoScan ? "หยุดการสแกนอัตโนมัติ" : "เริ่มการสแกนอัตโนมัติ"}
                 >
                   {isAutoScan ? (
                     <>
-                      <Pause className="h-3 w-3" /> Auto
+                      <Pause className="h-3.5 w-3.5" /> Auto Scan
                     </>
                   ) : (
                     <>
-                      <Play className="h-3 w-3" /> Auto
+                      <Play className="h-3.5 w-3.5" /> Auto Scan
                     </>
                   )}
                 </button>
@@ -443,7 +495,7 @@ export function LandingHero({
                               strokeWidth="0.5"
                               strokeDasharray="2,4"
                             />
-                            <circle cx="12" cy="12" r="1.5" fill="#10b981" />
+                            <circle cx="12" cy="12" r="1.5" fill={theme.hex} />
                           </pattern>
                         </defs>
                         <rect width="100%" height="100%" fill="url(#pcb-pattern)" />
@@ -451,7 +503,7 @@ export function LandingHero({
                         <path
                           d="M 30 50 L 80 50 L 110 80 L 110 160 L 150 200"
                           fill="none"
-                          stroke="#34d399"
+                          stroke={theme.hex}
                           strokeWidth="1.2"
                           strokeDasharray="4,4"
                         />
@@ -471,23 +523,24 @@ export function LandingHero({
 
                       {/* Radar Laser Scanning Sweep Line */}
                       <div
-                        className={`absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent z-10 opacity-75 shadow-[0_0_12px_#10b981] pointer-events-none transition-all duration-700 ${
+                        className={`absolute inset-x-0 h-1 bg-gradient-to-r from-transparent ${theme.radarSweep} to-transparent z-10 opacity-75 pointer-events-none transition-all duration-700 animate-radar-sweep ${
                           isScanningAnim ? "translate-y-64" : "translate-y-8"
                         }`}
                         style={{
-                          animation: "radarSweep 3s ease-in-out infinite alternate",
+                          boxShadow: `0 0 12px ${theme.radarShadow}`,
                         }}
                       />
 
                       {/* Internal Component Blueprint Silhouettes */}
-                      {/* Top Camera Module */}
+                      {/* Top Camera Module (id: 4) */}
                       <div
-                        onClick={() => handleSelectComponent(5)}
+                        onClick={() => handleSelectComponent(4)}
                         className={`absolute top-8 left-3 w-16 h-18 rounded-xl border p-1 cursor-pointer transition-all ${
-                          activeComponentId === 5
-                            ? "border-emerald-400 bg-emerald-950/40 shadow-[0_0_15px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400"
+                          activeComponentId === 4
+                            ? `${theme.darkBg}/50 ring-1 shadow-lg`
                             : "border-slate-700/80 bg-slate-900/60 hover:border-slate-500"
                         }`}
+                        style={activeComponentId === 4 ? { borderColor: theme.hex, boxShadow: `0 0 15px ${theme.hex}4d` } : undefined}
                       >
                         <div className="text-[9px] font-mono text-slate-400 flex items-center gap-1">
                           <Camera className="h-2.5 w-2.5 text-cyan-400" /> Triple OIS
@@ -499,56 +552,77 @@ export function LandingHero({
                         </div>
                       </div>
 
-                      {/* Logic Board BGA Chip */}
+                      {/* Logic Board BGA Chip (id: 3) */}
                       <div
                         onClick={() => handleSelectComponent(3)}
                         className={`absolute top-28 right-3 w-16 h-20 rounded-xl border p-1 cursor-pointer transition-all ${
                           activeComponentId === 3
-                            ? "border-emerald-400 bg-emerald-950/40 shadow-[0_0_15px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400"
+                            ? `${theme.darkBg}/50 ring-1 shadow-lg`
                             : "border-slate-700/80 bg-slate-900/60 hover:border-slate-500"
                         }`}
+                        style={activeComponentId === 3 ? { borderColor: theme.hex, boxShadow: `0 0 15px ${theme.hex}4d` } : undefined}
                       >
-                        <div className="text-[9px] font-mono text-emerald-400 flex items-center gap-1">
+                        <div className={`text-[9px] font-mono ${theme.accentText} flex items-center gap-1`}>
                           <Cpu className="h-2.5 w-2.5" /> BGA IC
                         </div>
                         <div className="mt-1 h-10 rounded bg-slate-950 border border-slate-800 p-1 flex items-center justify-center text-[9px] font-mono text-cyan-300">
-                          3.85V OK
+                          3.80V OK
                         </div>
                       </div>
 
-                      {/* High Capacity Battery Block */}
+                      {/* High Capacity Battery Block (id: 2) */}
                       <div
                         onClick={() => handleSelectComponent(2)}
-                        className={`absolute bottom-10 left-3 w-24 h-40 rounded-xl border p-1.5 cursor-pointer transition-all ${
+                        className={`absolute bottom-14 left-3 w-24 h-36 rounded-xl border p-1.5 cursor-pointer transition-all ${
                           activeComponentId === 2
-                            ? "border-emerald-400 bg-emerald-950/40 shadow-[0_0_15px_rgba(16,185,129,0.3)] ring-1 ring-emerald-400"
+                            ? `${theme.darkBg}/50 ring-1 shadow-lg`
                             : "border-slate-700/80 bg-slate-900/60 hover:border-slate-500"
                         }`}
+                        style={activeComponentId === 2 ? { borderColor: theme.hex, boxShadow: `0 0 15px ${theme.hex}4d` } : undefined}
                       >
                         <div className="flex items-center justify-between text-[9px] font-mono text-slate-300">
                           <span className="flex items-center gap-1">
-                            <BatteryCharging className="h-3 w-3 text-emerald-400" /> TIS มอก.
+                            <BatteryCharging className={`h-3 w-3 ${theme.accentText}`} /> TIS มอก.
                           </span>
-                          <span className="text-emerald-400 font-bold">100%</span>
+                          <span className={`${theme.accentText} font-bold`}>100%</span>
                         </div>
-                        <div className="h-24 mt-2 rounded bg-slate-950/90 border border-slate-800 p-1 flex flex-col justify-center items-center text-[8px] font-mono text-slate-400 space-y-1">
+                        <div className="h-20 mt-1.5 rounded bg-slate-950/90 border border-slate-800 p-1 flex flex-col justify-center items-center text-[8px] font-mono text-slate-400 space-y-1">
                           <div className="text-white font-semibold">4,450 mAh</div>
-                          <div className="text-emerald-400">0 Cycle New</div>
+                          <div className={theme.accentText}>0 Cycle New</div>
                           <div className="text-[8px] text-slate-500">Li-ion Polymer</div>
                         </div>
                       </div>
 
-                      {/* Display / True Tone Overlay */}
+                      {/* Bottom Charging Port & Power Delivery IC (id: 5) */}
+                      <div
+                        onClick={() => handleSelectComponent(5)}
+                        className={`absolute bottom-2.5 inset-x-6 h-8 rounded-xl border p-1 cursor-pointer transition-all flex items-center justify-between px-2.5 ${
+                          activeComponentId === 5
+                            ? `${theme.darkBg}/50 ring-1 shadow-lg`
+                            : "border-slate-700/80 bg-slate-900/60 hover:border-slate-500"
+                        }`}
+                        style={activeComponentId === 5 ? { borderColor: theme.hex, boxShadow: `0 0 15px ${theme.hex}4d` } : undefined}
+                      >
+                        <div className="flex items-center gap-1 text-[9px] font-mono text-slate-300">
+                          <Zap className={`h-2.5 w-2.5 ${theme.accentText}`} /> USB-C / PD
+                        </div>
+                        <div className="text-[8px] font-mono text-cyan-400">
+                          9.0V 2.22A
+                        </div>
+                      </div>
+
+                      {/* Display / True Tone Overlay (id: 1) */}
                       <div
                         onClick={() => handleSelectComponent(1)}
                         className={`absolute inset-x-2 top-2 bottom-2 rounded-[1.8rem] border border-dashed transition-all pointer-events-none ${
                           activeComponentId === 1
-                            ? "border-emerald-400/80 bg-emerald-500/5 shadow-[inset_0_0_20px_rgba(16,185,129,0.2)]"
+                            ? "border-opacity-80"
                             : "border-transparent"
                         }`}
+                        style={activeComponentId === 1 ? { borderColor: theme.hex, backgroundColor: `${theme.hex}0d`, boxShadow: `inset 0 0 20px ${theme.hex}33` } : undefined}
                       />
 
-                      {/* Hotspot Interactive Action Pins */}
+                      {/* Hotspot Interactive Action Pins (>= 44px touch targets) */}
                       {HARDWARE_COMPONENTS.map((comp) => {
                         const isSelected = comp.id === activeComponentId;
                         return (
@@ -559,7 +633,7 @@ export function LandingHero({
                               e.stopPropagation();
                               handleSelectComponent(comp.id);
                             }}
-                            className={`absolute -translate-x-1/2 -translate-y-1/2 z-30 transition-transform duration-200 focus:outline-none ${
+                            className={`absolute -translate-x-1/2 -translate-y-1/2 z-30 min-h-[44px] min-w-[44px] flex items-center justify-center p-2 transition-transform duration-200 focus:outline-none ${
                               isSelected ? "scale-125" : "hover:scale-110"
                             }`}
                             style={{
@@ -568,16 +642,20 @@ export function LandingHero({
                             }}
                             aria-label={`ดูผลตรวจเช็ค ${comp.nameTh}`}
                           >
-                            <span className="relative flex items-center justify-center">
+                            <span className="relative flex items-center justify-center pointer-events-none">
                               {isSelected && (
-                                <span className="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-emerald-400 opacity-60" />
+                                <span
+                                  className="animate-ping absolute inline-flex h-8 w-8 rounded-full opacity-60"
+                                  style={{ backgroundColor: theme.hex }}
+                                />
                               )}
                               <span
                                 className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-mono font-bold shadow-lg border ${
                                   isSelected
-                                    ? "bg-emerald-500 text-slate-950 border-white ring-2 ring-emerald-400"
-                                    : "bg-slate-900 text-white border-slate-600 hover:border-emerald-400"
+                                    ? "text-slate-950 border-white ring-2"
+                                    : "bg-slate-900 text-white border-slate-600 hover:border-slate-400"
                                 }`}
+                                style={isSelected ? { backgroundColor: theme.hex, borderColor: "#ffffff" } : undefined}
                               >
                                 {comp.id}
                               </span>
@@ -594,7 +672,7 @@ export function LandingHero({
                   {/* Active Component Title & Tag */}
                   <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold ${theme.darkBg} ${theme.badge.text} border ${theme.darkBorder} flex items-center gap-1`}>
                         <activeComp.icon className="h-3 w-3" />
                         จุดตรวจที่ [{activeComp.id}/5]
                       </span>
@@ -621,8 +699,8 @@ export function LandingHero({
                         <div className="text-[11px] text-slate-400 font-mono">
                           {reading.label}
                         </div>
-                        <div className="text-xs font-semibold font-mono text-emerald-400 tabular-nums flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />
+                        <div className={`text-xs font-semibold font-mono ${theme.accentText} tabular-nums flex items-center gap-1`}>
+                          <CheckCircle2 className={`h-3 w-3 ${theme.iconColor} shrink-0`} />
                           <span className="truncate">{reading.value}</span>
                         </div>
                       </div>
@@ -639,7 +717,7 @@ export function LandingHero({
                     </div>
                     <div className="text-right">
                       <div className="text-slate-400 text-[11px]">เวลาที่ใช้:</div>
-                      <div className="text-xs font-semibold font-mono text-emerald-400 tabular-nums">
+                      <div className={`text-xs font-semibold font-mono ${theme.accentText} tabular-nums`}>
                         {activeComp.repairTime}
                       </div>
                     </div>
@@ -650,20 +728,23 @@ export function LandingHero({
                     💡 {activeComp.techDetail}
                   </p>
 
-                  {/* Component Selector Pills */}
-                  <div className="flex items-center gap-1.5 pt-1 overflow-x-auto pb-1" role="tablist">
+                  {/* Component Selector Pills (>= 44px touch targets) */}
+                  <div className="flex items-center gap-2 pt-1 overflow-x-auto pb-1" role="tablist">
                     {HARDWARE_COMPONENTS.map((c) => (
                       <button
                         key={c.id}
                         type="button"
+                        role="tab"
+                        aria-selected={c.id === activeComponentId}
                         onClick={() => handleSelectComponent(c.id)}
-                        className={`min-h-[32px] px-2.5 py-1 rounded-lg text-xs font-mono transition-colors shrink-0 border ${
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-mono transition-colors shrink-0 border flex items-center justify-center gap-1.5 ${
                           c.id === activeComponentId
-                            ? "bg-emerald-600 text-white border-emerald-400 shadow-xs"
+                            ? theme.activePill
                             : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
                         }`}
                       >
-                        [{c.id}] {c.key}
+                        <span className="font-semibold">[{c.id}]</span>
+                        <span>{c.key}</span>
                       </button>
                     ))}
                   </div>
@@ -673,7 +754,7 @@ export function LandingHero({
               {/* Bottom 3 Live Counter Stats */}
               <div className="mt-4 pt-3 border-t border-slate-800 grid grid-cols-3 gap-2 text-center">
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
-                  <div className="text-base sm:text-lg font-semibold text-white font-mono tabular-nums text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
+                  <div className={`text-base sm:text-lg font-semibold text-white font-mono tabular-nums text-transparent bg-clip-text bg-gradient-to-r ${theme.gradientText}`}>
                     15,840+
                   </div>
                   <div className="text-[11px] text-slate-400 mt-0.5">เครื่องซ่อมสำเร็จ</div>
@@ -685,7 +766,7 @@ export function LandingHero({
                   <div className="text-[11px] text-slate-400 mt-0.5">ดัชนีความพึงพอใจ</div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
-                  <div className="text-base sm:text-lg font-semibold text-emerald-400 font-mono tabular-nums">
+                  <div className={`text-base sm:text-lg font-semibold ${theme.accentText} font-mono tabular-nums`}>
                     32 นาที
                   </div>
                   <div className="text-[11px] text-slate-400 mt-0.5">เวลาเฉลี่ยส่งมอบ</div>
@@ -696,23 +777,6 @@ export function LandingHero({
           )}
         </div>
       </div>
-
-      {/* Embedded CSS Keyframes for subtle radar sweep */}
-      <style jsx>{`
-        @keyframes radarSweep {
-          0% {
-            top: 5%;
-            opacity: 0.8;
-          }
-          50% {
-            opacity: 1;
-          }
-          100% {
-            top: 92%;
-            opacity: 0.8;
-          }
-        }
-      `}</style>
     </section>
   );
 }

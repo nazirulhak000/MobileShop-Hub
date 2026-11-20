@@ -55,12 +55,13 @@ export default function TrackSearchPortalPage() {
         <Card className="rounded-2xl border-slate-200/90 shadow-sm bg-white overflow-hidden">
           <CardContent className="p-6 space-y-4">
             <form onSubmit={handleSearch} className="space-y-3">
-              <label className="text-xs font-semibold text-slate-700 block">
+              <label htmlFor="track-code-input" className="text-xs font-semibold text-slate-700 block">
                 ลิงก์ติดตามงานซ่อม (จาก QR บนใบรับเครื่อง)
               </label>
               <div className="relative">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <Input
+                  id="track-code-input"
                   type="text"
                   placeholder="วางลิงก์ติดตามจากใบรับเครื่อง"
                   value={code}
@@ -69,11 +70,13 @@ export default function TrackSearchPortalPage() {
                     setError("");
                   }}
                   className="pl-10 h-11 text-sm font-mono font-semibold text-slate-900 border-slate-200 rounded-xl focus:border-teal-500 focus:ring-teal-100"
+                  aria-invalid={!!error}
+                  aria-describedby={error ? "track-error-msg" : undefined}
                 />
               </div>
 
               {error && (
-                <p className="text-xs font-medium text-rose-600">{error}</p>
+                <p id="track-error-msg" role="alert" className="text-xs font-medium text-rose-600">{error}</p>
               )}
 
               <Button

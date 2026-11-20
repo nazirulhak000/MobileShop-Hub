@@ -1,5 +1,5 @@
 import { AccessError, staffContext, staffTenantId } from "@/lib/staff-context";
-import { safeError, withStaff, reqEnum, reqInt, reqMoney, bangkokYYYYMM, addMonthsClamped, takeParam } from "@/lib/staff-http";
+import { readJson, safeError, withStaff, reqEnum, reqInt, reqMoney, bangkokYYYYMM, addMonthsClamped, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -65,9 +65,14 @@ async function handleGET(request: NextRequest) {
         }
       }
 
+      let parsedInspection = null;
+      if (c.inspectionData) {
+        try { parsedInspection = JSON.parse(c.inspectionData); } catch { parsedInspection = null; }
+      }
+
       return {
         ...c,
-        inspectionData: c.inspectionData ? JSON.parse(c.inspectionData) : null,
+        inspectionData: parsedInspection,
         monthlyInterestAmount,
         isOverdue,
         daysOverdue,
@@ -75,10 +80,8 @@ async function handleGET(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, contracts: formatted });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("GET /api/trade-in error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 
@@ -98,7 +101,7 @@ function normaliseModel(value: string): string {
 // POST /api/trade-in - Create new Buyback or Pawn contract
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const actor = staffContext();
 
     const type = reqEnum(body.type, "type", CONTRACT_TYPES);
@@ -275,14 +278,8 @@ async function handlePOST(request: NextRequest) {
       message: `สร้างสัญญาเลขที่ ${contract.contractNo} เรียบร้อยแล้ว`,
       contract,
     });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    // Unique violation (e.g. IMEI registered in a branch this user cannot see).
-    if (error?.code === "P2002") {
-      return NextResponse.json({ success: false, error: "IMEI หรือข้อมูลนี้มีอยู่ในระบบแล้ว" }, { status: 409 });
-    }
-    console.error("POST /api/trade-in error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

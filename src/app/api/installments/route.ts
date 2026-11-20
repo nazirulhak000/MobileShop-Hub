@@ -1,8 +1,10 @@
 import { AccessError, staffContext } from "@/lib/staff-context";
 import {
+  readJson,
   safeError,
   withStaff,
   reqId,
+  optId,
   reqInt,
   reqMoney,
   bangkokYYYYMM,
@@ -57,10 +59,8 @@ async function handleGET(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: contracts.map(formatContract) });
-  } catch (err: any) {
-    if (err instanceof AccessError) return safeError(err);
-    console.error("GET /api/installments error:");
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err) {
+    return safeError(err);
   }
 }
 
@@ -71,7 +71,7 @@ function reqText(value: unknown, field: string): string {
 
 async function handlePOST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
 
     const customerName = reqText(body.customerName, "ชื่อลูกค้า");
     const customerPhone = reqText(body.customerPhone, "เบอร์โทรศัพท์");
@@ -100,9 +100,26 @@ async function handlePOST(request: NextRequest) {
     const now = new Date();
     const yyyymm = bangkokYYYYMM(now);
     const actor = staffContext();
+    const branchId = optId(body.branchId, "branchId") ?? actor.branchId;
+    if (!actor.branchIds.includes(branchId)) throw new AccessError(404, "ไม่พบสาขาที่มีสิทธิ์");
 
     // Transactional creation with atomic counter
     const contract = await prisma.$transaction(async (tx) => {
+      let finalCustId = optId(body.customerId, "customerId");
+      if (!finalCustId) {
+        let existingCust = await tx.customer.findFirst({ where: { phone: customerPhone } });
+        if (!existingCust) {
+          existingCust = await tx.customer.create({
+            data: {
+              name: customerName,
+              phone: customerPhone,
+              nationalId: nationalId !== "-" ? nationalId : null,
+            },
+          });
+        }
+        finalCustId = existingCust.id;
+      }
+
       const counter = await tx.sequenceCounter.upsert({
         where: { id: `INS-${yyyymm}` },
         update: { current: { increment: 1 } },
@@ -123,6 +140,8 @@ async function handlePOST(request: NextRequest) {
       const created = await tx.installmentContract.create({
         data: {
           contractNo,
+          branchId,
+          customerId: finalCustId,
           customerName,
           customerPhone,
           nationalId,
@@ -164,16 +183,14 @@ async function handlePOST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: formatContract(contract) });
-  } catch (err: any) {
-    if (err instanceof AccessError) return safeError(err);
-    console.error("POST /api/installments error:");
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err) {
+    return safeError(err);
   }
 }
 
 async function handlePATCH(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const contractId = reqId(body.contractId, "contractId");
     // `monthIndex` accepted for backward compatibility: the old UI sent the 0-based row index.
     const rawMonth =
@@ -192,6 +209,10 @@ async function handlePATCH(request: NextRequest) {
       }
 
       const month = reqInt(rawMonth, "งวดที่", 1, contract.termMonths);
+      const earliestUnpaid = contract.payments.find((p) => UNPAID.includes(p.status));
+      if (earliestUnpaid && earliestUnpaid.monthNumber < month) {
+        throw new AccessError(400, `กรุณารับชำระงวดที่ ${earliestUnpaid.monthNumber} ก่อน (ยอดคงค้าง)`);
+      }
       const period = contract.payments.find((p) => p.monthNumber === month);
       if (!period) throw new AccessError(409, "งวดนี้ชำระแล้วหรือไม่พบ");
       const amount = reqMoney(body.amount, "จำนวนเงิน", 0.01);
@@ -214,6 +235,7 @@ async function handlePATCH(request: NextRequest) {
         orderBy: { monthNumber: "asc" },
       });
       const stillOverdue = nextPending ? nextPending.dueDate.getTime() < now.getTime() : false;
+      const overdueDays = stillOverdue && nextPending ? Math.max(0, Math.floor((now.getTime() - nextPending.dueDate.getTime()) / (1000 * 60 * 60 * 24))) : 0;
 
       const result = await tx.installmentContract.update({
         where: { id: contractId },
@@ -221,7 +243,7 @@ async function handlePATCH(request: NextRequest) {
           paidMonths: paidCount,
           status: nextPending ? (stillOverdue ? "OVERDUE" : "ACTIVE") : "COMPLETED",
           isOverdue: stillOverdue,
-          overdueDays: stillOverdue ? contract.overdueDays : 0,
+          overdueDays,
           nextDueDate: nextPending ? nextPending.dueDate : null,
         },
         include: { payments: { orderBy: { monthNumber: "asc" } } },
@@ -250,10 +272,8 @@ async function handlePATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: formatContract(updated) });
-  } catch (err: any) {
-    if (err instanceof AccessError) return safeError(err);
-    console.error("PATCH /api/installments error:");
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err) {
+    return safeError(err);
   }
 }
 

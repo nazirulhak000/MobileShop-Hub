@@ -99,16 +99,22 @@ export async function requestOtp(shopSlug: unknown, inputPhone: unknown, ctx?: O
 export async function verifyOtp(shopSlug: unknown, inputPhone: unknown, challengeId: unknown, code: unknown, displayName: unknown) {
   const shop = await resolveShop(shopSlug);
   const phone = normalizePhone(inputPhone);
-  if (typeof challengeId !== "string" || typeof code !== "string" || !/^\d{6}$/.test(code) || typeof displayName !== "string" || displayName.trim().length < 2 || displayName.length > 100) throw new AccessError(400, "กรุณาระบุชื่อและรหัสยืนยัน 6 หลัก");
+  const trimmedCode = typeof code === "string" ? code.trim() : "";
+  const trimmedChallengeId = typeof challengeId === "string" ? challengeId.trim() : "";
+  const trimmedName = typeof displayName === "string" ? displayName.trim() : "";
+
+  if (!trimmedChallengeId || !/^\d{6}$/.test(trimmedCode) || trimmedName.length < 2 || trimmedName.length > 100) {
+    throw new AccessError(400, "กรุณาระบุชื่อและรหัสยืนยัน 6 หลัก");
+  }
   await throttle(`otp-verify:${shop.id}:${phone}`, 15, 15 * 60_000);
-  const claimed = await db.otpChallenge.updateMany({ where: { id: challengeId, tenantId: shop.id, phone, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } }, data: { attempts: { increment: 1 } } });
+  const claimed = await db.otpChallenge.updateMany({ where: { id: trimmedChallengeId, tenantId: shop.id, phone, consumedAt: null, expiresAt: { gt: new Date() }, attempts: { lt: 5 } }, data: { attempts: { increment: 1 } } });
   if (!claimed.count) throw new AccessError(401, "รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่");
-  const challenge = await db.otpChallenge.findUniqueOrThrow({ where: { id: challengeId } });
-  if (!timingSafeEqual(Buffer.from(challenge.secretHash, "hex"), Buffer.from(otpHash(challengeId, shop.id, phone, code), "hex"))) throw new AccessError(401, "รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่");
+  const challenge = await db.otpChallenge.findUniqueOrThrow({ where: { id: trimmedChallengeId } });
+  if (!timingSafeEqual(Buffer.from(challenge.secretHash, "hex"), Buffer.from(otpHash(trimmedChallengeId, shop.id, phone, trimmedCode), "hex"))) throw new AccessError(401, "รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่");
   return db.$transaction(async tx => {
-    const used = await tx.otpChallenge.updateMany({ where: { id: challengeId, tenantId: shop.id, consumedAt: null, expiresAt: { gt: new Date() } }, data: { consumedAt: new Date() } });
+    const used = await tx.otpChallenge.updateMany({ where: { id: trimmedChallengeId, tenantId: shop.id, consumedAt: null, expiresAt: { gt: new Date() } }, data: { consumedAt: new Date() } });
     if (!used.count) throw new AccessError(401, "รหัสนี้ถูกใช้แล้ว กรุณาขอรหัสใหม่");
-    const account = await tx.customerAccount.upsert({ where: { tenantId_phone: { tenantId: shop.id, phone } }, create: { tenantId: shop.id, phone, displayName: displayName.trim() }, update: {} });
+    const account = await tx.customerAccount.upsert({ where: { tenantId_phone: { tenantId: shop.id, phone } }, create: { tenantId: shop.id, phone, displayName: trimmedName }, update: {} });
     if (account.status !== "ACTIVE") throw new AccessError(403, "บัญชีนี้ไม่พร้อมใช้งาน กรุณาติดต่อร้าน");
     // New CRM records may be linked immediately. Existing CRM needs staff-reviewed proof.
     const crm = await tx.customer.findMany({ where: { tenantId: shop.id }, select: { id: true, phone: true } });
@@ -133,6 +139,21 @@ export async function requireCustomer(shopSlug: unknown) {
   const token = (await cookies()).get(CUSTOMER_COOKIE)?.value;
   const session = token ? await db.customerSession.findUnique({ where: { tokenHash: hashToken(token) } }) : null;
   if (!session || session.tenantId !== shop.id || session.revokedAt || session.expiresAt <= new Date()) throw new AccessError(401, "กรุณาเข้าสู่บัญชีลูกค้าของร้านนี้");
+
+  // Sliding session refresh: if less than 2 days remain on a 7-day session, extend by another 7 days
+  const twoDaysMs = 2 * 86_400_000;
+  if (session.expiresAt.getTime() - Date.now() < twoDaysMs) {
+    const newExpiresAt = new Date(Date.now() + 7 * 86_400_000);
+    await db.customerSession.update({
+      where: { id: session.id },
+      data: { expiresAt: newExpiresAt },
+    }).catch(() => {});
+    try {
+      (await cookies()).set(CUSTOMER_COOKIE, token!, { ...cookieOptions, expires: newExpiresAt });
+    } catch {
+      // In Server Components where cookies are immutable during render, ignore
+    }
+  }
   const account = await db.customerAccount.findFirst({ where: { id: session.accountId, tenantId: shop.id, status: "ACTIVE" } });
   if (!account) throw new AccessError(401, "บัญชีไม่พร้อมใช้งาน");
   const link = await db.customerAccountLink.findFirst({ where: { accountId: account.id, tenantId: shop.id } });

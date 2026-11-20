@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { db } from "@/lib/db";
-import { reqId, withStaff } from "@/lib/staff-http";
+import { reqId, withStaff, readJson } from "@/lib/staff-http";
 import { staffContext, AccessError } from "@/lib/staff-context";
 import { retryTransaction } from "@/lib/bookings";
 export const GET = withStaff(async () => {
@@ -17,7 +17,9 @@ export const GET = withStaff(async () => {
   return NextResponse.json({ appointments: appointments.map(a => ({ ...a, slot: slots.find(s => s.id === a.slotId), account: accounts.find(c => c.id === a.accountId) })), policies, branches });
 }, ["ADMIN", "MANAGER", "CASHIER"]);
 export const POST = withStaff(async (request: NextRequest) => {
-  const actor = staffContext(); const body = await request.json();
+  const actor = staffContext();
+  const body = (await readJson<Record<string, any>>(request)) || {};
+  if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
   if (body.action === "policy") {
     if (!["ADMIN", "MANAGER"].includes(actor.role)) throw new AccessError(403, "ไม่มีสิทธิ์ตั้งค่าคิว");
     const branch = await prisma.branch.findFirst({ where: { id: reqId(body.branchId, "branchId") } });

@@ -1,5 +1,5 @@
 import { AccessError, staffContext } from "@/lib/staff-context";
-import { safeError, withStaff, reqId, reqInt, reqEnum, requireRole, addMonthsClamped } from "@/lib/staff-http";
+import { readJson, safeError, withStaff, reqId, reqInt, reqEnum, requireRole, addMonthsClamped } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -12,7 +12,7 @@ async function handlePATCH(
 ) {
   try {
     const id = reqId(params.id, "id");
-    const body = await request.json();
+    const body = await readJson(request);
     const action = reqEnum(body.action, "action", ACTIONS);
     const actor = staffContext();
     if (action === "FORFEIT") requireRole(actor.role, ["ADMIN", "MANAGER"]);
@@ -94,10 +94,8 @@ async function handlePATCH(
     });
 
     return NextResponse.json({ success: true, message: result.message, contract: result.updated });
-  } catch (error: any) {
-    if (error instanceof AccessError) return safeError(error);
-    console.error("PATCH /api/trade-in/[id] error:");
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error) {
+    return safeError(error);
   }
 }
 

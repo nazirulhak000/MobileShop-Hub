@@ -89,9 +89,10 @@ export default function SalesHistoryPage() {
   const [methodFilter, setMethodFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
-  // Selected Sale for 80mm Reprint
+  // Selected Sale for Reprint
   const [selectedSale, setSelectedSale] = useState<SaleLedgerItem | null>(null);
   const [reprintModalOpen, setReprintModalOpen] = useState(false);
+  const [reprintSlipWidth, setReprintSlipWidth] = useState<"80mm" | "58mm">("80mm");
 
   // Refund Modal
   const [refundModalOpen, setRefundModalOpen] = useState(false);
@@ -406,17 +407,43 @@ export default function SalesHistoryPage() {
         </div>
       </Card>
 
-      {/* REPRINT 80MM SLIP MODAL */}
+      {/* REPRINT SLIP MODAL (80mm & 58mm) */}
       <Dialog open={reprintModalOpen} onOpenChange={setReprintModalOpen}>
         <div className="max-w-md w-full">
           <DialogHeader>
             <DialogTitle onClose={() => setReprintModalOpen(false)}>
-              พิมพ์ใบเสร็จซ้ำ (Reprint 80mm Slip)
+              พิมพ์ใบเสร็จซ้ำ (Reprint Thermal Slip)
             </DialogTitle>
           </DialogHeader>
-          <DialogContent className="p-4 bg-slate-100 flex justify-center">
+          <DialogContent className="p-4 bg-slate-100 flex flex-col items-center">
+            {/* Format toggle */}
+            <div className="flex items-center gap-2 mb-3 bg-white p-1 rounded-xl border border-slate-300 text-xs no-print">
+              <button
+                type="button"
+                onClick={() => setReprintSlipWidth("80mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  reprintSlipWidth === "80mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 80 มม.
+              </button>
+              <button
+                type="button"
+                onClick={() => setReprintSlipWidth("58mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  reprintSlipWidth === "58mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 58 มม.
+              </button>
+            </div>
+
             {selectedSale && (
-              <div className="thermal-80mm bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900">
+              <div
+                className={`${
+                  reprintSlipWidth === "58mm" ? "thermal-58mm" : "thermal-80mm"
+                } bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900`}
+              >
                 <div className="text-center border-b border-dashed border-slate-400 pb-2">
                   <div className="font-extrabold text-sm">MOBILESHOP HUB</div>
                   <div className="text-[10px]">{currentBranch.name}</div>
@@ -467,9 +494,17 @@ export default function SalesHistoryPage() {
             <Button variant="outline" size="sm" onClick={() => setReprintModalOpen(false)}>
               ปิด
             </Button>
-            <Button size="sm" onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5">
+            <Button
+              size="sm"
+              onClick={() => {
+                document.body.classList.add("printing-slip");
+                window.print();
+                setTimeout(() => document.body.classList.remove("printing-slip"), 1000);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+            >
               <Printer className="h-4 w-4" />
-              <span>พิมพ์สลิป</span>
+              <span>พิมพ์สลิป ({reprintSlipWidth})</span>
             </Button>
           </DialogFooter>
         </div>

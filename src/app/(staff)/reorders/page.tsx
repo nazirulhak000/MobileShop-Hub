@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { DemoBanner } from "@/components/ui/DemoBanner";
 import {
   ShoppingCart,
@@ -54,10 +54,23 @@ export default function AutomaticReordersPage() {
     fetchInventory();
   }, [currentBranch.code]);
 
-  const lowStockItems = products.filter((p) => p.isLowStock);
+  const lowStockItems = useMemo(() => {
+    return products.filter((p: any) => {
+      if (!p.isLowStock) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return (
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q) ||
+          (p.brand || "").toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [products, search]);
 
   const handleGeneratePo = (selectedSupplier: string) => {
-    const itemsToOrder = lowStockItems.map((p) => ({
+    const itemsToOrder = lowStockItems.map((p: any) => ({
       name: p.name,
       code: p.code,
       quantity: orderQtys[p.id] || 5,
@@ -65,7 +78,7 @@ export default function AutomaticReordersPage() {
       total: (orderQtys[p.id] || 5) * p.costPrice,
     }));
 
-    const poTotal = itemsToOrder.reduce((sum, i) => sum + i.total, 0);
+    const poTotal = itemsToOrder.reduce((sum: number, i: any) => sum + i.total, 0);
 
     const po = {
       poNumber: `DRAFT-${Date.now().toString().slice(-6)}`,
@@ -139,7 +152,7 @@ export default function AutomaticReordersPage() {
               <div className="text-2xl font-bold text-blue-700 mt-0.5 font-mono">
                 {formatTHB(
                   lowStockItems.reduce(
-                    (sum, p) => sum + (orderQtys[p.id] || 5) * p.costPrice,
+                    (sum: number, p: any) => sum + (orderQtys[p.id] || 5) * p.costPrice,
                     0
                   )
                 )}
@@ -163,6 +176,21 @@ export default function AutomaticReordersPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Search Filter Bar */}
+      <Card className="border-slate-200">
+        <CardContent className="p-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="ค้นหาสินค้าที่ใกล้หมด (รหัส, ชื่อสินค้า, แบรนด์)..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 text-xs h-9 bg-slate-50 border-slate-200"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Table */}
       <Card className="border-slate-200 overflow-hidden">
@@ -193,7 +221,7 @@ export default function AutomaticReordersPage() {
                   </td>
                 </tr>
               ) : (
-                lowStockItems.map((item) => {
+                lowStockItems.map((item: any) => {
                   const qty = orderQtys[item.id] || 5;
                   const totalEst = qty * item.costPrice;
 
@@ -224,12 +252,13 @@ export default function AutomaticReordersPage() {
                           type="number"
                           min="1"
                           value={qty}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
                             setOrderQtys((prev) => ({
                               ...prev,
-                              [item.id]: Number(e.target.value),
-                            }))
-                          }
+                              [item.id]: isNaN(val) ? 1 : Math.max(1, val),
+                            }));
+                          }}
                           className="w-16 text-center font-bold text-xs p-1 rounded border border-blue-300 font-mono bg-white"
                         />
                       </td>
@@ -288,6 +317,7 @@ export default function AutomaticReordersPage() {
                   <div>เงื่อนไขชำระเงิน: เครดิต 30 วัน / วางบิลปลายเดือน</div>
                 </div>
 
+                <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border border-slate-200">
                   <thead className="bg-slate-100 text-[10px] uppercase font-bold text-slate-700">
                     <tr>
@@ -316,6 +346,7 @@ export default function AutomaticReordersPage() {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
 
                 <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs">
                   <div>

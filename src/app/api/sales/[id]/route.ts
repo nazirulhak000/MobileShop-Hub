@@ -6,8 +6,9 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 // GET /api/sales/[id] - one sale with its items (scoped to the actor's tenant/branches)
-async function handleGET(_request: NextRequest, { params }: { params: { id: string } }) {
-  const id = reqId(params.id);
+async function handleGET(_request: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
+  const resolved = await Promise.resolve(params);
+  const id = reqId(resolved?.id, "id");
   const sale = await prisma.sale.findFirst({
     where: { id },
     select: {

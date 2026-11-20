@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React from "react";
 import Link from "next/link";
@@ -7,6 +7,8 @@ import {
   Phone,
   MapPin,
   LogIn,
+  CalendarDays,
+  UserRound,
 } from "lucide-react";
 
 interface LandingFooterProps {
@@ -16,6 +18,8 @@ interface LandingFooterProps {
   address?: string | null;
   /** Real branch phone; hidden when missing. */
   phone?: string | null;
+  /** Tenant shop slug for tenant-scoped portal navigation. */
+  shopSlug?: string;
   /** Section anchors not rendered on this page (e.g. "#estimate"). */
   hiddenSections?: string[];
 }
@@ -24,6 +28,7 @@ export function LandingFooter({
   shopName,
   address,
   phone,
+  shopSlug,
   hiddenSections = [],
 }: LandingFooterProps = {}) {
   const shows = (href: string) => !hiddenSections.includes(href);
@@ -43,12 +48,14 @@ export function LandingFooter({
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
-              <a
-                href="#track-search"
-                className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-              >
-                ตรวจสอบสถานะงานซ่อมสด
-              </a>
+              {shows("#track-search") && (
+                <a
+                  href="#track-search"
+                  className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  ตรวจสอบสถานะงานซ่อมสด
+                </a>
+              )}
               {shows("#estimate") && (
               <a
                 href="#estimate"
@@ -57,6 +64,13 @@ export function LandingFooter({
                 ประเมินราคาก่อนซ่อม
               </a>
               )}
+              <Link
+                href={shopSlug ? `/s/${shopSlug}` : "/customer"}
+                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-medium text-xs shadow-2xs transition-colors duration-150 motion-reduce:transition-none inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+              >
+                <CalendarDays className="h-4 w-4 text-teal-200" />
+                <span>จองคิว / พอร์ทัลลูกค้า</span>
+              </Link>
               <Link
                 href="/dashboard"
                 className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs inline-flex items-center gap-1.5 transition-colors duration-150 motion-reduce:transition-none border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
@@ -74,7 +88,7 @@ export function LandingFooter({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           {/* Col 1: Brand & Bio (2 cols on lg) */}
           <div className="lg:col-span-2 space-y-4">
-            <Link href="/landing" className="flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg p-1">
+            <Link href={shopSlug ? `/store/${shopSlug}` : "/landing"} className="flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg p-1">
               <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-2xs">
                 <Smartphone className="h-5 w-5 text-emerald-400" />
               </div>
@@ -123,36 +137,24 @@ export function LandingFooter({
               บริการศูนย์ซ่อม
             </h4>
             <ul className="space-y-2.5 text-xs">
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  เปลี่ยนหน้าจอแท้ OLED และ True Tone
-                </a>
-              </li>
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  เปลี่ยนแบตเตอรี่มาตรฐาน มอก. พร้อมใบเซอร์รับรอง
-                </a>
-              </li>
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  ลอกกระจกจอแท้ OCA คงจอในเดิม
-                </a>
-              </li>
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  ตรวจวัดกระแสไฟและคลื่นความถี่ระดับแล็บ
-                </a>
-              </li>
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  ซ่อมก้นชาร์จ Type-C และเลนส์กล้อง
-                </a>
-              </li>
-              <li>
-                <a href="#services" className="hover:text-white transition-colors duration-150">
-                  ตรวจสอบประวัติเครื่องและเลข IMEI 15 หลัก
-                </a>
-              </li>
+              {[
+                "เปลี่ยนหน้าจอแท้ OLED และ True Tone",
+                "เปลี่ยนแบตเตอรี่มาตรฐาน มอก. พร้อมใบเซอร์รับรอง",
+                "ลอกกระจกจอแท้ OCA คงจอในเดิม",
+                "ตรวจวัดกระแสไฟและคลื่นความถี่ระดับแล็บ",
+                "ซ่อมก้นชาร์จ Type-C และเลนส์กล้อง",
+                "ตรวจสอบประวัติเครื่องและเลข IMEI 15 หลัก",
+              ].map((service, sIdx) => (
+                <li key={sIdx}>
+                  {shows("#services") ? (
+                    <a href="#services" className="hover:text-white transition-colors duration-150">
+                      {service}
+                    </a>
+                  ) : (
+                    <span className="text-slate-400 cursor-default">{service}</span>
+                  )}
+                </li>
+              ))}
             </ul>
           </div>
 
@@ -163,39 +165,57 @@ export function LandingFooter({
             </h4>
             <ul className="space-y-2.5 text-xs">
               <li>
-                <a href="#track-search" className="hover:text-white transition-colors duration-150">
-                  ติดตามงานซ่อมออนไลน์ (Live Tracking)
-                </a>
+                <Link href={shopSlug ? `/s/${shopSlug}` : "/customer"} className="text-teal-400 hover:text-white transition-colors duration-150 font-medium">
+                  พอร์ทัลลูกค้า (ดูประวัติซ่อม / ซื้อสินค้า)
+                </Link>
               </li>
+              <li>
+                <Link href={shopSlug ? `/s/${shopSlug}?tab=bookings` : "/customer"} className="text-teal-400 hover:text-white transition-colors duration-150 font-medium">
+                  จองคิวเข้ารับบริการล่วงหน้า
+                </Link>
+              </li>
+              {shows("#track-search") && (
+                <li>
+                  <a href="#track-search" className="hover:text-white transition-colors duration-150">
+                    ติดตามงานซ่อมออนไลน์ (Live Tracking)
+                  </a>
+                </li>
+              )}
               {shows("#estimate") && (
-              <li>
-                <a href="#estimate" className="hover:text-white transition-colors duration-150">
-                  คำนวณราคาซ่อมล่วงหน้า
-                </a>
-              </li>
+                <li>
+                  <a href="#estimate" className="hover:text-white transition-colors duration-150">
+                    คำนวณราคาซ่อมล่วงหน้า
+                  </a>
+                </li>
               )}
-              <li>
-                <a href="#inspection" className="hover:text-white transition-colors duration-150">
-                  มาตรฐานการตรวจเช็ค 10 จุด
-                </a>
-              </li>
+              {shows("#inspection") && (
+                <li>
+                  <a href="#inspection" className="hover:text-white transition-colors duration-150">
+                    มาตรฐานการตรวจเช็ค 10 จุด
+                  </a>
+                </li>
+              )}
               {shows("#reviews") && (
-              <li>
-                <a href="#reviews" className="hover:text-white transition-colors duration-150">
-                  ผลงานเปรียบเทียบก่อน-หลังซ่อม
-                </a>
-              </li>
+                <li>
+                  <a href="#reviews" className="hover:text-white transition-colors duration-150">
+                    ผลงานเปรียบเทียบก่อน-หลังซ่อม
+                  </a>
+                </li>
               )}
-              <li>
-                <a href="#location" className="hover:text-white transition-colors duration-150">
-                  แผนที่และการเดินทาง
-                </a>
-              </li>
-              <li>
-                <a href="#faq" className="hover:text-white transition-colors duration-150">
-                  คำถามที่พบบ่อย (FAQ)
-                </a>
-              </li>
+              {shows("#location") && (
+                <li>
+                  <a href="#location" className="hover:text-white transition-colors duration-150">
+                    แผนที่และการเดินทาง
+                  </a>
+                </li>
+              )}
+              {shows("#faq") && (
+                <li>
+                  <a href="#faq" className="hover:text-white transition-colors duration-150">
+                    คำถามที่พบบ่อย (FAQ)
+                  </a>
+                </li>
+              )}
             </ul>
           </div>
 

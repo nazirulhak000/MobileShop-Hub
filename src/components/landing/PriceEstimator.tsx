@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
@@ -19,6 +19,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { formatTHB } from "@/lib/utils";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface BrandOption {
   id: string;
@@ -166,12 +167,29 @@ const SYMPTOMS: SymptomOption[] = [
 export interface PriceEstimatorProps {
   phone?: string | null;
   lineId?: string | null;
+  themeColor?: StorefrontThemeColor;
+  customRates?: any[];
 }
 
-export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
+export function PriceEstimator({ phone, lineId, themeColor = "emerald", customRates }: PriceEstimatorProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+  const symptomsList = useMemo(() => {
+    if (customRates && Array.isArray(customRates) && customRates.length > 0) {
+      const valid = customRates.filter((item): item is SymptomOption => Boolean(item && typeof item === "object"));
+      if (valid.length > 0) return valid;
+    }
+    return SYMPTOMS;
+  }, [customRates]);
+
   const [selectedBrand, setSelectedBrand] = useState<string>("apple-iphone");
   const [selectedModel, setSelectedModel] = useState<string>("iPhone 14 Pro Max");
-  const [selectedSymptom, setSelectedSymptom] = useState<string>("screen");
+  const [selectedSymptom, setSelectedSymptom] = useState<string>(symptomsList[0]?.id || "screen");
+
+  useEffect(() => {
+    if (symptomsList.length > 0 && !symptomsList.some((s) => s.id === selectedSymptom)) {
+      setSelectedSymptom(symptomsList[0]?.id || "screen");
+    }
+  }, [symptomsList, selectedSymptom]);
 
   // Part Grade Interactive Switcher: 'genuine' (180 days) vs 'premium' (90 days)
   const [partGrade, setPartGrade] = useState<"genuine" | "premium">("genuine");
@@ -193,10 +211,11 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
   };
 
   const estimation = useMemo(() => {
-    const symptom = SYMPTOMS.find((s) => s.id === selectedSymptom) || SYMPTOMS[0];
+    const defaultSymptom = SYMPTOMS[0];
+    const symptom = symptomsList.find((s) => s && s.id === selectedSymptom) || symptomsList[0] || defaultSymptom;
 
     let multiplier = 1.0;
-    const lowerModel = selectedModel.toLowerCase();
+    const lowerModel = (selectedModel || "").toLowerCase();
     if (lowerModel.includes("15 pro") || lowerModel.includes("s24 ultra") || lowerModel.includes("fold") || lowerModel.includes("x100")) {
       multiplier = 1.7;
     } else if (lowerModel.includes("14 pro") || lowerModel.includes("s23 ultra") || lowerModel.includes("m4") || lowerModel.includes("13 ultra")) {
@@ -211,21 +230,23 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
     const gradeFactor = partGrade === "genuine" ? 1.0 : 0.78;
     const warrantyDays = partGrade === "genuine" ? 180 : 90;
 
-    const minPrice = Math.round((symptom.basePrice * multiplier * gradeFactor) / 50) * 50;
+    const rawBase = typeof symptom?.basePrice === "number" ? symptom.basePrice : Number(symptom?.basePrice);
+    const basePrice = !isNaN(rawBase) && rawBase > 0 ? rawBase : 1190;
+    const minPrice = Math.max(300, Math.round((basePrice * multiplier * gradeFactor) / 50) * 50);
     const maxPrice = minPrice + (minPrice > 2500 ? 500 : 350);
 
     return {
       minPrice,
       maxPrice,
-      timeEst: symptom.timeEst,
+      timeEst: String(symptom?.timeEst || "30 นาที"),
       warrantyDays,
-      symptomName: symptom.name,
+      symptomName: String(symptom?.name || "บริการซ่อมบำรุง"),
       gradeTitle:
         partGrade === "genuine"
           ? "อะไหล่แท้ศูนย์ 100% (รับประกัน 180 วัน)"
           : "เกรดพรีเมียม มอก. (รับประกัน 90 วัน)",
     };
-  }, [selectedModel, selectedSymptom, partGrade]);
+  }, [selectedModel, selectedSymptom, partGrade, symptomsList]);
 
   return (
     <section id="estimate" className="py-16 sm:py-24 bg-white relative border-b border-slate-200">
@@ -233,7 +254,7 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium border border-slate-200">
-            <Calculator className="h-3.5 w-3.5 text-emerald-600" />
+            <Calculator className={`h-3.5 w-3.5 ${theme.iconColor}`} />
             <span>ตัวอย่างระบบประเมินราคา (ราคาสาธิต)</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
@@ -300,37 +321,44 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
             {/* 3. Symptom Radio Grid */}
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-emerald-700" />
+                <Wrench className={`h-4 w-4 ${theme.iconColor}`} />
                 <span>3. เลือกอาการเสียและบริการที่ต้องการ</span>
               </label>
               <div className="space-y-2">
-                {SYMPTOMS.map((s) => (
-                  <label
-                    key={s.id}
-                    className={`min-h-[44px] flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-colors duration-150 motion-reduce:transition-none ${
-                      selectedSymptom === s.id
-                        ? "bg-white border-slate-900 shadow-xs"
-                        : "bg-white/70 border-slate-200 hover:bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="radio"
-                        name="symptom"
-                        checked={selectedSymptom === s.id}
-                        onChange={() => setSelectedSymptom(s.id)}
-                        className="text-emerald-600 focus:ring-emerald-600 h-4 w-4"
-                      />
-                      <div>
-                        <div className="text-xs font-semibold text-slate-900">{s.name}</div>
-                        <div className="text-xs text-emerald-800 font-medium mt-0.5">{s.badge}</div>
+                {symptomsList.map((s: any, idx: number) => {
+                  const sId = s?.id || `symptom-${idx}`;
+                  const sName = s?.name || "บริการซ่อมบำรุง";
+                  const sBadge = s?.badge || "มาตรฐานศูนย์";
+                  const sTime = s?.timeEst || "30 นาที";
+                  return (
+                    <label
+                      key={sId}
+                      className={`min-h-[44px] flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-colors duration-150 motion-reduce:transition-none ${
+                        selectedSymptom === sId
+                          ? "bg-white border-slate-900 shadow-xs ring-1 ring-slate-900/10"
+                          : "bg-white/70 border-slate-200 hover:bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="radio"
+                          name="symptom"
+                          checked={selectedSymptom === sId}
+                          onChange={() => setSelectedSymptom(sId)}
+                          style={{ accentColor: theme.hex }}
+                          className="h-4 w-4"
+                        />
+                        <div>
+                          <div className="text-xs font-semibold text-slate-900">{sName}</div>
+                          <div className={`text-xs ${theme.lightText} font-medium mt-0.5`}>{sBadge}</div>
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-xs font-mono text-slate-500 shrink-0 tabular-nums">
-                      {s.timeEst}
-                    </span>
-                  </label>
-                ))}
+                      <span className="text-xs font-mono text-slate-500 shrink-0 tabular-nums">
+                        {sTime}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -341,7 +369,7 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
               <div className="space-y-5">
                 {/* Device & Symptom Recap */}
                 <div className="pb-4 border-b border-slate-800">
-                  <span className="text-xs font-mono text-emerald-400 font-medium uppercase tracking-wider block">
+                  <span className={`text-xs font-mono ${theme.accentText} font-medium uppercase tracking-wider block`}>
                     ผลการประเมินราคาเบื้องต้น
                   </span>
                   <h3 className="text-lg font-semibold text-white mt-1">
@@ -359,7 +387,7 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
                     onClick={() => setPartGrade("genuine")}
                     className={`flex-1 py-2 px-3 rounded-xl text-xs font-medium transition-all ${
                       partGrade === "genuine"
-                        ? "bg-emerald-600 text-white shadow-xs"
+                        ? theme.activePill
                         : "text-slate-400 hover:text-white"
                     }`}
                   >
@@ -385,7 +413,7 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
                 <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700 space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-slate-400 font-medium">ราคาประเมินโดยประมาณ:</span>
-                    <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
+                    <span className={`text-[11px] font-mono ${theme.badge.text} ${theme.darkBg} px-2 py-0.5 rounded border ${theme.darkBorder}`}>
                       {partGrade === "genuine" ? "เกรดแท้ศูนย์" : "เกรด มอก. ประหยัด"}
                     </span>
                   </div>
@@ -401,18 +429,18 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700 space-y-1">
                     <div className="flex items-center gap-1.5 text-slate-400">
-                      <Clock className="h-4 w-4 text-emerald-400" />
+                      <Clock className={`h-4 w-4 ${theme.iconColor}`} />
                       <span>ระยะเวลาซ่อม:</span>
                     </div>
                     <div className="font-semibold text-sm text-white font-mono tabular-nums">
                       {estimation.timeEst}
                     </div>
-                    <div className="text-xs text-emerald-400">รอรับเครื่องที่ศูนย์ได้</div>
+                    <div className={`text-xs ${theme.accentText}`}>รอรับเครื่องที่ศูนย์ได้</div>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700 space-y-1">
                     <div className="flex items-center gap-1.5 text-slate-400">
-                      <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                      <ShieldCheck className={`h-4 w-4 ${theme.iconColor}`} />
                       <span>การรับประกัน:</span>
                     </div>
                     <div className="font-semibold text-sm text-white font-mono tabular-nums">
@@ -426,7 +454,7 @@ export function PriceEstimator({ phone, lineId }: PriceEstimatorProps = {}) {
                 <button
                   type="button"
                   onClick={() => setIsBookingOpen(true)}
-                  className="min-h-[48px] w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-semibold text-xs sm:text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                  className={`min-h-[48px] w-full py-3 px-4 ${theme.primaryButton} font-semibold text-xs sm:text-sm rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 ${theme.accentRing}`}
                 >
                   <BadgePercent className="h-4 w-4" />
                   <span>ดูตัวอย่างขั้นตอนจองคิวออนไลน์</span>

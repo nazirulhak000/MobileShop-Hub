@@ -130,6 +130,11 @@ export function PatternLockCanvas({
     if (readonly) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
@@ -163,14 +168,24 @@ export function PatternLockCanvas({
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent<HTMLCanvasElement>) => {
     if (readonly) return;
+    if (e) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
     setIsDrawing(false);
   };
 
   const handleClear = () => {
     setSelectedDots([]);
     onChange?.("");
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
   return (
@@ -202,6 +217,7 @@ export function PatternLockCanvas({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
           className={`touch-none ${readonly ? "cursor-default" : "cursor-crosshair"}`}
         />
       </div>
