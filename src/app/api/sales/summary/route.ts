@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { withStaff, bangkokDayRange, bangkokDateString } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
@@ -13,6 +13,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * Aggregates for one Bangkok day (daily takings / shift cash count). Uses groupBy/aggregate only.
  */
 async function handleGET(request: NextRequest) {
+  const actor = staffContext();
   const { searchParams } = new URL(request.url);
   const dayRaw = searchParams.get("day")?.trim() || "";
   if (dayRaw && !/^\d{4}-\d{2}-\d{2}$/.test(dayRaw)) throw new AccessError(400, "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)");
@@ -23,13 +24,19 @@ async function handleGET(request: NextRequest) {
   let branchId: string | undefined;
   if (branchKey) {
     const branch = await prisma.branch.findFirst({
-      where: { OR: [{ code: branchKey }, { id: branchKey }] },
+      where: {
+        tenantId: actor.tenantId,
+        OR: [{ code: branchKey }, { id: branchKey }],
+      },
       select: { id: true },
     });
-    if (!branch) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
+    if (!branch || !actor.branchIds.includes(branch.id)) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
     branchId = branch.id;
   }
-  const branchWhere: Prisma.SaleWhereInput = branchId ? { branchId } : {};
+  const branchWhere: Prisma.SaleWhereInput = {
+    tenantId: actor.tenantId,
+    ...(branchId ? { branchId } : { branchId: { in: actor.branchIds } }),
+  };
   const dayWhere: Prisma.SaleWhereInput = { ...branchWhere, createdAt: { gte: start, lt: end } };
 
   const [byMethod, voided, lateVoids, topRaw] = await Promise.all([

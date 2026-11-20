@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffContext } from "@/lib/staff-context";
 import { withStaff, bangkokDayRange, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
@@ -47,6 +47,7 @@ interface VoidInfo {
 
 // GET /api/sales?branch=HQ&from=YYYY-MM-DD&to=YYYY-MM-DD&status=COMPLETED|VOID&search=&take=
 async function handleGET(request: NextRequest) {
+  const actor = staffContext();
   const { searchParams } = new URL(request.url);
   const branchKey = searchParams.get("branch")?.trim() || "";
   const from = searchParams.get("from")?.trim() || "";
@@ -55,11 +56,21 @@ async function handleGET(request: NextRequest) {
   const search = (searchParams.get("search") || "").trim().slice(0, 100);
   const take = takeParam(searchParams.get("take"), 200, 500);
 
-  const where: Prisma.SaleWhereInput = {};
+  const where: Prisma.SaleWhereInput = {
+    tenantId: actor.tenantId,
+  };
   if (branchKey) {
-    const branch = await prisma.branch.findFirst({ where: { OR: [{ code: branchKey }, { id: branchKey }] }, select: { id: true } });
-    if (!branch) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
+    const branch = await prisma.branch.findFirst({
+      where: {
+        tenantId: actor.tenantId,
+        OR: [{ code: branchKey }, { id: branchKey }],
+      },
+      select: { id: true },
+    });
+    if (!branch || !actor.branchIds.includes(branch.id)) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
     where.branchId = branch.id;
+  } else {
+    where.branchId = { in: actor.branchIds };
   }
   if ((from && !DAY_RE.test(from)) || (to && !DAY_RE.test(to))) throw new AccessError(400, "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)");
   if (from || to) {

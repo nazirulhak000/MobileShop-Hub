@@ -22,7 +22,7 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
 
   const saleId = await prisma.$transaction(async (tx) => {
     const before = await tx.sale.findFirst({
-      where: { id },
+      where: { id, tenantId: actor.tenantId, branchId: { in: actor.branchIds } },
       select: {
         id: true,
         invoiceNo: true,
@@ -38,7 +38,10 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
     if (!before) throw new AccessError(404, "ไม่พบบิลขายนี้");
 
     // Conditional flip guards against double refunds (concurrent requests or already-voided bills).
-    const flipped = await tx.sale.updateMany({ where: { id, status: "COMPLETED" }, data: { status: "VOID" } });
+    const flipped = await tx.sale.updateMany({
+      where: { id, tenantId: actor.tenantId, status: "COMPLETED" },
+      data: { status: "VOID" },
+    });
     if (flipped.count !== 1) throw new AccessError(409, "บิลนี้ถูกยกเลิก/คืนเงินไปแล้ว");
 
     const imeis: Record<string, string> = {};
@@ -46,12 +49,17 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
       await tx.stockItem.upsert({
         where: { productId_branchId: { productId: item.productId, branchId: before.branchId } },
         update: { quantity: { increment: item.quantity } },
-        create: { productId: item.productId, branchId: before.branchId, quantity: item.quantity },
+        create: {
+          tenantId: actor.tenantId,
+          productId: item.productId,
+          branchId: before.branchId,
+          quantity: item.quantity,
+        },
       });
 
       if (item.deviceImeiId) {
         const released = await tx.deviceIMEI.updateMany({
-          where: { id: item.deviceImeiId, status: "SOLD" },
+          where: { id: item.deviceImeiId, tenantId: actor.tenantId, status: "SOLD" },
           data: { status: "IN_STOCK" },
         });
         if (released.count !== 1) {
@@ -59,7 +67,10 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
         }
         imeis[item.id] = item.deviceImei?.imei ?? "";
         // SaleItem.deviceImeiId is @unique: detach it so the device can be sold again (IMEI kept in the audit log).
-        await tx.saleItem.updateMany({ where: { id: item.id }, data: { deviceImeiId: null } });
+        await tx.saleItem.updateMany({
+          where: { id: item.id, tenantId: actor.tenantId },
+          data: { deviceImeiId: null },
+        });
       }
     }
 
