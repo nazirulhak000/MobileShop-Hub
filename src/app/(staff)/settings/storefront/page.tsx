@@ -2784,7 +2784,7 @@ export default function StorefrontCustomizerPage() {
                         <LandingFooter shopName={shopName} phone={config.phone} hiddenSections={hiddenSections} />
 
                         {config.showMobileQuickBar && (
-                          <div className="[&_.md\\:hidden]:!block [&>div]:!sticky [&>div]:!bottom-0 z-30 sticky bottom-0">
+                          <div className="z-30 sticky bottom-0">
                             <MobileQuickBar
                               phone={config.phone}
                               lineId={config.lineId}
