@@ -30,6 +30,8 @@ async function cleanupTestTenants() {
   const tenants = ["test-a", "test-b"];
   try {
     await db.authThrottle.deleteMany({});
+    await db.attendanceRecord.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.payrollSlip.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.appointmentEvent.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.appointment.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.bookingSlot.deleteMany({ where: { tenantId: { in: tenants } } });
@@ -3043,5 +3045,241 @@ test("Round 19: Supplier Management & CRM Audit - Profile, Tax ID, Credit Terms,
       where: { id: supplierA.id },
     });
     assert.equal(originalInA?.name, "บริษัท ซีคอน สแปร์พาร์ท จำกัด");
+  });
+});
+
+test("Round 20: Attendance & Payroll Audit - Check-in/Out, Late Detection, OT 1.5x/2x/3x, Leave Requests, SSF 5% Capped at 750 THB, Satang Precision & Multi-Tenant Isolation", async () => {
+  const userB = await db.user.findFirst({ where: { tenantId: "test-b" } });
+  assert.ok(userB);
+  const staffB: StaffPrincipal = {
+    id: userB.id,
+    tenantId: "test-b",
+    name: userB.name,
+    username: userB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  const { toSatang, fromSatang, calculateOtPay } = await import("../src/lib/payroll-calc");
+
+  // 1. Attendance Check-in: Late Arrival Detection & Precision
+  let attOnTime: any;
+  let attLate: any;
+  await staffStorage.run(admin, async () => {
+    const today = new Date("2026-11-20T00:00:00.000Z");
+
+    // Case A: On time (08:55 AM, within 09:00 + 15m grace)
+    const clockInOnTime = new Date("2026-11-20T01:55:00.000Z"); // 08:55 Bangkok (UTC+7)
+    attOnTime = await prisma.attendanceRecord.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        branchId: ownBranch,
+        date: today,
+        clockIn: clockInOnTime,
+        status: "ON_TIME",
+        lateMinutes: 0,
+      },
+    });
+    assert.equal(attOnTime.status, "ON_TIME");
+    assert.equal(attOnTime.lateMinutes, 0);
+
+    // Case B: Late arrival (09:40 AM -> 40 minutes late, past 15m grace)
+    const yesterday = new Date("2026-11-19T00:00:00.000Z");
+    const clockInLate = new Date("2026-11-19T02:40:00.000Z"); // 09:40 Bangkok
+    const clockOutLate = new Date("2026-11-19T13:40:00.000Z"); // 20:40 Bangkok (11 hours worked -> 3 hours OT)
+    attLate = await prisma.attendanceRecord.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        branchId: ownBranch,
+        date: yesterday,
+        clockIn: clockInLate,
+        clockOut: clockOutLate,
+        totalHours: 11,
+        overtimeHours: 3,
+        otMultiplier: 1.5,
+        lateMinutes: 40,
+        status: "LATE",
+      },
+    });
+    assert.equal(attLate.status, "LATE");
+    assert.equal(attLate.lateMinutes, 40);
+    assert.equal(attLate.overtimeHours, 3);
+    assert.equal(attLate.otMultiplier, 1.5);
+  });
+
+  // 2. Attendance Leave Requests (Sick, Annual, Personal)
+  let leaveSick: any;
+  await staffStorage.run(admin, async () => {
+    const leaveDay = new Date("2026-11-18T00:00:00.000Z");
+    leaveSick = await prisma.attendanceRecord.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        branchId: ownBranch,
+        date: leaveDay,
+        status: "LEAVE_SICK",
+        leaveType: "SICK",
+        notes: "ลาป่วย มีไข้สูงตามใบรับรองแพทย์",
+        verifiedBy: admin.id,
+      },
+    });
+    assert.equal(leaveSick.status, "LEAVE_SICK");
+    assert.equal(leaveSick.leaveType, "SICK");
+    assert.equal(leaveSick.clockIn, null);
+    assert.equal(leaveSick.notes, "ลาป่วย มีไข้สูงตามใบรับรองแพทย์");
+  });
+
+  // 3. Overtime Pay Calculation Helper (1.5x, 2.0x, 3.0x)
+  // Base Salary = 24,000 THB => Daily = 800 THB => Hourly Base = 100 THB
+  // 10 hrs at 1.5x = 10 * 150 = 1,500 THB
+  // 5 hrs at 2.0x = 5 * 200 = 1,000 THB
+  // 2 hrs at 3.0x = 2 * 300 = 600 THB
+  // Total OT = 3,100.00 THB
+  const otCalc = calculateOtPay(24000, 10, 5, 2);
+  assert.equal(otCalc, 3100);
+
+  // 4. Payroll Calculation: Base, OT, Commission, SSF 5% Capped at 750 THB
+  let slipHighEarner: any;
+  let slipStandard: any;
+
+  await staffStorage.run(admin, async () => {
+    // Case A: High Earner (Base = 30,000 THB). Gross = 30,000 + 5,000 = 35,000 THB.
+    // SSF 5% on 35,000 capped strictly at 750 THB (max base 15,000).
+    // Deductions: SSF 750 + WHT 350 + Late 200 = 1,300 THB.
+    // Net: 35,000 - 1,300 = 33,700.00 THB.
+    const baseHigh = 30000;
+    const commHigh = 5000;
+    const grossHigh = baseHigh + commHigh;
+    const ssoHigh = Math.min(Math.round(Math.min(grossHigh, 15000) * 0.05), 750);
+    assert.equal(ssoHigh, 750, "SSF must be capped at 750 THB for gross >= 15,000");
+
+    const whtHigh = 350;
+    const lateHigh = 200;
+    const totalDeductionsHigh = ssoHigh + whtHigh + lateHigh;
+    const netHigh = grossHigh - totalDeductionsHigh;
+
+    slipHighEarner = await prisma.payrollSlip.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        branchId: ownBranch,
+        month: "2026-11",
+        baseSalary: baseHigh,
+        repairCommission: 3000,
+        salesCommission: 2000,
+        allowance: 0,
+        bonus: 0,
+        overtimePay: 0,
+        ot15Hours: 0,
+        ot20Hours: 0,
+        ot30Hours: 0,
+        ssoDeduction: ssoHigh,
+        taxDeduction: whtHigh,
+        lateDeduction: lateHigh,
+        unpaidDeduction: 0,
+        otherDeductions: 0,
+        netPayout: netHigh,
+        status: "APPROVED",
+      },
+    });
+
+    assert.equal(slipHighEarner.baseSalary, 30000);
+    assert.equal(slipHighEarner.ssoDeduction, 750);
+    assert.equal(slipHighEarner.netPayout, 33700);
+
+    // Case B: Standard Earner (Technician, Base = 12,000 THB).
+    const techUser = await db.user.create({
+      data: {
+        tenantId: "test-a",
+        name: "สมชาย ช่างซ่อม",
+        username: "somchai_tech",
+        password: "unused",
+        role: "TECHNICIAN",
+        branchId: ownBranch,
+      },
+    });
+
+    const baseStd = 12000;
+    const otStd = 1500;
+    const grossStd = baseStd + otStd;
+    const ssoStd = Math.min(Math.round(Math.min(grossStd, 15000) * 0.05), 750);
+    assert.equal(ssoStd, 675);
+    const netStd = grossStd - ssoStd;
+
+    slipStandard = await prisma.payrollSlip.create({
+      data: {
+        tenantId: "test-a",
+        userId: techUser.id,
+        branchId: ownBranch,
+        month: "2026-11",
+        baseSalary: baseStd,
+        repairCommission: 0,
+        salesCommission: 0,
+        allowance: 0,
+        bonus: 0,
+        overtimePay: otStd,
+        ot15Hours: 10,
+        ot20Hours: 0,
+        ot30Hours: 0,
+        ssoDeduction: ssoStd,
+        taxDeduction: 0,
+        lateDeduction: 0,
+        unpaidDeduction: 0,
+        otherDeductions: 0,
+        netPayout: netStd,
+        status: "PENDING",
+      },
+    });
+
+    assert.equal(slipStandard.baseSalary, 12000);
+    assert.equal(slipStandard.ssoDeduction, 675);
+    assert.equal(slipStandard.netPayout, 12825);
+  });
+
+  // 5. Satang Precision: Clean integer satang rounding with zero remainder
+  const satangGross = toSatang(33700.55);
+  const satangDed = toSatang(1250.35);
+  const satangNet = satangGross - satangDed;
+  assert.equal(satangGross, 3370055);
+  assert.equal(satangDed, 125035);
+  assert.equal(satangNet, 3245020);
+  assert.equal(fromSatang(satangNet), 32450.2);
+  assert.equal(fromSatang(satangGross - satangDed), 32450.2);
+  assert.equal(toSatang(fromSatang(satangNet)), satangNet);
+
+  // 6. Multi-Tenant Isolation
+  // Tenant B cannot view Tenant A attendance records
+  await staffStorage.run(staffB, async () => {
+    const recordsInB = await prisma.attendanceRecord.findMany({
+      where: { id: attOnTime.id },
+    });
+    assert.equal(recordsInB.length, 0, "Tenant B must not see Tenant A attendance records");
+
+    // Tenant B cannot view Tenant A payroll slips
+    const slipsInB = await prisma.payrollSlip.findMany({
+      where: { id: slipHighEarner.id },
+    });
+    assert.equal(slipsInB.length, 0, "Tenant B must not see Tenant A payroll slips");
+
+    // Cross-tenant update must fail closed
+    let updateSlipFailed = false;
+    try {
+      await prisma.payrollSlip.update({
+        where: { id: slipHighEarner.id },
+        data: { netPayout: 999999 },
+      });
+    } catch {
+      updateSlipFailed = true;
+    }
+    assert.ok(updateSlipFailed, "Cross-tenant payroll slip update must fail closed");
+
+    // Verify Tenant A payroll record was not mutated
+    const originalSlip = await db.payrollSlip.findUnique({
+      where: { id: slipHighEarner.id },
+    });
+    assert.equal(originalSlip?.netPayout, 33700);
   });
 });

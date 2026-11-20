@@ -726,24 +726,30 @@ model ShopExpense {
 }
 
 model AttendanceRecord {
-  tenantId   String?
-  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  branchId   String
-  branch     Branch    @relation(fields: [branchId], references: [id])
-  date       DateTime
-  clockIn    DateTime?
-  clockOut   DateTime?
-  totalHours Float?
-  status     String    @default("ON_TIME") // ON_TIME, LATE, ABSENT, LEAVE
-  notes      String?
-  verifiedBy String?
-  createdAt  DateTime  @default(now())
+  tenantId      String?
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  branchId      String
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  date          DateTime
+  clockIn       DateTime?
+  clockOut      DateTime?
+  totalHours    Float?
+  overtimeHours Float?    @default(0)
+  otMultiplier  Float?    @default(1.5) // 1.5, 2.0, 3.0
+  lateMinutes   Int?      @default(0)
+  status        String    @default("ON_TIME") // ON_TIME, LATE, ABSENT, LEAVE, LEAVE_SICK, LEAVE_ANNUAL, LEAVE_PERSONAL
+  leaveType     String?   // SICK, ANNUAL, PERSONAL
+  notes         String?
+  verifiedBy    String?
+  createdAt     DateTime  @default(now())
 
   @@unique([userId, date])
   @@index([branchId, date])
+  @@index([tenantId])
+  @@index([tenantId, date])
 }
 
 model PayrollSlip {
@@ -759,9 +765,15 @@ model PayrollSlip {
   repairCommission Float     @default(0)
   salesCommission  Float     @default(0)
   allowance        Float     @default(0)
+  bonus            Float     @default(0)
   overtimePay      Float     @default(0)
+  ot15Hours        Float     @default(0)
+  ot20Hours        Float     @default(0)
+  ot30Hours        Float     @default(0)
   ssoDeduction     Float     @default(0)
   taxDeduction     Float     @default(0)
+  lateDeduction    Float     @default(0)
+  unpaidDeduction  Float     @default(0)
   otherDeductions  Float     @default(0)
   netPayout        Float
   status           String    @default("PENDING") // PENDING, APPROVED, PAID
@@ -771,6 +783,8 @@ model PayrollSlip {
 
   @@unique([userId, month])
   @@index([branchId, month])
+  @@index([tenantId])
+  @@index([tenantId, month])
 }
 
 // ==========================================
