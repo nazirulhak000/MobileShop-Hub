@@ -1,6 +1,5 @@
 datasource db {
-  provider  = "postgresql"
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -439,6 +438,10 @@ model RepairJob {
   laborFee          Float             @default(0)
   estimatedCost     Float             @default(0)
   totalCost         Float             @default(0)
+  depositAmount     Float             @default(0)
+  discount          Float             @default(0)
+  taxRate           Float             @default(0)
+  vatAmount         Float             @default(0)
   customerApproved  Boolean           @default(true)
   notes             String?
   photos            String? // JSON array string of photo URLs/Mocks

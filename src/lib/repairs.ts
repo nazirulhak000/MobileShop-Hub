@@ -1,8 +1,9 @@
 import prisma from "@/lib/prisma";
-import { staffContext } from "@/lib/staff-context";
+import { staffContext, staffStorage } from "@/lib/staff-context";
 import { bangkokYYYYMM } from "@/lib/staff-http";
 
 export interface RepairFilters {
+  tenantId?: string;
   status?: string;
   branchId?: string;
   technicianId?: string;
@@ -42,6 +43,10 @@ const repairJobListScalars = {
   laborFee: true,
   estimatedCost: true,
   totalCost: true,
+  depositAmount: true,
+  discount: true,
+  taxRate: true,
+  vatAmount: true,
   customerApproved: true,
   notes: true,
   photos: true,
@@ -52,6 +57,10 @@ const repairJobListScalars = {
 
 export async function getRepairJobs(filters: RepairFilters = {}) {
   const where: any = {};
+  const effectiveTenantId = filters.tenantId || staffStorage.getStore()?.tenantId;
+  if (effectiveTenantId) {
+    where.tenantId = effectiveTenantId;
+  }
 
   if (filters.status && filters.status !== "ALL") {
     where.status = filters.status;
@@ -109,12 +118,17 @@ export async function getRepairJobs(filters: RepairFilters = {}) {
 
 /** ADMIN/MANAGER or the assigned technician may see device unlock secrets. */
 function canSeeDeviceLock(technicianId: string | null): boolean {
-  const actor = staffContext();
-  if (actor.role === "ADMIN" || actor.role === "MANAGER") return true;
-  return actor.role === "TECHNICIAN" && technicianId === actor.id;
+  try {
+    const actor = staffContext();
+    if (actor.role === "ADMIN" || actor.role === "MANAGER") return true;
+    return actor.role === "TECHNICIAN" && technicianId === actor.id;
+  } catch {
+    return false;
+  }
 }
 
-export async function getRepairJobById(id: string) {
+export async function getRepairJobById(id: string, tenantId?: string) {
+  const effectiveTenantId = tenantId || staffStorage.getStore()?.tenantId;
   const job = await prisma.repairJob.findUnique({
     where: { id },
     include: {
@@ -131,7 +145,31 @@ export async function getRepairJobById(id: string) {
     },
   });
   if (!job) return null;
-  return redactDeviceLock(job);
+  if (effectiveTenantId && job.tenantId && job.tenantId !== effectiveTenantId) return null;
+
+  // Fetch status history events with actor names
+  const events = await prisma.repairStatusEvent.findMany({
+    where: { repairJobId: job.id, ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}) },
+    orderBy: { occurredAt: "asc" },
+  });
+  const actorIds = Array.from(new Set(events.map((e) => e.actorId).filter(Boolean)));
+  const actors =
+    actorIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, name: true, role: true },
+        })
+      : [];
+  const actorMap = new Map(actors.map((a) => [a.id, a]));
+  const statusEvents = events.map((e) => ({
+    ...e,
+    actor: actorMap.get(e.actorId) || { id: e.actorId, name: "เจ้าหน้าที่", role: "STAFF" },
+  }));
+
+  return {
+    ...redactDeviceLock(job),
+    statusEvents,
+  };
 }
 
 /**
@@ -145,9 +183,10 @@ export function redactDeviceLock<T extends { passcode: string | null; patternLoc
   return { ...job, passcode: null, patternLock: null, hasPasscode, hasPatternLock };
 }
 
-export async function getRepairJobByTrackingCode(trackingCode: string) {
+export async function getRepairJobByTrackingCode(trackingCode: string, tenantId?: string) {
+  const effectiveTenantId = tenantId || staffStorage.getStore()?.tenantId;
   return await prisma.repairJob.findFirst({
-    where: { trackingCode },
+    where: { trackingCode, ...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}) },
     include: {
       customer: true,
       branch: true,

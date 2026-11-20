@@ -32,8 +32,8 @@ const REPAIR_TRANSITIONS: Record<RepairStatusValue, readonly RepairStatusValue[]
   DIAGNOSING: ["WAITING_PARTS", "REPAIRING", "CANCELLED"],
   WAITING_PARTS: ["REPAIRING", "CANCELLED"],
   REPAIRING: ["WAITING_PARTS", "QC_PASSED", "READY", "CANCELLED"],
-  QC_PASSED: ["REPAIRING", "READY"],
-  READY: ["COMPLETED", "REPAIRING"],
+  QC_PASSED: ["REPAIRING", "READY", "CANCELLED"],
+  READY: ["COMPLETED", "REPAIRING", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
 };
@@ -73,7 +73,8 @@ async function handleGET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const job = await getRepairJobById(params.id);
+    const actor = staffContext();
+    const job = await getRepairJobById(params.id, actor.tenantId);
     if (!job) {
       return NextResponse.json(
         { success: false, error: "ไม่พบข้อมูลใบงานซ่อม" },
@@ -91,6 +92,7 @@ async function handlePATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const actor = staffContext();
     const body = await readJson(request);
     const {
       status: rawStatus,
@@ -99,15 +101,17 @@ async function handlePATCH(
       postCheckData,
       laborFee,
       estimatedCost,
+      depositAmount,
+      discount,
+      taxRate,
       warrantyDays,
       estimatedFinish,
       customerApproved,
       photos,
     } = body;
-    const actor = staffContext();
 
-    const existing = await prisma.repairJob.findUnique({
-      where: { id: params.id },
+    const existing = await prisma.repairJob.findFirst({
+      where: { id: params.id, tenantId: actor.tenantId },
       include: {
         partUsages: true,
       },
@@ -121,7 +125,9 @@ async function handlePATCH(
     }
 
     const updateData: any = {};
-    if (actor.role === "TECHNICIAN" && [technicianId, laborFee, estimatedCost, warrantyDays, customerApproved].some(value => value !== undefined)) throw new AccessError(403, "ช่างแก้ไขได้เฉพาะสถานะ ผลตรวจ และบันทึกงานที่รับผิดชอบ");
+    if (actor.role === "TECHNICIAN" && [technicianId, laborFee, estimatedCost, depositAmount, discount, taxRate, warrantyDays, customerApproved].some(value => value !== undefined)) {
+      throw new AccessError(403, "ช่างแก้ไขได้เฉพาะสถานะ ผลตรวจ และบันทึกงานที่รับผิดชอบ");
+    }
     if (customerApproved !== undefined) throw new AccessError(400, "กรุณาใช้ขั้นตอนยืนยันใบเสนอราคา");
 
     if (rawStatus !== undefined && !REPAIR_STATUSES.includes(rawStatus)) throw new AccessError(400, "สถานะงานซ่อมไม่ถูกต้อง");
@@ -186,6 +192,18 @@ async function handlePATCH(
       updateData.estimatedCost = reqMoney(estimatedCost, "estimatedCost");
     }
 
+    if (depositAmount !== undefined) {
+      updateData.depositAmount = reqMoney(depositAmount, "depositAmount");
+    }
+
+    if (discount !== undefined) {
+      updateData.discount = reqMoney(discount, "discount");
+    }
+
+    if (taxRate !== undefined) {
+      updateData.taxRate = Math.min(100, Math.max(0, Number(taxRate) || 0));
+    }
+
     if (warrantyDays !== undefined) {
       updateData.warrantyDays = reqInt(warrantyDays, "warrantyDays", 0, 3650);
     }
@@ -207,7 +225,7 @@ async function handlePATCH(
     const updatedJob = await prisma.$transaction(async tx => {
       // Optimistic guard: the status must still be what we validated against.
       const guard = await tx.repairJob.updateMany({
-        where: { id: existing.id, status: existing.status },
+        where: { id: existing.id, tenantId: actor.tenantId, status: existing.status },
         data: updateData,
       });
       if (guard.count !== 1) throw new AccessError(409, "สถานะงานซ่อมถูกเปลี่ยนโดยผู้ใช้อื่น กรุณาโหลดข้อมูลใหม่");
@@ -216,26 +234,36 @@ async function handlePATCH(
       if (statusChanged && status === "CANCELLED") {
         // Return every used part to the job's branch stock and drop the usages,
         // so a later part removal cannot return the same stock twice.
-        const usages = await tx.repairPartUsage.findMany({ where: { repairJobId: existing.id } });
+        const usages = await tx.repairPartUsage.findMany({ where: { repairJobId: existing.id, tenantId: actor.tenantId } });
         for (const usage of usages) {
           await tx.stockItem.upsert({
             where: { productId_branchId: { productId: usage.productId, branchId: existing.branchId } },
-            create: { productId: usage.productId, branchId: existing.branchId, quantity: usage.quantity },
+            create: { tenantId: actor.tenantId, productId: usage.productId, branchId: existing.branchId, quantity: usage.quantity },
             update: { quantity: { increment: usage.quantity } },
           });
         }
         if (usages.length > 0) {
-          await tx.repairPartUsage.deleteMany({ where: { repairJobId: existing.id } });
+          await tx.repairPartUsage.deleteMany({ where: { repairJobId: existing.id, tenantId: actor.tenantId } });
         }
         returnedParts = usages.map(u => ({ productId: u.productId, quantity: u.quantity }));
       }
 
-      // Recalculate totalCost from current labor fee + remaining parts.
-      if (laborFee !== undefined || returnedParts.length > 0) {
-        const remaining = await tx.repairPartUsage.findMany({ where: { repairJobId: existing.id } });
+      // Recalculate totalCost from current labor fee + remaining parts - discount + tax.
+      if (laborFee !== undefined || discount !== undefined || taxRate !== undefined || depositAmount !== undefined || returnedParts.length > 0) {
+        const remaining = await tx.repairPartUsage.findMany({ where: { repairJobId: existing.id, tenantId: actor.tenantId } });
         const partsTotal = remaining.reduce((sum, p) => sum + p.sellPrice * p.quantity, 0);
         const fee = updateData.laborFee ?? existing.laborFee;
-        await tx.repairJob.update({ where: { id: existing.id }, data: { totalCost: Math.round((fee + partsTotal) * 100) / 100 } });
+        const currentDiscount = updateData.discount ?? existing.discount;
+        const currentTaxRate = updateData.taxRate ?? existing.taxRate;
+        const subtotal = Math.max(0, fee + partsTotal);
+        const discounted = Math.max(0, subtotal - currentDiscount);
+        const vat = currentTaxRate > 0 ? Math.round(discounted * (currentTaxRate / 100) * 100) / 100 : 0;
+        const totalCost = Math.round((discounted + vat) * 100) / 100;
+
+        await tx.repairJob.update({
+          where: { id: existing.id },
+          data: { vatAmount: vat, totalCost },
+        });
       }
 
       const updated = await tx.repairJob.findUniqueOrThrow({
@@ -246,7 +274,7 @@ async function handlePATCH(
       if (statusChanged && status) {
         const label = RepairStatusMap[status].label;
         await tx.repairStatusEvent.create({ data: { tenantId: actor.tenantId, repairJobId: existing.id, status, customerMessage: CUSTOMER_MESSAGES[status], actorId: actor.id } });
-        const link = await tx.customerAccountLink.findFirst({ where: { customerId: existing.customerId } });
+        const link = await tx.customerAccountLink.findFirst({ where: { customerId: existing.customerId, tenantId: actor.tenantId } });
         if (link) await tx.customerNotification.create({ data: { tenantId: actor.tenantId, accountId: link.accountId, eventKey: `repair:${existing.id}:${updated.updatedAt.getTime()}`, message: `งานซ่อม ${existing.trackingCode} อัปเดตสถานะ: ${label}`, href: "repairs" } });
         await tx.auditLog.create({
           data: {
@@ -267,7 +295,31 @@ async function handlePATCH(
       return updated;
     });
 
-    return NextResponse.json({ success: true, data: redactDeviceLock(updatedJob) });
+    // Attach status history with actors
+    const events = await prisma.repairStatusEvent.findMany({
+      where: { repairJobId: updatedJob.id, tenantId: actor.tenantId },
+      orderBy: { occurredAt: "asc" },
+    });
+    const actorIds = Array.from(new Set(events.map(e => e.actorId).filter(Boolean)));
+    const actors = actorIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: actorIds } },
+          select: { id: true, name: true, role: true },
+        })
+      : [];
+    const actorMap = new Map(actors.map(a => [a.id, a]));
+    const statusEvents = events.map(e => ({
+      ...e,
+      actor: actorMap.get(e.actorId) || { id: e.actorId, name: "เจ้าหน้าที่", role: "STAFF" },
+    }));
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...redactDeviceLock(updatedJob),
+        statusEvents,
+      },
+    });
   } catch (error) {
     return safeError(error);
   }

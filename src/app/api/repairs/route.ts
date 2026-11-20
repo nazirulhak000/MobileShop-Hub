@@ -8,13 +8,14 @@ export const dynamic = "force-dynamic";
 
 async function handleGET(request: NextRequest) {
   try {
+    const actor = staffContext();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || undefined;
     const branchId = searchParams.get("branchId") || undefined;
     const technicianId = searchParams.get("technicianId") || undefined;
     const search = searchParams.get("search") || undefined;
 
-    const jobs = await getRepairJobs({ status, branchId, technicianId, search });
+    const jobs = await getRepairJobs({ tenantId: actor.tenantId, status, branchId, technicianId, search });
     return NextResponse.json({ success: true, data: jobs });
   } catch (error) {
     return safeError(error);
@@ -92,6 +93,8 @@ async function handlePOST(request: NextRequest) {
 
     const parsedLaborFee = Math.max(0, Number(laborFee) || 0);
     const parsedEstimatedCost = Math.max(0, Number(estimatedCost) || parsedLaborFee);
+    const parsedDeposit = Math.max(0, Number(body.depositAmount) || 0);
+    const parsedDiscount = Math.max(0, Number(body.discount) || 0);
     const parsedFinish = estimatedFinish && !isNaN(new Date(estimatedFinish).getTime()) ? new Date(estimatedFinish) : null;
 
     const newJob = await prisma.$transaction(async (tx) => {
@@ -153,6 +156,8 @@ async function handlePOST(request: NextRequest) {
           laborFee: parsedLaborFee,
           estimatedCost: parsedEstimatedCost,
           totalCost: parsedEstimatedCost,
+          depositAmount: parsedDeposit,
+          discount: parsedDiscount,
           customerApproved: true,
           estimatedFinish: parsedFinish,
           notes: notes || null,

@@ -42,14 +42,14 @@ const STATE_FLOW: {
   label: string;
   nextAllowed: RepairStatusType[];
 }[] = [
-  { status: "PENDING", label: "รอตรวจรับ", nextAllowed: ["DIAGNOSING", "CANCELLED"] },
+  { status: "PENDING", label: "รอตรวจรับ", nextAllowed: ["DIAGNOSING", "WAITING_PARTS", "REPAIRING", "CANCELLED"] },
   { status: "DIAGNOSING", label: "กำลังตรวจเช็ค", nextAllowed: ["WAITING_PARTS", "REPAIRING", "CANCELLED"] },
   { status: "WAITING_PARTS", label: "รออะไหล่", nextAllowed: ["REPAIRING", "CANCELLED"] },
-  { status: "REPAIRING", label: "กำลังซ่อม", nextAllowed: ["QC_PASSED", "WAITING_PARTS"] },
-  { status: "QC_PASSED", label: "ผ่าน QC แล้ว", nextAllowed: ["READY", "REPAIRING"] },
-  { status: "READY", label: "พร้อมส่งมอบ", nextAllowed: ["COMPLETED"] },
+  { status: "REPAIRING", label: "กำลังซ่อม", nextAllowed: ["QC_PASSED", "READY", "WAITING_PARTS", "CANCELLED"] },
+  { status: "QC_PASSED", label: "ผ่าน QC แล้ว", nextAllowed: ["READY", "REPAIRING", "CANCELLED"] },
+  { status: "READY", label: "พร้อมส่งมอบ", nextAllowed: ["COMPLETED", "REPAIRING", "CANCELLED"] },
   { status: "COMPLETED", label: "ส่งมอบเสร็จสิ้น", nextAllowed: [] },
-  { status: "CANCELLED", label: "ยกเลิกงานซ่อม", nextAllowed: ["PENDING"] },
+  { status: "CANCELLED", label: "ยกเลิกงานซ่อม", nextAllowed: [] },
 ];
 
 const POST_QC_ITEMS = [
@@ -84,6 +84,9 @@ export default function TechnicianWorkspacePage() {
   // Editable local state
   const [technicianNotes, setTechnicianNotes] = useState("");
   const [laborFeeInput, setLaborFeeInput] = useState<number>(0);
+  const [discountInput, setDiscountInput] = useState<number>(0);
+  const [depositInput, setDepositInput] = useState<number>(0);
+  const [taxRateInput, setTaxRateInput] = useState<number>(0);
   const [warrantyDaysInput, setWarrantyDaysInput] = useState<number>(90);
   const [postQcState, setPostQcState] = useState<Record<string, boolean>>({});
 
@@ -95,6 +98,9 @@ export default function TechnicianWorkspacePage() {
         setJob(json.data);
         setTechnicianNotes(json.data.notes || "");
         setLaborFeeInput(json.data.laborFee || 0);
+        setDiscountInput(json.data.discount || 0);
+        setDepositInput(json.data.depositAmount || 0);
+        setTaxRateInput(json.data.taxRate || 0);
         setWarrantyDaysInput(json.data.warrantyDays || 90);
 
         if (json.data.postCheckData) {
@@ -160,8 +166,11 @@ export default function TechnicianWorkspacePage() {
         postCheckData: postQcState,
       };
       if (!isTechnician) {
-        payload.laborFee = Number(laborFeeInput);
-        payload.warrantyDays = Number(warrantyDaysInput);
+        payload.laborFee = Number(laborFeeInput) || 0;
+        payload.discount = Number(discountInput) || 0;
+        payload.depositAmount = Number(depositInput) || 0;
+        payload.taxRate = Number(taxRateInput) || 0;
+        payload.warrantyDays = Number(warrantyDaysInput) || 90;
       }
 
       const res = await fetch(`/api/repairs/${job.id}`, {
@@ -277,9 +286,18 @@ export default function TechnicianWorkspacePage() {
       (sum: number, p: any) => sum + p.costPrice * p.quantity,
       0
     ) || 0;
-  const currentLaborFee = Number(laborFeeInput);
-  const totalCustomerCost = currentLaborFee + partsSellTotal;
-  const grossProfit = totalCustomerCost - partsCostTotal;
+  const currentLaborFee = Math.max(0, Number(laborFeeInput) || 0);
+  const currentDiscount = Math.max(0, Number(discountInput) || 0);
+  const currentDeposit = Math.max(0, Number(depositInput) || 0);
+  const currentTaxRate = Math.max(0, Number(taxRateInput) || 0);
+
+  const subtotal = Math.max(0, currentLaborFee + partsSellTotal);
+  const discountedSubtotal = Math.max(0, subtotal - currentDiscount);
+  const vatAmount = currentTaxRate > 0 ? Math.round(discountedSubtotal * (currentTaxRate / 100) * 100) / 100 : 0;
+  const totalCustomerCost = Math.round((discountedSubtotal + vatAmount) * 100) / 100;
+  const remainingBalance = Math.max(0, totalCustomerCost - currentDeposit);
+
+  const grossProfit = Math.max(0, totalCustomerCost - partsCostTotal);
   const partsGrossProfit = Math.max(0, partsSellTotal - partsCostTotal);
   // Technician Commission: 30% on labor fee + 10% on spare parts GP
   const techCommission = currentLaborFee * 0.30 + partsGrossProfit * 0.10;
@@ -405,6 +423,17 @@ export default function TechnicianWorkspacePage() {
                   </Button>
                 );
               })}
+              {currentUser.role === "ADMIN" && (job.status === "COMPLETED" || job.status === "CANCELLED") && (
+                <Button
+                  size="sm"
+                  disabled={updating}
+                  onClick={() => handleTransitionState("PENDING")}
+                  className="h-8 text-xs font-semibold gap-1.5 shadow-xs bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>&rarr; เปิดงานซ่อมใหม่ (Reopen)</span>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -524,13 +553,14 @@ export default function TechnicianWorkspacePage() {
                 </table>
               </div>
 
-              {/* Financial Live Calculation Summary Card */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <div>
-                  <div className="text-[11px] text-slate-500">
-                    ค่าแรงช่าง {isTechnician && <span className="text-amber-600 text-[10px]">(ช่างอ่านอย่างเดียว)</span>}
-                  </div>
-                  <div className="flex items-center gap-1 mt-0.5">
+              {/* Financial Calculation Inputs & Live Summary */}
+              <div className="space-y-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                {/* Inputs Row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-600 block mb-1">
+                      ค่าแรงช่าง (บาท) {isTechnician && <span className="text-amber-600 text-[10px]">(อ่านอย่างเดียว)</span>}
+                    </label>
                     <Input
                       type="number"
                       min="0"
@@ -540,41 +570,122 @@ export default function TechnicianWorkspacePage() {
                       className="text-xs font-bold h-8 font-mono bg-white disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-600 block mb-1">
+                      ส่วนลด (บาท) {isTechnician && <span className="text-amber-600 text-[10px]">(อ่านอย่างเดียว)</span>}
+                    </label>
+                    <Input
+                      type="number"
+                      min="0"
+                      disabled={isTechnician}
+                      value={discountInput}
+                      onChange={(e) => setDiscountInput(Number(e.target.value))}
+                      placeholder="0"
+                      className="text-xs font-bold h-8 font-mono bg-white disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-600 block mb-1">
+                      ภาษี VAT {isTechnician && <span className="text-amber-600 text-[10px]">(อ่านอย่างเดียว)</span>}
+                    </label>
+                    <select
+                      disabled={isTechnician}
+                      value={taxRateInput}
+                      onChange={(e) => setTaxRateInput(Number(e.target.value))}
+                      className="w-full text-xs font-bold h-8 font-mono rounded-lg border border-slate-300 bg-white px-2 disabled:bg-slate-100 disabled:text-slate-500"
+                    >
+                      <option value={0}>ไม่มี VAT (0%)</option>
+                      <option value={7}>VAT 7%</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-600 block mb-1">
+                      เงินมัดจำล่วงหน้า (บาท) {isTechnician && <span className="text-amber-600 text-[10px]">(อ่านอย่างเดียว)</span>}
+                    </label>
+                    <Input
+                      type="number"
+                      min="0"
+                      disabled={isTechnician}
+                      value={depositInput}
+                      onChange={(e) => setDepositInput(Number(e.target.value))}
+                      placeholder="0"
+                      className="text-xs font-bold h-8 font-mono bg-white disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <div className="text-[11px] text-slate-500">รวมราคาอะไหล่</div>
-                  <div className="text-sm font-bold text-slate-900 mt-1.5 font-mono">
-                    {formatTHB(partsSellTotal)}
+                {/* Calculation Breakdown Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2 border-t border-slate-200">
+                  <div className="bg-white p-2 rounded-lg border border-slate-200">
+                    <div className="text-[10px] text-slate-500">รวมค่าแรง + อะไหล่</div>
+                    <div className="text-xs font-bold text-slate-800 mt-1 font-mono">
+                      {formatTHB(subtotal)}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-2 rounded-lg border border-slate-200">
+                    <div className="text-[10px] text-slate-500">หักส่วนลด</div>
+                    <div className="text-xs font-bold text-rose-600 mt-1 font-mono">
+                      - {formatTHB(currentDiscount)}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-2 rounded-lg border border-slate-200">
+                    <div className="text-[10px] text-slate-500">VAT {currentTaxRate > 0 ? "7%" : "(0%)"}</div>
+                    <div className="text-xs font-bold text-slate-700 mt-1 font-mono">
+                      + {formatTHB(vatAmount)}
+                    </div>
+                  </div>
+
+                  <div className="bg-blue-50/70 p-2 rounded-lg border border-blue-200">
+                    <div className="text-[10px] font-bold text-blue-900">ยอดสุทธิรวมทั้งสิ้น</div>
+                    <div className="text-sm font-black text-blue-700 mt-0.5 font-mono">
+                      {formatTHB(totalCustomerCost)}
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50/70 p-2 rounded-lg border border-emerald-200">
+                    <div className="text-[10px] font-bold text-emerald-900">มัดจำชำระแล้ว</div>
+                    <div className="text-xs font-bold text-emerald-700 mt-1 font-mono">
+                      {formatTHB(currentDeposit)}
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-50 p-2 rounded-lg border border-amber-300">
+                    <div className="text-[10px] font-bold text-amber-900">คงเหลือชำระวันรับ</div>
+                    <div className="text-sm font-black text-amber-800 mt-0.5 font-mono">
+                      {formatTHB(remainingBalance)}
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <div className="text-[11px] text-slate-500">ยอดรวมเรียกเก็บลูกค้า</div>
-                  <div className="text-base font-black text-blue-700 mt-1 font-mono">
-                    {formatTHB(totalCustomerCost)}
+                {/* Profit & Commission Indicators */}
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <div className="bg-emerald-50/50 p-2 rounded-lg border border-emerald-200 flex items-center justify-between">
+                    <div className="text-[10px] font-bold text-emerald-800 uppercase flex items-center gap-1">
+                      <TrendingUp className="w-3 h-3 text-emerald-600" />
+                      กำไรขั้นต้นร้าน (GP)
+                    </div>
+                    <div className="text-xs font-black text-emerald-700 font-mono">
+                      {formatTHB(grossProfit)}
+                    </div>
                   </div>
-                </div>
 
-                <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
-                  <div className="text-[10px] font-bold text-emerald-800 uppercase flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-emerald-600" />
-                    กำไรขั้นต้น (GP)
+                  <div className="bg-indigo-50/50 p-2 rounded-lg border border-indigo-200 flex items-center justify-between">
+                    <div>
+                      <div className="text-[10px] font-bold text-indigo-800 uppercase flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-indigo-600" />
+                        คอมมิชชั่นช่าง
+                      </div>
+                      <div className="text-[9px] text-indigo-600">30% ค่าแรง + 10% GP อะไหล่</div>
+                    </div>
+                    <div className="text-xs font-black text-indigo-700 font-mono">
+                      {formatTHB(techCommission)}
+                    </div>
                   </div>
-                  <div className="text-base font-black text-emerald-700 mt-0.5 font-mono">
-                    {formatTHB(grossProfit)}
-                  </div>
-                </div>
-
-                <div className="bg-indigo-50 p-2 rounded-lg border border-indigo-200">
-                  <div className="text-[10px] font-bold text-indigo-800 uppercase flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-indigo-600" />
-                    คอมมิชชั่นช่าง
-                  </div>
-                  <div className="text-base font-black text-indigo-700 mt-0.5 font-mono">
-                    {formatTHB(techCommission)}
-                  </div>
-                  <div className="text-[9px] text-indigo-600">30% ค่าแรง + 10% GP อะไหล่</div>
                 </div>
               </div>
             </CardContent>
@@ -799,6 +910,59 @@ export default function TechnicianWorkspacePage() {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Repair Timeline & Status Audit Trail Card */}
+          <Card className="border-slate-200">
+            <CardHeader className="pb-3 border-b border-slate-100">
+              <CardTitle className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-blue-600" />
+                <span>ประวัติสถานะ & บันทึกติดตาม (Timeline)</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-3">
+              {job.statusEvents && job.statusEvents.length > 0 ? (
+                <div className="relative pl-4 border-l-2 border-blue-200 space-y-3.5 my-1">
+                  {job.statusEvents.map((evt: any) => {
+                    const evtInfo =
+                      RepairStatusMap[evt.status as RepairStatusType] || {
+                        label: evt.status,
+                        bg: "bg-slate-50",
+                        color: "text-slate-700",
+                        border: "border-slate-200",
+                      };
+                    return (
+                      <div key={evt.id} className="relative text-xs">
+                        <span className="absolute -left-[23px] top-1.5 h-2.5 w-2.5 rounded-full bg-blue-600 border-2 border-white ring-2 ring-blue-100" />
+                        <div className="flex items-center justify-between gap-1">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${evtInfo.bg} ${evtInfo.color} ${evtInfo.border}`}
+                          >
+                            {evtInfo.label}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {formatDateThai(evt.occurredAt)}
+                          </span>
+                        </div>
+                        <div className="text-slate-700 font-medium text-[11px] mt-1">
+                          {evt.customerMessage}
+                        </div>
+                        {evt.actor && (
+                          <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                            <User className="w-3 h-3 text-slate-400" />
+                            <span>โดย: {evt.actor.name} ({evt.actor.role})</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-400 italic text-center py-4">
+                  ยังไม่มีประวัติสถานะบันทึกไว้
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

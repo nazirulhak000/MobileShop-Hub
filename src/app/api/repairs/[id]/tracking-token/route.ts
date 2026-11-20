@@ -6,9 +6,9 @@ import { withStaff } from "@/lib/staff-http";
 import { AccessError, staffContext } from "@/lib/staff-context";
 import { hashToken } from "@/lib/staff-auth";
 export const POST = withStaff(async (_request: NextRequest, { params }: { params: { id: string } }) => {
-  const job = await prisma.repairJob.findUnique({ where: { id: params.id }, select: { id: true } });
-  if (!job) throw new AccessError(404, "ไม่พบงานซ่อม");
   const tenantId = staffContext().tenantId;
+  const job = await prisma.repairJob.findFirst({ where: { id: params.id, tenantId }, select: { id: true } });
+  if (!job) throw new AccessError(404, "ไม่พบงานซ่อม");
   const token = randomBytes(32).toString("hex");
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 90 * 86_400_000);
@@ -20,8 +20,9 @@ export const POST = withStaff(async (_request: NextRequest, { params }: { params
   return NextResponse.json({ token, expiresAt });
 }, ["ADMIN", "MANAGER", "CASHIER"]);
 export const DELETE = withStaff(async (_request: NextRequest, { params }: { params: { id: string } }) => {
-  const job = await prisma.repairJob.findUnique({ where: { id: params.id }, select: { id: true } });
+  const tenantId = staffContext().tenantId;
+  const job = await prisma.repairJob.findFirst({ where: { id: params.id, tenantId }, select: { id: true } });
   if (!job) throw new AccessError(404, "ไม่พบงานซ่อม");
-  await db.publicTrackingToken.updateMany({ where: { tenantId: staffContext().tenantId, repairJobId: job.id, revokedAt: null }, data: { revokedAt: new Date() } });
+  await db.publicTrackingToken.updateMany({ where: { tenantId, repairJobId: job.id, revokedAt: null }, data: { revokedAt: new Date() } });
   return NextResponse.json({ success: true });
 }, ["ADMIN", "MANAGER"]);

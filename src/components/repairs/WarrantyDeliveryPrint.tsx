@@ -231,6 +231,26 @@ export function WarrantyDeliveryPrint({
                     ))}
                   </tbody>
                   <tfoot>
+                    {job.discount > 0 && (
+                      <tr className="bg-slate-50 text-xs">
+                        <td colSpan={4} className="p-2 border border-slate-200 text-right text-slate-600">
+                          ส่วนลดพิเศษ (Discount):
+                        </td>
+                        <td className="p-2 border border-slate-200 text-right text-rose-600 font-medium">
+                          - {formatTHB(job.discount)}
+                        </td>
+                      </tr>
+                    )}
+                    {job.vatAmount > 0 && (
+                      <tr className="bg-slate-50 text-xs">
+                        <td colSpan={4} className="p-2 border border-slate-200 text-right text-slate-600">
+                          ภาษีมูลค่าเพิ่ม 7% (VAT):
+                        </td>
+                        <td className="p-2 border border-slate-200 text-right text-slate-800">
+                          + {formatTHB(job.vatAmount)}
+                        </td>
+                      </tr>
+                    )}
                     <tr className="bg-slate-50 font-bold">
                       <td colSpan={4} className="p-2 border border-slate-200 text-right">
                         ยอดรวมทั้งสิ้น (Total Net Amount):
@@ -239,6 +259,26 @@ export function WarrantyDeliveryPrint({
                         {formatTHB(job.totalCost || job.laborFee + partsTotal)}
                       </td>
                     </tr>
+                    {job.depositAmount > 0 && (
+                      <tr className="bg-emerald-50/50 text-xs font-semibold">
+                        <td colSpan={4} className="p-2 border border-slate-200 text-right text-emerald-800">
+                          หักเงินมัดจำชำระแล้ว (Deposit Paid):
+                        </td>
+                        <td className="p-2 border border-slate-200 text-right text-emerald-700">
+                          - {formatTHB(job.depositAmount)}
+                        </td>
+                      </tr>
+                    )}
+                    {job.depositAmount > 0 && (
+                      <tr className="bg-slate-100 font-bold">
+                        <td colSpan={4} className="p-2 border border-slate-200 text-right text-slate-900">
+                          คงเหลือชำระวันรับเครื่อง (Remaining Balance):
+                        </td>
+                        <td className="p-2 border border-slate-200 text-right text-sm text-emerald-800">
+                          {formatTHB(Math.max(0, (job.totalCost || job.laborFee + partsTotal) - job.depositAmount))}
+                        </td>
+                      </tr>
+                    )}
                   </tfoot>
                 </table>
               </div>
