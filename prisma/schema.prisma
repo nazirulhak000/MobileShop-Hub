@@ -245,6 +245,9 @@ model Tenant {
   expenses             ShopExpense[]
   attendanceRecords    AttendanceRecord[]
   payrollSlips         PayrollSlip[]
+  suppliers            Supplier[]
+  purchaseOrders       PurchaseOrder[]
+  purchaseOrderItems   PurchaseOrderItem[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 }
@@ -350,6 +353,7 @@ model Branch {
   expenses             ShopExpense[]
   attendance           AttendanceRecord[]
   payrollSlips         PayrollSlip[]
+  purchaseOrders       PurchaseOrder[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 
@@ -480,6 +484,7 @@ model Product {
   imeis            DeviceIMEI[]
   partUsages       RepairPartUsage[]
   saleItems        SaleItem[]
+  purchaseOrderItems PurchaseOrderItem[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -790,4 +795,84 @@ model AuditLog {
 
   @@index([module, createdAt])
   @@index([tenantId, createdAt])
+}
+
+// ==========================================
+// 10. PURCHASING & SUPPLIER MANAGEMENT
+// ==========================================
+
+model Supplier {
+  tenantId       String?
+  tenant         Tenant?         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id             String          @id @default(cuid())
+  name           String
+  contactPerson  String?
+  phone          String
+  lineId         String?
+  address        String?
+  taxId          String?
+  creditTerms    String?         @default("เครดิต 30 วัน")
+  categories     String?         // comma-separated or JSON string
+  active         Boolean         @default(true)
+  purchaseOrders PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model PurchaseOrder {
+  tenantId      String?
+  tenant        Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id            String              @id @default(cuid())
+  poNumber      String
+  branchId      String
+  branch        Branch              @relation(fields: [branchId], references: [id])
+  supplierId    String?
+  supplier      Supplier?           @relation(fields: [supplierId], references: [id])
+  supplierName  String
+  supplierPhone String?
+  status        String              @default("DRAFT") // DRAFT, ORDERED, RECEIVED, CANCELLED
+  paymentStatus String              @default("PENDING") // PENDING, PAID
+  subtotal      Float               @default(0)
+  taxRate       Float               @default(7)
+  vatAmount     Float               @default(0)
+  totalAmount   Float               @default(0)
+  notes         String?
+  orderedAt     DateTime?
+  receivedAt    DateTime?
+  items         PurchaseOrderItem[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([tenantId, poNumber])
+  @@index([tenantId])
+  @@index([branchId, status])
+  @@index([supplierId])
+  @@index([createdAt])
+}
+
+model PurchaseOrderItem {
+  tenantId        String?
+  tenant          Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  id              String         @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?       @relation(fields: [productId], references: [id])
+  productCode     String
+  productName     String
+  category        String?        @default("SPARE_PART") // DEVICE, ACCESSORY, SPARE_PART
+  quantity        Int            @default(1)
+  receivedQty     Int            @default(0)
+  unitCost        Float          @default(0)
+  totalCost       Float          @default(0)
+  imeis           String?        // JSON array string of registered device IMEIs
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+  @@index([tenantId])
 }

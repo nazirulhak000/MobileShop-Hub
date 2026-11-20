@@ -37,6 +37,9 @@ async function cleanupTestTenants() {
     await db.sale.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.deviceIMEI.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.tradeInContract.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.purchaseOrderItem.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.purchaseOrder.deleteMany({ where: { tenantId: { in: tenants } } });
+    await db.supplier.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.stockItem.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.product.deleteMany({ where: { tenantId: { in: tenants } } });
     await db.otpChallenge.deleteMany({ where: { tenantId: { in: tenants } } });
@@ -1603,3 +1606,353 @@ test("Round 13: Shift Management, Daily Takings, Sales History & Refunds Audit -
     assert.equal(foreignIMEIs.length, 0);
   });
 });
+
+test("Round 14: Purchasing, Purchase Orders, Receiving Shipment, Reorder Alerts & Multi-Tenant Isolation", async () => {
+  // 1. Create Suppliers in Tenant A and Tenant B
+  let supA: any;
+  let supB: any;
+
+  await staffStorage.run(admin, async () => {
+    supA = await prisma.supplier.create({
+      data: {
+        tenantId: "test-a",
+        name: "ซีคอน พาร์ท เซ็นเตอร์",
+        contactPerson: "คุณกิตติศักดิ์",
+        phone: "02-721-8899",
+        creditTerms: "เครดิต 30 วัน",
+        categories: "หน้าจอแท้, แบตเตอรี่ มอก.",
+      },
+    });
+    assert.equal(supA.name, "ซีคอน พาร์ท เซ็นเตอร์");
+  });
+
+  const adminB = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", username: "admin" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminB.id,
+    tenantId: "test-b",
+    name: adminB.name,
+    username: adminB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  await staffStorage.run(adminBPrincipal, async () => {
+    supB = await prisma.supplier.create({
+      data: {
+        tenantId: "test-b",
+        name: "เสือป่า เทรดดิ้ง",
+        contactPerson: "เฮียชัย",
+        phone: "081-998-7766",
+        creditTerms: "เงินสด",
+      },
+    });
+
+    // Multi-tenant check: Tenant B cannot see Tenant A's supplier
+    const supFromB = await prisma.supplier.findMany({ where: { id: supA.id } });
+    assert.equal(supFromB.length, 0);
+  });
+
+  // 2. PO Creation with Sequential Numbering & 7% VAT Calculation
+  let createdPo: any;
+  let testPhoneProduct: any;
+  let testPartProduct: any;
+
+  await staffStorage.run(admin, async () => {
+    testPhoneProduct = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: "DEV-IP15P-128",
+        name: "iPhone 15 Pro 128GB",
+        category: "DEVICE",
+        costPrice: 28000,
+        sellPrice: 35900,
+        minStock: 2,
+      },
+    });
+
+    testPartProduct = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: "PART-BAT-IP14",
+        name: "แบตเตอรี่ iPhone 14 มอก.",
+        category: "SPARE_PART",
+        costPrice: 850,
+        sellPrice: 1500,
+        minStock: 5,
+      },
+    });
+
+    // Initialize initial stock for part to 2 (below minStock 5 -> Low Stock!)
+    await prisma.stockItem.create({
+      data: {
+        tenantId: "test-a",
+        branchId: ownBranch,
+        productId: testPartProduct.id,
+        quantity: 2,
+      },
+    });
+
+    // Initial stock for device is 0
+    await prisma.stockItem.create({
+      data: {
+        tenantId: "test-a",
+        branchId: ownBranch,
+        productId: testPhoneProduct.id,
+        quantity: 0,
+      },
+    });
+
+    // Subtotal: (2 phones * 27,500) + (10 batteries * 800) = 55,000 + 8,000 = 63,000
+    const qtyPhone = 2;
+    const costPhone = 27500;
+    const qtyPart = 10;
+    const costPart = 800;
+
+    const subtotal = qtyPhone * costPhone + qtyPart * costPart; // 63000
+    const vatAmount = Math.round(subtotal * 0.07 * 100) / 100; // 4410
+    const totalAmount = Math.round((subtotal + vatAmount) * 100) / 100; // 67410
+
+    const yyyymm = bangkokYYYYMM();
+    const counter = await prisma.sequenceCounter.upsert({
+      where: { id: `PO-test-a-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `PO-test-a-${yyyymm}`, current: 1, tenantId: "test-a" },
+    });
+    const poNumber = `PO-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
+
+    createdPo = await prisma.purchaseOrder.create({
+      data: {
+        tenantId: "test-a",
+        poNumber,
+        branchId: ownBranch,
+        supplierId: supA.id,
+        supplierName: supA.name,
+        supplierPhone: supA.phone,
+        status: "ORDERED",
+        paymentStatus: "PENDING",
+        subtotal,
+        taxRate: 7,
+        vatAmount,
+        totalAmount,
+        orderedAt: new Date(),
+        items: {
+          create: [
+            {
+              tenantId: "test-a",
+              productId: testPhoneProduct.id,
+              productCode: testPhoneProduct.code,
+              productName: testPhoneProduct.name,
+              category: "DEVICE",
+              quantity: qtyPhone,
+              receivedQty: 0,
+              unitCost: costPhone,
+              totalCost: qtyPhone * costPhone,
+            },
+            {
+              tenantId: "test-a",
+              productId: testPartProduct.id,
+              productCode: testPartProduct.code,
+              productName: testPartProduct.name,
+              category: "SPARE_PART",
+              quantity: qtyPart,
+              receivedQty: 0,
+              unitCost: costPart,
+              totalCost: qtyPart * costPart,
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    assert.equal(createdPo.subtotal, 63000);
+    assert.equal(createdPo.vatAmount, 4410);
+    assert.equal(createdPo.totalAmount, 67410);
+    assert.match(createdPo.poNumber, /^PO-\d{6}-\d{4}$/);
+    assert.equal(createdPo.items.length, 2);
+  });
+
+  // 3. Receiving Shipment: Atomic inventory credit, batch IMEI registration, updating cost price
+  await staffStorage.run(admin, async () => {
+    const po = await prisma.purchaseOrder.findUniqueOrThrow({
+      where: { id: createdPo.id },
+      include: { items: true },
+    });
+
+    const phoneItem = po.items.find((i) => i.category === "DEVICE")!;
+    const partItem = po.items.find((i) => i.category === "SPARE_PART")!;
+
+    const phoneImeis = ["359871112223331", "359871112223332"];
+
+    // Atomic transaction simulation (same as PATCH /api/purchases with action: RECEIVE)
+    await prisma.$transaction(async (tx) => {
+      // A. Credit part stock
+      await tx.stockItem.upsert({
+        where: {
+          productId_branchId: { productId: partItem.productId!, branchId: ownBranch },
+        },
+        update: { quantity: { increment: partItem.quantity } },
+        create: { tenantId: "test-a", branchId: ownBranch, productId: partItem.productId!, quantity: partItem.quantity },
+      });
+      // Update part cost price
+      await tx.product.update({
+        where: { id: partItem.productId! },
+        data: { costPrice: partItem.unitCost },
+      });
+
+      // B. Credit phone stock
+      await tx.stockItem.upsert({
+        where: {
+          productId_branchId: { productId: phoneItem.productId!, branchId: ownBranch },
+        },
+        update: { quantity: { increment: phoneItem.quantity } },
+        create: { tenantId: "test-a", branchId: ownBranch, productId: phoneItem.productId!, quantity: phoneItem.quantity },
+      });
+      // Update phone cost price
+      await tx.product.update({
+        where: { id: phoneItem.productId! },
+        data: { costPrice: phoneItem.unitCost },
+      });
+
+      // Batch IMEI registration
+      await tx.deviceIMEI.createMany({
+        data: phoneImeis.map((imei) => ({
+          tenantId: "test-a",
+          branchId: ownBranch,
+          productId: phoneItem.productId!,
+          imei,
+          status: "IN_STOCK",
+          conditionGrade: "A",
+          costPrice: phoneItem.unitCost,
+          sellPrice: 35900,
+        })),
+      });
+
+      // Update PO status to RECEIVED
+      await tx.purchaseOrder.update({
+        where: { id: po.id },
+        data: {
+          status: "RECEIVED",
+          receivedAt: new Date(),
+          paymentStatus: "PAID",
+        },
+      });
+    });
+
+    // Verification after receiving
+    const partStock = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: testPartProduct.id, branchId: ownBranch } },
+    });
+    // Was 2, received 10 -> should be 12
+    assert.equal(partStock?.quantity, 12);
+
+    const updatedPartProd = await prisma.product.findUnique({ where: { id: testPartProduct.id } });
+    assert.equal(updatedPartProd?.costPrice, 800);
+
+    const phoneStock = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: testPhoneProduct.id, branchId: ownBranch } },
+    });
+    // Was 0, received 2 -> should be 2
+    assert.equal(phoneStock?.quantity, 2);
+
+    const registeredImeis = await prisma.deviceIMEI.findMany({
+      where: { tenantId: "test-a", imei: { in: phoneImeis } },
+    });
+    assert.equal(registeredImeis.length, 2);
+    assert.equal(registeredImeis[0].status, "IN_STOCK");
+    assert.equal(registeredImeis[0].costPrice, 27500);
+
+    const receivedPo = await prisma.purchaseOrder.findUnique({ where: { id: createdPo.id } });
+    assert.equal(receivedPo?.status, "RECEIVED");
+    assert.equal(receivedPo?.paymentStatus, "PAID");
+  });
+
+  // 4. Reorder Alerts: Low-stock detection & 1-Click PO Draft creation
+  await staffStorage.run(admin, async () => {
+    // Create a product with stock below minStock
+    const lowStockProd = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: "CABLE-TYPE-C",
+        name: "สายชาร์จ Type-C 100W",
+        category: "ACCESSORY",
+        costPrice: 120,
+        sellPrice: 290,
+        minStock: 10,
+      },
+    });
+
+    await prisma.stockItem.create({
+      data: {
+        tenantId: "test-a",
+        branchId: ownBranch,
+        productId: lowStockProd.id,
+        quantity: 3, // 3 <= minStock 10 -> Low stock!
+      },
+    });
+
+    // Auto-suggested reorder calculation: minStock * 2 - currentStock = 20 - 3 = 17
+    const currentStock = 3;
+    const minStock = 10;
+    const suggestedQuantity = Math.max(1, minStock * 2 - currentStock);
+    assert.equal(suggestedQuantity, 17);
+
+    // 1-Click convert into PO Draft
+    const yyyymm = bangkokYYYYMM();
+    const counter = await prisma.sequenceCounter.upsert({
+      where: { id: `PO-test-a-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `PO-test-a-${yyyymm}`, current: 1, tenantId: "test-a" },
+    });
+    const draftPoNumber = `PO-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
+
+    const draftPo = await prisma.purchaseOrder.create({
+      data: {
+        tenantId: "test-a",
+        poNumber: draftPoNumber,
+        branchId: ownBranch,
+        supplierId: supA.id,
+        supplierName: supA.name,
+        status: "DRAFT",
+        paymentStatus: "PENDING",
+        subtotal: suggestedQuantity * lowStockProd.costPrice,
+        taxRate: 7,
+        vatAmount: Math.round(suggestedQuantity * lowStockProd.costPrice * 0.07 * 100) / 100,
+        totalAmount: Math.round(suggestedQuantity * lowStockProd.costPrice * 1.07 * 100) / 100,
+        items: {
+          create: [
+            {
+              tenantId: "test-a",
+              productId: lowStockProd.id,
+              productCode: lowStockProd.code,
+              productName: lowStockProd.name,
+              category: lowStockProd.category,
+              quantity: suggestedQuantity,
+              receivedQty: 0,
+              unitCost: lowStockProd.costPrice,
+              totalCost: suggestedQuantity * lowStockProd.costPrice,
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    assert.equal(draftPo.status, "DRAFT");
+    assert.equal(draftPo.items[0].quantity, 17);
+    assert.equal(draftPo.items[0].totalCost, 2040); // 17 * 120
+  });
+
+  // 5. Multi-Tenant Isolation: Tenant B cannot see Tenant A's Purchase Orders
+  await staffStorage.run(adminBPrincipal, async () => {
+    const foreignPos = await prisma.purchaseOrder.findMany({
+      where: { id: createdPo.id },
+    });
+    assert.equal(foreignPos.length, 0);
+
+    const allPosForB = await prisma.purchaseOrder.findMany({});
+    assert.equal(allPosForB.length, 0);
+  });
+});
+
