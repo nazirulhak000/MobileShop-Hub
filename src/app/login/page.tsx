@@ -28,7 +28,7 @@ export default function StaffLoginPage() {
           </div>
           <div>
             <h1 className="text-2xl font-black tracking-tight text-slate-900">เข้าสู่ระบบร้าน</h1>
-            <p className="text-xs text-slate-500 font-medium">MobileShop-Hub Staff Portal</p>
+            <p className="text-xs text-slate-500 font-medium">FixMe Staff Portal</p>
           </div>
         </div>
 
@@ -37,23 +37,32 @@ export default function StaffLoginPage() {
           <div className="flex items-center justify-between font-bold text-teal-950 mb-1.5">
             <span className="flex items-center gap-1.5">
               <Sparkles className="h-4 w-4 text-teal-600" />
-              <span>บัญชีทดสอบด่วน (Dev Seed)</span>
+              <span>บัญชีทดสอบด่วน</span>
             </span>
             <span className="text-[11px] text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-full font-mono">
               Ready
             </span>
           </div>
           <div className="text-slate-600 space-y-0.5 font-mono text-[11px]">
-            <div>ร้าน: <span className="font-semibold text-slate-900">mobileshop</span> • ผู้ใช้: <span className="font-semibold text-slate-900">admin</span></div>
+            <div>ร้าน: <span className="font-semibold text-slate-900">fixme-service</span> • ผู้ใช้: <span className="font-semibold text-slate-900">fixme_admin</span></div>
           </div>
-          <button
-            type="button"
-            onClick={() => fillDemo("mobileshop", "admin", "password123")}
-            className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-900 bg-white border border-teal-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-          >
-            <KeyRound className="h-3.5 w-3.5" />
-            <span>คลิกเติมรหัสผ่านอัตโนมัติ</span>
-          </button>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => fillDemo("fixme-service", "fixme_admin", "P@ssw0rd123!")}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-900 bg-white border border-teal-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>เติมร้าน fixme-service</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => fillDemo("mobileshop", "admin", "password123")}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            >
+              <span>เติม dev seed</span>
+            </button>
+          </div>
         </div>
 
         <form

@@ -20,7 +20,7 @@ const schema = path.join(directory, `schema-${Date.now()}.prisma`);
 const schemaContent = fs.readFileSync('prisma/schema.prisma', 'utf8')
   .replace(/datasource db \{[\s\S]*?\}/, `datasource db {\n  provider = "sqlite"\n  url      = "file:./${filename}"\n}`);
 fs.writeFileSync(schema, schemaContent);
-run(['node_modules/prisma/build/index.js', 'db', 'push', '--schema', schema, '--skip-generate']);
+run(['node_modules/prisma/build/index.js', 'db', 'push', '--schema', schema]);
 if (process.argv.includes('--e2e')) {
   run(['node_modules/tsx/dist/cli.mjs', 'tests/seed-e2e.ts']);
   run(['node_modules/@playwright/test/cli.js', 'test']);

@@ -31,6 +31,9 @@ export function safeError(error: unknown) {
       );
     }
   }
+  if (!(error instanceof AccessError)) {
+    console.error("[API Unhandled Error]:", error);
+  }
   const status = error instanceof AccessError ? error.status : 500;
   return NextResponse.json(
     { success: false, error: error instanceof AccessError ? error.message : "ไม่สามารถทำรายการได้ กรุณาลองใหม่" },
