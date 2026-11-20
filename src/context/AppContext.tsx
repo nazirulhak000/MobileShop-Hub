@@ -36,7 +36,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   async function logout() {
     const response = await fetch("/api/auth/logout", { method: "POST" });
     if (!response.ok) throw new Error("ออกจากระบบไม่สำเร็จ กรุณาลองใหม่");
-    localStorage.removeItem("mobileshop_user"); localStorage.removeItem("mobileshop_branch_code");
+    localStorage.removeItem("fixme_user"); localStorage.removeItem("fixme_branch_code");
     window.location.assign("/login");
   }
   return <AppContext.Provider value={{ currentBranch, currentUser, branches, users, loading, logout, setCurrentBranch: branch => { const allowed = branches.find(b => b.id === branch.id); if (allowed) setBranch(allowed); } }}>{children}</AppContext.Provider>;

@@ -9,9 +9,9 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "sans-serif"],
-        display: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["'Plus Jakarta Sans'", "'Anuphan'", "system-ui", "-apple-system", "monospace"],
+        sans: ["var(--font-plus-jakarta)", "var(--font-anuphan)", "system-ui", "-apple-system", "sans-serif"],
+        display: ["var(--font-plus-jakarta)", "var(--font-anuphan)", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", "monospace"],
       },
       colors: {
         background: "var(--background)",
@@ -35,10 +35,6 @@ const config: Config = {
           blue: "#0284c7",
           dark: "#0f172a",
         },
-      },
-      boxShadow: {
-        "2xs": "0 1px 1px 0 rgb(0 0 0 / 0.05)",
-        xs: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
       },
     },
   },

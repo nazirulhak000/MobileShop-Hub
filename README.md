@@ -1,4 +1,4 @@
-# MobileShop-Hub (ระบบบริหารร้านมือถือ & ศูนย์บริการครบวงจร)
+# FixMe (ระบบบริหารร้านซ่อมมือถือ & จัดการงานซ่อมครบวงจร)
 
 ระบบบริหารจัดการร้านขายโทรศัพท์มือถือและศูนย์ซ่อมครบวงจร (All-in-One Mobile Store & Repair ERP SaaS) พัฒนาด้วย Next.js 14 App Router, TypeScript, Tailwind CSS, และ Prisma ORM
 

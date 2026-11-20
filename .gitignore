@@ -40,3 +40,6 @@ prisma/*.db-journal
 *.db
 *.db-journal
 /.local/
+
+scripts/browser-run.js
+.browsermcp

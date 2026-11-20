@@ -14,6 +14,10 @@ function authorized(request: NextRequest, secret: string) {
   const match = /^Bearer (.+)$/.exec(header);
   return !!match && timingSafeEqual(digest(match[1]), digest(secret));
 }
+export async function GET(request: NextRequest) {
+  return POST(request);
+}
+
 export async function POST(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || secret.length < 32) return notFound();

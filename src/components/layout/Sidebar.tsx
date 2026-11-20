@@ -310,8 +310,8 @@ export function Sidebar() {
               <Smartphone className="h-5 w-5" />
             </div>
             <div className="flex flex-col">
-              <span className="font-bold text-slate-900 text-base leading-none tracking-tight">Fixme</span>
-              <span className="text-[11px] text-teal-600 font-semibold tracking-wide mt-0.5">MobileHub ERP</span>
+              <span className="font-bold text-slate-900 text-base leading-none tracking-tight">FixMe</span>
+              <span className="text-[11px] text-teal-600 font-semibold tracking-wide mt-0.5">Repair & Shop OS</span>
             </div>
           </Link>
 
@@ -436,7 +436,7 @@ export function Sidebar() {
               SQLite Synced
             </span>
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5 font-mono">MobileShop dev.db • 38 Modules</div>
+          <div className="text-[10px] text-slate-400 mt-0.5 font-mono">FixMe dev.db • 38 Modules</div>
         </div>
       </aside>
     </>

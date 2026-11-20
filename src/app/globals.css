@@ -1,22 +1,13 @@
-@import url('https://fonts.googleapis.com/css2?family=Anuphan:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-html, body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
 
 /* transitions-dev — semantic CSS custom properties for micro-animations */
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
-  --font-plus-jakarta: "Plus Jakarta Sans", system-ui, sans-serif;
-  --font-anuphan: "Anuphan", system-ui, sans-serif;
-  --font-sans: "Plus Jakarta Sans", "Anuphan", system-ui, -apple-system, sans-serif;
-  --font-mono: "Plus Jakarta Sans", "Anuphan", monospace;
+  --font-sans: var(--font-plus-jakarta), var(--font-anuphan), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-plus-jakarta), var(--font-anuphan), system-ui, -apple-system, sans-serif;
 
   /* Card resize */
   --resize-dur: 300ms;
@@ -97,10 +88,6 @@ html, body {
   --shake-ease: cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
 
-body {
-  font-family: "Plus Jakarta Sans", "Anuphan", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
-
 @layer base {
   body {
     background-color: var(--background);
@@ -114,13 +101,6 @@ body {
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-plus-jakarta), var(--font-anuphan), system-ui, -apple-system, sans-serif;
     letter-spacing: -0.02em;
-  }
-
-  /* Thai typography rendering: prevent tone mark clipping and ensure natural word wrapping */
-  :lang(th) {
-    line-height: 1.55;
-    word-break: break-word;
-    overflow-wrap: break-word;
   }
 }
 
@@ -170,24 +150,6 @@ body {
   animation: fadeIn 0.15s var(--dropdown-ease) forwards;
 }
 
-@keyframes radarSweep {
-  0% {
-    top: 5%;
-    opacity: 0.7;
-  }
-  50% {
-    opacity: 1;
-  }
-  100% {
-    top: 92%;
-    opacity: 0.7;
-  }
-}
-
-.animate-radar-sweep {
-  animation: radarSweep 3.2s ease-in-out infinite alternate;
-}
-
 /* Transitions.dev Dropdown Surface */
 .t-dropdown {
   transform-origin: top right;
@@ -195,25 +157,11 @@ body {
               transform var(--dropdown-open-dur) var(--dropdown-ease);
 }
 
-/* Print Styles for 80mm Thermal Slips & Real A4 Invoices */
-@page {
-  size: A4 portrait;
-  margin: 10mm;
-}
-
+/* Print Styles for 80mm Thermal Slips & A4 Invoices */
 @media print {
-  @page {
-    size: A4 portrait;
-    margin: 10mm;
-  }
-
-  html, body {
+  body {
     background: #ffffff !important;
     color: #000000 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
   }
 
   /* Hide navigation, sidebar, header, buttons during print */
@@ -231,10 +179,10 @@ body {
     max-width: none !important;
   }
 
-  /* 80mm Thermal Slip formatting */
+  /* 80mm Thermal Slip formatting (72mm / 576 dots printable area) */
   .thermal-80mm {
-    width: 76mm !important;
-    max-width: 76mm !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
     margin: 0 auto !important;
     padding: 2mm !important;
     font-size: 11px !important;
@@ -243,46 +191,13 @@ body {
     page-break-after: always;
   }
 
-  /* 58mm Thermal Slip formatting */
-  .thermal-58mm {
-    width: 52mm !important;
-    max-width: 54mm !important;
-    margin: 0 auto !important;
-    padding: 1mm !important;
-    font-size: 9.5px !important;
-    line-height: 1.2 !important;
-    font-family: monospace, monospace !important;
-    page-break-after: always;
-  }
-
-  /* Print isolation helper */
-  body.printing-slip * {
-    visibility: hidden;
-  }
-  body.printing-slip #thermal-print-area,
-  body.printing-slip #thermal-print-area * {
-    visibility: visible;
-  }
-  body.printing-slip #thermal-print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    margin: 0 auto;
-  }
-
-  /* True A4 Invoice & Receipt formatting */
-  .invoice-a4,
-  .invoice-a4-preview,
-  .a4-sheet {
+  /* A4 Invoice formatting */
+  .invoice-a4 {
     width: 100% !important;
     max-width: 210mm !important;
-    min-height: auto !important;
-    padding: 0 !important;
+    padding: 10mm !important;
     margin: 0 auto !important;
-    box-shadow: none !important;
-    border: none !important;
     page-break-after: always;
-    border-radius: 0 !important;
   }
 }
 

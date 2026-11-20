@@ -1,231 +1,162 @@
-import { AccessError, staffContext } from "@/lib/staff-context";
-import { withStaff, reqId, reqEnum, reqMoney, assertTransition, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// All DeviceIMEI statuses used across the codebase (inventory, POS, trade-in, pawn).
-const IMEI_STATUSES = ["IN_STOCK", "SOLD", "IN_REPAIR", "PAWNED", "RETURNED"] as const;
-type ImeiStatus = (typeof IMEI_STATUSES)[number];
-const CONDITION_GRADES = ["A", "B", "C"] as const;
-
-// Manual status transitions allowed via PATCH. Sales go through POS; reversing a
-// sale should go through the refund flow, so SOLD has no exits for non-admins.
-const IMEI_TRANSITIONS: Record<ImeiStatus, readonly ImeiStatus[]> = {
-  IN_STOCK: ["SOLD", "IN_REPAIR", "RETURNED"],
-  IN_REPAIR: ["IN_STOCK", "RETURNED"],
-  PAWNED: ["IN_STOCK", "RETURNED"],
-  RETURNED: ["IN_STOCK"],
-  SOLD: [],
-};
-// ADMIN-only overrides (e.g. correcting a sale outside the refund flow).
-const ADMIN_TRANSITIONS: Record<ImeiStatus, readonly ImeiStatus[]> = {
-  ...IMEI_TRANSITIONS,
-  SOLD: ["IN_STOCK", "RETURNED"],
-};
-
-async function readJson(request: NextRequest) {
-  try {
-    return await request.json();
-  } catch {
-    throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
-  }
-}
-
 // GET /api/inventory/imei?productId=... or imei=...
-async function handleGET(request: NextRequest) {
-  const actor = staffContext();
-  const { searchParams } = new URL(request.url);
-  const productId = searchParams.get("productId");
-  const imei = searchParams.get("imei");
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const productId = searchParams.get("productId");
+    const imei = searchParams.get("imei");
 
-  const where: any = {};
-  if (productId) where.productId = productId;
-  if (imei) where.imei = imei;
+    const where: any = {};
+    if (productId) where.productId = productId;
+    if (imei) where.imei = imei;
 
-  const imeis = await prisma.deviceIMEI.findMany({
-    where,
-    include: {
-      product: true,
-      branch: true,
-      tradeInContract: {
-        include: { customer: true },
+    const imeis = await prisma.deviceIMEI.findMany({
+      where,
+      include: {
+        product: true,
+        branch: true,
+        tradeInContract: {
+          include: { customer: true },
+        },
+        saleItem: {
+          include: { sale: true },
+        },
       },
-      saleItem: {
-        include: { sale: true },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-    take: takeParam(searchParams.get("take"), 200, 500),
-  });
-
-  // Hide cost prices from roles that should not see margins.
-  if (actor.role === "CASHIER" || actor.role === "TECHNICIAN") {
-    const stripped = imeis.map(({ costPrice: _c, product, ...rest }) => {
-      const { costPrice: _pc, ...productRest } = product;
-      return { ...rest, product: productRest };
+      orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json({ success: true, imeis: stripped });
-  }
 
-  return NextResponse.json({ success: true, imeis });
+    return NextResponse.json({ success: true, imeis });
+  } catch (error: any) {
+    console.error("GET /api/inventory/imei error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
 }
 
 // POST /api/inventory/imei - Add new IMEI
-async function handlePOST(request: NextRequest) {
-  const actor = staffContext();
-  const body = await readJson(request);
-  const productId = reqId(body?.productId, "productId");
-  const branchCode = reqId(body?.branchCode, "branchCode");
-  const rawImei = reqId(body?.imei, "imei");
-  const imei = rawImei.replace(/\s+/g, "");
-  if (imei.length < 8 || imei.length > 30) {
-    throw new AccessError(400, "หมายเลข IMEI หรือ Serial Number ต้องมีความยาว 8-30 ตัวอักษร");
-  }
-  const serialNo = typeof body?.serialNo === "string" && body.serialNo.trim() ? body.serialNo.trim().replace(/\s+/g, "") : null;
-  const conditionGrade =
-    body?.conditionGrade === undefined || body?.conditionGrade === null || body?.conditionGrade === ""
-      ? "A"
-      : reqEnum(body.conditionGrade, "conditionGrade", CONDITION_GRADES);
-  const costPrice = body?.costPrice === undefined || body?.costPrice === "" ? 0 : reqMoney(body.costPrice, "costPrice");
-  const sellPrice = body?.sellPrice === undefined || body?.sellPrice === "" ? 0 : reqMoney(body.sellPrice, "sellPrice");
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { productId, branchCode, imei, serialNo, conditionGrade, costPrice, sellPrice } = body;
 
-  const newImei = await prisma.$transaction(async (tx) => {
-    const branch = await tx.branch.findFirst({
+    if (!productId || !branchCode || !imei) {
+      return NextResponse.json(
+        { success: false, error: "กรุณาระบุ productId, สาขา และหมายเลข IMEI" },
+        { status: 400 }
+      );
+    }
+
+    const branch = await prisma.branch.findFirst({
       where: { OR: [{ code: branchCode }, { id: branchCode }] },
     });
-    if (!branch) throw new AccessError(404, "ไม่พบสาขา");
-    if (!actor.branchIds.includes(branch.id)) throw new AccessError(403, "ไม่มีสิทธิ์จัดการ IMEI ในสาขานี้");
+    if (!branch) {
+      return NextResponse.json({ success: false, error: "ไม่พบสาขา" }, { status: 404 });
+    }
 
-    // Duplicate check inside the tx; the @@unique([tenantId, imei]) index is the final guard.
-    const existing = await tx.deviceIMEI.findFirst({ where: { imei } });
-    if (existing) throw new AccessError(409, `หมายเลข IMEI ${imei} มีอยู่ในระบบแล้ว`);
+    // Check if IMEI already exists
+    const existing = await prisma.deviceIMEI.findFirst({
+      where: { imei },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { success: false, error: `หมายเลข IMEI ${imei} มีอยู่ในระบบแล้ว` },
+        { status: 400 }
+      );
+    }
 
-    const created = await tx.deviceIMEI.create({
+    const newImei = await prisma.deviceIMEI.create({
       data: {
-        tenantId: actor.tenantId ?? branch.tenantId,
         productId,
         branchId: branch.id,
         imei,
-        serialNo,
-        conditionGrade,
+        serialNo: serialNo || null,
+        conditionGrade: conditionGrade || "A",
         status: "IN_STOCK",
-        costPrice,
-        sellPrice,
+        costPrice: Number(costPrice) || 0,
+        sellPrice: Number(sellPrice) || 0,
       },
       include: { product: true, branch: true },
     });
 
-    await tx.stockItem.upsert({
-      where: { productId_branchId: { productId, branchId: branch.id } },
-      update: { quantity: { increment: 1 } },
-      create: { tenantId: actor.tenantId ?? branch.tenantId, productId, branchId: branch.id, quantity: 1 },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        tenantId: actor.tenantId,
-        userId: actor.id,
-        module: "INVENTORY",
-        action: "IMEI_CREATE",
-        targetId: created.id,
-        details: JSON.stringify({ imei, productId, branchCode: branch.code }),
-        afterJson: JSON.stringify({ status: "IN_STOCK", conditionGrade, costPrice, sellPrice }),
-        severity: "INFO",
+    // Update stock quantity for this product at this branch
+    await prisma.stockItem.upsert({
+      where: {
+        productId_branchId: {
+          productId,
+          branchId: branch.id,
+        },
+      },
+      update: {
+        quantity: { increment: 1 },
+      },
+      create: {
+        productId,
+        branchId: branch.id,
+        quantity: 1,
       },
     });
 
-    return created;
-  });
-
-  return NextResponse.json({ success: true, imei: newImei });
+    return NextResponse.json({ success: true, imei: newImei });
+  } catch (error: any) {
+    console.error("POST /api/inventory/imei error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
 }
 
-// PATCH /api/inventory/imei - Update status, condition grade or prices
-async function handlePATCH(request: NextRequest) {
-  const actor = staffContext();
-  const body = await readJson(request);
-  const id = reqId(body?.id, "id");
+// PATCH /api/inventory/imei - Update status or condition grade
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, status, conditionGrade, sellPrice, costPrice } = body;
 
-  const data: { status?: ImeiStatus; conditionGrade?: string; sellPrice?: number; costPrice?: number } = {};
-  if (body?.status !== undefined && body?.status !== null && body?.status !== "") {
-    data.status = reqEnum(body.status, "status", IMEI_STATUSES);
-  }
-  if (body?.conditionGrade !== undefined && body?.conditionGrade !== null && body?.conditionGrade !== "") {
-    data.conditionGrade = reqEnum(body.conditionGrade, "conditionGrade", CONDITION_GRADES);
-  }
-  if (body?.sellPrice !== undefined && body?.sellPrice !== null && body?.sellPrice !== "") {
-    data.sellPrice = reqMoney(body.sellPrice, "sellPrice");
-  }
-  if (body?.costPrice !== undefined && body?.costPrice !== null && body?.costPrice !== "") {
-    data.costPrice = reqMoney(body.costPrice, "costPrice");
-  }
-  if (Object.keys(data).length === 0) throw new AccessError(400, "ไม่มีข้อมูลที่ต้องการแก้ไข");
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const current = await tx.deviceIMEI.findFirst({ where: { id } });
-    if (!current) throw new AccessError(404, "ไม่พบ IMEI นี้");
-
-    const from = current.status as ImeiStatus;
-    const to = data.status ?? from;
-    if (from !== to) {
-      if (from === "SOLD" && actor.role !== "ADMIN") {
-        throw new AccessError(409, "เครื่องที่ขายแล้วต้องทำรายการคืนสินค้าผ่านระบบคืนเงิน");
-      }
-      assertTransition(actor.role === "ADMIN" ? ADMIN_TRANSITIONS : IMEI_TRANSITIONS, from, to);
+    if (!id) {
+      return NextResponse.json({ success: false, error: "ต้องระบุ ID ของ IMEI" }, { status: 400 });
     }
 
-    // Optimistic concurrency: only update if status has not changed since we read it.
-    const { count } = await tx.deviceIMEI.updateMany({
-      where: { id, status: current.status },
+    const currentImei = await prisma.deviceIMEI.findUnique({ where: { id } });
+    if (!currentImei) {
+      return NextResponse.json({ success: false, error: "ไม่พบเครื่อง IMEI" }, { status: 404 });
+    }
+
+    const data: any = {};
+    if (status) data.status = status;
+    if (conditionGrade) data.conditionGrade = conditionGrade;
+    if (sellPrice !== undefined) data.sellPrice = Number(sellPrice);
+    if (costPrice !== undefined) data.costPrice = Number(costPrice);
+
+    const updated = await prisma.deviceIMEI.update({
+      where: { id },
       data,
+      include: { product: true, branch: true },
     });
-    if (count !== 1) throw new AccessError(409, "สถานะ IMEI ถูกเปลี่ยนโดยผู้อื่น กรุณาโหลดใหม่");
 
-    // Keep StockItem in sync when moving into / out of IN_STOCK.
-    let stockSync: string | null = null;
-    if (from !== to && to === "IN_STOCK") {
-      await tx.stockItem.upsert({
-        where: { productId_branchId: { productId: current.productId, branchId: current.branchId } },
-        update: { quantity: { increment: 1 } },
-        create: { productId: current.productId, branchId: current.branchId, quantity: 1 },
-      });
-      stockSync = "INCREMENT";
-    } else if (from !== to && from === "IN_STOCK") {
-      const dec = await tx.stockItem.updateMany({
-        where: { productId: current.productId, branchId: current.branchId, quantity: { gte: 1 } },
-        data: { quantity: { decrement: 1 } },
-      });
-      // If stock was already 0 (out of sync), do not go negative; record it in the audit log.
-      stockSync = dec.count === 1 ? "DECREMENT" : "SKIPPED_ZERO_STOCK";
+    // Sync StockItem quantity if IN_STOCK status toggles
+    if (status && status !== currentImei.status) {
+      if (currentImei.status === "IN_STOCK" && status !== "IN_STOCK") {
+        // Left stock -> decrement
+        const stock = await prisma.stockItem.findUnique({
+          where: { productId_branchId: { productId: currentImei.productId, branchId: currentImei.branchId } },
+        });
+        if (stock) {
+          await prisma.stockItem.update({
+            where: { id: stock.id },
+            data: { quantity: Math.max(0, stock.quantity - 1) },
+          });
+        }
+      } else if (currentImei.status !== "IN_STOCK" && status === "IN_STOCK") {
+        // Returned to stock -> increment
+        await prisma.stockItem.upsert({
+          where: { productId_branchId: { productId: currentImei.productId, branchId: currentImei.branchId } },
+          update: { quantity: { increment: 1 } },
+          create: { productId: currentImei.productId, branchId: currentImei.branchId, quantity: 1 },
+        });
+      }
     }
 
-    await tx.auditLog.create({
-      data: {
-        tenantId: actor.tenantId,
-        userId: actor.id,
-        module: "INVENTORY",
-        action: from !== to ? "IMEI_STATUS_CHANGE" : "IMEI_UPDATE",
-        targetId: id,
-        details: JSON.stringify({ imei: current.imei, from, to, stockSync }),
-        beforeJson: JSON.stringify({
-          status: current.status,
-          conditionGrade: current.conditionGrade,
-          costPrice: current.costPrice,
-          sellPrice: current.sellPrice,
-        }),
-        afterJson: JSON.stringify(data),
-        severity: from === "SOLD" && from !== to ? "WARNING" : "INFO",
-      },
-    });
-
-    return tx.deviceIMEI.findFirst({ where: { id }, include: { product: true, branch: true } });
-  });
-
-  return NextResponse.json({ success: true, imei: updated });
+    return NextResponse.json({ success: true, imei: updated });
+  } catch (error: any) {
+    console.error("PATCH /api/inventory/imei error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
 }
-
-export const GET = withStaff(handleGET, ["ADMIN", "MANAGER", "CASHIER"]);
-
-export const POST = withStaff(handlePOST, ["ADMIN", "MANAGER"]);
-
-export const PATCH = withStaff(handlePATCH, ["ADMIN", "MANAGER"]);
