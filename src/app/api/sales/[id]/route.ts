@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffTenantId } from "@/lib/staff-context";
 import { withStaff, reqId } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic";
 async function handleGET(_request: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
   const resolved = await Promise.resolve(params);
   const id = reqId(resolved?.id, "id");
+  const tenantId = staffTenantId();
   const sale = await prisma.sale.findFirst({
-    where: { id },
+    where: { id, tenantId },
     select: {
       id: true,
       invoiceNo: true,

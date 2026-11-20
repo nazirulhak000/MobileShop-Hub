@@ -1,4 +1,4 @@
-import { AccessError } from "@/lib/staff-context";
+import { AccessError, staffTenantId } from "@/lib/staff-context";
 import { withStaff, bangkokDayRange, takeParam } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const STATUSES = ["COMPLETED", "VOID"];
+const STATUSES = ["COMPLETED", "VOID", "PARTIAL_REFUND"];
 
 // Fields returned for a sale (never the full User / cost prices).
 const SALE_SELECT = {
@@ -55,9 +55,13 @@ async function handleGET(request: NextRequest) {
   const search = (searchParams.get("search") || "").trim().slice(0, 100);
   const take = takeParam(searchParams.get("take"), 200, 500);
 
-  const where: Prisma.SaleWhereInput = {};
-  if (branchKey) {
-    const branch = await prisma.branch.findFirst({ where: { OR: [{ code: branchKey }, { id: branchKey }] }, select: { id: true } });
+  const tenantId = staffTenantId();
+  const where: Prisma.SaleWhereInput = { tenantId };
+  if (branchKey && branchKey !== "ALL") {
+    const branch = await prisma.branch.findFirst({
+      where: { tenantId, OR: [{ code: branchKey }, { id: branchKey }] },
+      select: { id: true },
+    });
     if (!branch) throw new AccessError(404, "ไม่พบข้อมูลสาขา");
     where.branchId = branch.id;
   }
@@ -81,12 +85,12 @@ async function handleGET(request: NextRequest) {
 
   const sales = await prisma.sale.findMany({ where, select: SALE_SELECT, orderBy: { createdAt: "desc" }, take });
 
-  // Void reason/actor live in AuditLog (Sale has no void fields): one query for all VOID sales.
-  const voidIds = sales.filter((s) => s.status === "VOID").map((s) => s.id);
+  // Void reason/actor live in AuditLog (Sale has no void fields): one query for all VOID / REFUND sales.
+  const voidIds = sales.filter((s) => s.status === "VOID" || s.status === "PARTIAL_REFUND").map((s) => s.id);
   const voidInfo = new Map<string, VoidInfo>();
   if (voidIds.length > 0) {
     const logs = await prisma.auditLog.findMany({
-      where: { module: "POS", action: "VOID", targetId: { in: voidIds } },
+      where: { tenantId, module: "POS", action: { in: ["VOID", "REFUND", "PARTIAL_REFUND"] }, targetId: { in: voidIds } },
       select: { targetId: true, details: true, createdAt: true, user: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
     });

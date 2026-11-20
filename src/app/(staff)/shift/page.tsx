@@ -1,14 +1,13 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { ArrowDownCircle, ArrowUpCircle, Printer, Lock, Unlock, RefreshCw } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Printer, Lock, Unlock, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
-import { DemoBanner } from "@/components/ui/DemoBanner";
 import { formatTHB } from "@/lib/utils";
 
 interface CashMovement {
@@ -17,6 +16,7 @@ interface CashMovement {
   type: "CASH_IN" | "CASH_OUT";
   amount: number;
   reason: string;
+  createdBy?: string;
 }
 
 interface SummaryData {
@@ -25,7 +25,7 @@ interface SummaryData {
   cashRefundsOfEarlierSales: number;
 }
 
-// Notes and coins with their face value (THB). Coins are counted per denomination.
+// Notes and coins with their face value (THB).
 const DENOMINATIONS = [
   { key: "b1000", label: "ธนบัตร 1,000 บาท", value: 1000 },
   { key: "b500", label: "ธนบัตร 500 บาท", value: 500 },
@@ -42,13 +42,14 @@ const DENOMINATIONS = [
 type DenomKey = (typeof DENOMINATIONS)[number]["key"];
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
-// Client-safe "YYYY-MM-DD" in Bangkok time.
 const bangkokToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
-const bangkokTime = () => new Date().toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" }) + " น.";
+const bangkokTime = () =>
+  new Date().toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" }) + " น.";
 
 export default function ShiftManagementPage() {
   const { currentBranch, currentUser } = useApp();
 
+  const [shiftId, setShiftId] = useState<string>(() => `SHIFT-${Date.now()}`);
   const [isShiftOpen, setIsShiftOpen] = useState(true);
   const [openingTime, setOpeningTime] = useState(() => bangkokTime());
   const [openingFloat, setOpeningFloat] = useState(0);
@@ -57,8 +58,9 @@ export default function ShiftManagementPage() {
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  // Cash In / Out during shift (local only - no model to persist them)
+  // Cash In / Out during shift
   const [movements, setMovements] = useState<CashMovement[]>([]);
 
   // Cash count per denomination
@@ -72,10 +74,44 @@ export default function ShiftManagementPage() {
   const [actionAmount, setActionAmount] = useState("");
   const [actionReason, setActionReason] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [savingAction, setSavingAction] = useState(false);
+
+  const [openShiftModalOpen, setOpenShiftModalOpen] = useState(false);
+  const [newFloatInput, setNewFloatInput] = useState("0");
 
   const [closeShiftModalOpen, setCloseShiftModalOpen] = useState(false);
+  const [closeNote, setCloseNote] = useState("");
   const [shiftReportModalOpen, setShiftReportModalOpen] = useState(false);
+  const [slipWidth, setSlipWidth] = useState<"80mm" | "58mm">("80mm");
   const [closedAt, setClosedAt] = useState("");
+  const [closedBy, setClosedBy] = useState("");
+
+  // Load active shift from API
+  const loadShift = useCallback(async () => {
+    if (!currentBranch.code) return;
+    try {
+      const params = new URLSearchParams({ branch: currentBranch.code, day: bangkokToday() });
+      const res = await fetch(`/api/shifts?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success && json?.data?.shift) {
+        const s = json.data.shift;
+        setShiftId(s.shiftId);
+        setIsShiftOpen(s.isOpen);
+        setOpeningFloat(s.openingFloat ?? 0);
+        setOpeningTime(new Date(s.openedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) + " น.");
+        setMovements(s.movements ?? []);
+        if (!s.isOpen && s.closedAt) {
+          setClosedAt(new Date(s.closedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) + " น.");
+          setClosedBy(s.closedBy ?? "");
+          if (s.denominations) {
+            setCounts((prev) => ({ ...prev, ...s.denominations }));
+          }
+        }
+      }
+    } catch {
+      // Keep default open shift state if fetch fails
+    }
+  }, [currentBranch.code]);
 
   const loadSummary = useCallback(async () => {
     if (!currentBranch.code) return;
@@ -97,20 +133,20 @@ export default function ShiftManagementPage() {
 
   useEffect(() => {
     loadSummary();
-  }, [loadSummary]);
+    loadShift();
+  }, [loadSummary, loadShift]);
 
   const methodTotal = (m: string) => summary?.byPaymentMethod.find((r) => r.paymentMethod === m)?.netAmount ?? 0;
   const posCashSales = summary?.cashSales ?? 0;
   const posPromptPaySales = methodTotal("PROMPTPAY");
   const posCardSales = methodTotal("CARD");
   const posSplitSales = methodTotal("SPLIT");
-  // Cash refunded today for bills sold on earlier days leaves the drawer today.
   const cashRefunds = summary?.cashRefundsOfEarlierSales ?? 0;
 
   const totalCashIn = useMemo(() => movements.filter((m) => m.type === "CASH_IN").reduce((sum, m) => sum + m.amount, 0), [movements]);
   const totalCashOut = useMemo(() => movements.filter((m) => m.type === "CASH_OUT").reduce((sum, m) => sum + m.amount, 0), [movements]);
 
-  // Expected cash in drawer
+  // Expected cash in drawer: float + cashSales - cashRefunds + cashIn - cashOut
   const expectedCashInDrawer = round2(openingFloat + posCashSales - cashRefunds + totalCashIn - totalCashOut);
 
   // Actual counted cash: count x face value of each denomination
@@ -120,7 +156,37 @@ export default function ShiftManagementPage() {
   const discrepancyText =
     discrepancy === 0 ? "พอดี (0.00)" : discrepancy > 0 ? `เงินเกิน +${formatTHB(discrepancy)}` : `เงินขาด ${formatTHB(discrepancy)}`;
 
-  const handleAddMovement = () => {
+  const handleOpenShift = async () => {
+    const floatNum = Math.max(0, parseFloat(newFloatInput) || 0);
+    try {
+      const res = await fetch("/api/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "OPEN",
+          branchCode: currentBranch.code,
+          openingFloat: floatNum,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.error || "เปิดกะไม่สำเร็จ");
+
+      setShiftId(json.data.shiftId);
+      setIsShiftOpen(true);
+      setOpeningFloat(floatNum);
+      setOpeningTime(bangkokTime());
+      setMovements([]);
+      setCounts(Object.fromEntries(DENOMINATIONS.map((d) => [d.key, 0])) as Record<DenomKey, number>);
+      setClosedAt("");
+      setOpenShiftModalOpen(false);
+      setNotice("เปิดกะทำงานเรียบร้อย บันทึกเงินทอนตั้งต้นลงระบบแล้ว");
+      await loadSummary();
+    } catch (err: any) {
+      alert(err?.message || "เปิดกะไม่สำเร็จ");
+    }
+  };
+
+  const handleAddMovement = async () => {
     const amount = Number(actionAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setActionError("กรุณาระบุจำนวนเงินมากกว่า 0");
@@ -130,40 +196,89 @@ export default function ShiftManagementPage() {
       setActionError("กรุณาระบุเหตุผลอย่างน้อย 3 ตัวอักษร");
       return;
     }
-    const item: CashMovement = {
-      id: `${Date.now()}`,
-      time: bangkokTime(),
-      type: actionType,
-      amount: round2(amount),
-      reason: actionReason.trim(),
-    };
-    setMovements([...movements, item]);
-    setCashActionModalOpen(false);
-    setActionAmount("");
-    setActionReason("");
+
+    setSavingAction(true);
     setActionError(null);
+    try {
+      const res = await fetch("/api/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "MOVEMENT",
+          branchCode: currentBranch.code,
+          shiftId,
+          type: actionType,
+          amount: round2(amount),
+          reason: actionReason.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.error || "บันทึกรายการไม่สำเร็จ");
+
+      const item: CashMovement = {
+        id: json.data?.id || `${Date.now()}`,
+        time: json.data?.time || bangkokTime(),
+        type: actionType,
+        amount: round2(amount),
+        reason: actionReason.trim(),
+        createdBy: currentUser.name,
+      };
+      setMovements([...movements, item]);
+      setCashActionModalOpen(false);
+      setActionAmount("");
+      setActionReason("");
+      setNotice(`บันทึก${actionType === "CASH_IN" ? "เงินเข้า" : "เบิกเงินสด"} ${formatTHB(amount)} ลงระบบเรียบร้อย`);
+    } catch (err: any) {
+      setActionError(err?.message || "บันทึกรายการไม่สำเร็จ");
+    } finally {
+      setSavingAction(false);
+    }
   };
 
-  const handleConfirmCloseShift = () => {
-    // Nothing is persisted (no shift model): only lock the local view and show the printable summary.
-    setClosedAt(bangkokTime());
-    setIsShiftOpen(false);
-    setCloseShiftModalOpen(false);
-    setShiftReportModalOpen(true);
-  };
+  const handleConfirmCloseShift = async () => {
+    try {
+      const res = await fetch("/api/shifts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "CLOSE",
+          branchCode: currentBranch.code,
+          shiftId,
+          openingFloat,
+          countedCash,
+          expectedCash: expectedCashInDrawer,
+          discrepancy,
+          denominations: counts,
+          note: closeNote.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) throw new Error(json?.error || "ปิดกะไม่สำเร็จ");
 
-  const handleOpenNewShift = () => {
-    setIsShiftOpen(true);
-    setOpeningTime(bangkokTime());
-    setMovements([]);
-    setCounts(Object.fromEntries(DENOMINATIONS.map((d) => [d.key, 0])) as Record<DenomKey, number>);
-    setClosedAt("");
-    loadSummary();
+      setClosedAt(bangkokTime());
+      setClosedBy(currentUser.name);
+      setIsShiftOpen(false);
+      setCloseShiftModalOpen(false);
+      setShiftReportModalOpen(true);
+      setNotice(`ปิดกะประจำวันเรียบร้อย บันทึกผลต่างตรวจนับ (${discrepancyText}) ลงระบบแล้ว`);
+    } catch (err: any) {
+      alert(err?.message || "ปิดกะไม่สำเร็จ");
+    }
   };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
-      <DemoBanner message="การปิดกะยังไม่ถูกบันทึกลงฐานข้อมูล ใช้เพื่อตรวจนับเงินสดเท่านั้น" />
+      {notice && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {notice}
+          </span>
+          <button type="button" onClick={() => setNotice(null)} className="text-xs font-semibold hover:underline">
+            ปิด
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -177,24 +292,25 @@ export default function ShiftManagementPage() {
                   กะกำลังเปิดอยู่
                 </Badge>
               ) : (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className="text-xs bg-slate-800 text-white">
                   <Lock className="h-3 w-3 mr-1 inline" />
-                  ตรวจนับปิดกะแล้ว
+                  ตรวจนับปิดกะแล้ว (Shift Locked)
                 </Badge>
               )}
             </h1>
           </div>
           <p className="text-sm text-slate-500">
-            นับเงินทอนตั้งต้น (Opening Float), จดเงินเข้า-ออกระหว่างกะ, และตรวจสอบผลต่างเงินสดเทียบยอดขายเงินสดจริงของวันนี้
+            นับเงินทอนตั้งต้น (Opening Float), จดเงินเข้า-ออกระหว่างกะ, และตรวจสอบผลต่างเงินสดเทียบยอดขายเงินสดจริง บันทึกลงระบบตรวจสอบได้
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={loadSummary} disabled={loading} className="text-xs gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => { loadSummary(); loadShift(); }} disabled={loading} className="text-xs gap-1.5">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            <span>รีเฟรชยอดขาย</span>
+            <span>รีเฟรช</span>
           </Button>
-          {isShiftOpen && (
+
+          {isShiftOpen ? (
             <>
               <Button
                 variant="outline"
@@ -214,19 +330,36 @@ export default function ShiftManagementPage() {
                 size="sm"
                 onClick={() => setCloseShiftModalOpen(true)}
                 disabled={loading || !!loadError}
-                className="bg-rose-600 hover:bg-rose-700 text-white text-xs gap-1.5 shadow-sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white text-xs gap-1.5 shadow-sm font-bold"
               >
                 <Lock className="h-4 w-4" />
                 <span>นับเงิน & ปิดกะประจำวัน</span>
               </Button>
             </>
-          )}
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShiftReportModalOpen(true)}
+                className="text-xs gap-1.5"
+              >
+                <Printer className="h-4 w-4" />
+                <span>พิมพ์ใบสรุปปิดกะ</span>
+              </Button>
 
-          {!isShiftOpen && (
-            <Button size="sm" onClick={handleOpenNewShift} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5">
-              <Unlock className="h-4 w-4" />
-              <span>เปิดกะใหม่</span>
-            </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setNewFloatInput(String(openingFloat));
+                  setOpenShiftModalOpen(true);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 font-bold shadow-sm"
+              >
+                <Unlock className="h-4 w-4" />
+                <span>เปิดกะใหม่</span>
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -261,7 +394,7 @@ export default function ShiftManagementPage() {
           <span className="text-xs font-semibold text-emerald-700">ยอดขายเงินสดวันนี้ (Cash Sales)</span>
           <div className="text-2xl font-bold font-mono text-emerald-700">{loading ? "..." : formatTHB(posCashSales)}</div>
           <div className="text-[11px] text-slate-400">
-            จากบิล POS ที่สมบูรณ์ของวันนี้
+            จากบิล POS ที่สมบูรณ์
             {cashRefunds > 0 && ` • คืนเงินสดบิลวันก่อน -${formatTHB(cashRefunds)}`}
           </div>
         </Card>
@@ -271,7 +404,7 @@ export default function ShiftManagementPage() {
           <div className="text-2xl font-bold font-mono text-blue-700">{loading ? "..." : formatTHB(posPromptPaySales + posCardSales)}</div>
           <div className="text-[11px] text-slate-400">
             โอน: {formatTHB(posPromptPaySales)} | บัตร: {formatTHB(posCardSales)}
-            {posSplitSales > 0 && ` | แยกชำระ: ${formatTHB(posSplitSales)} (ไม่นับเป็นเงินสด)`}
+            {posSplitSales > 0 && ` | แยกชำระ: ${formatTHB(posSplitSales)}`}
           </div>
         </Card>
 
@@ -290,7 +423,7 @@ export default function ShiftManagementPage() {
             <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-sm">รายการเบิกจ่ายเงินสดระหว่างกะ (Cash In / Out)</CardTitle>
-                <CardDescription>จดไว้ในหน้านี้เพื่อคำนวณยอดที่ควรมี (ไม่ถูกบันทึกลงฐานข้อมูล)</CardDescription>
+                <CardDescription>บันทึกเงินเข้า/ออกลิ้นชัก พร้อมบันทึกลงระบบอย่างปลอดภัย</CardDescription>
               </div>
               <Button
                 size="sm"
@@ -353,7 +486,7 @@ export default function ShiftManagementPage() {
         <div className="lg:col-span-5 space-y-4">
           <Card>
             <CardHeader className="p-4 border-b border-slate-100">
-              <CardTitle className="text-sm">นับเงินในลิ้นชัก (Cash Count)</CardTitle>
+              <CardTitle className="text-sm">นับเงินในลิ้นชัก (Cash Count Calculator)</CardTitle>
               <CardDescription>ใส่จำนวนธนบัตร/เหรียญแต่ละชนิดเพื่อคำนวณยอดเงินจริง</CardDescription>
             </CardHeader>
             <CardContent className="p-4 space-y-2.5 text-xs">
@@ -404,6 +537,37 @@ export default function ShiftManagementPage() {
         </div>
       </div>
 
+      {/* OPEN NEW SHIFT MODAL */}
+      <Dialog open={openShiftModalOpen} onOpenChange={setOpenShiftModalOpen}>
+        <DialogHeader>
+          <DialogTitle onClose={() => setOpenShiftModalOpen(false)}>เปิดกะทำงานใหม่ (Open Shift)</DialogTitle>
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 mb-1 block">เงินทอนตั้งต้น (Opening Float) *</label>
+            <Input
+              type="number"
+              min="0"
+              step="0.25"
+              value={newFloatInput}
+              onChange={(e) => setNewFloatInput(e.target.value)}
+              className="font-mono text-lg font-bold"
+            />
+          </div>
+          <p className="text-xs text-slate-500">
+            ระบบจะเริ่มรอบกะการขายใหม่ และบันทึกข้อมูลกะปัจจุบันเข้าสู่ระบบตรวจสอบ
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setOpenShiftModalOpen(false)}>
+            ยกเลิก
+          </Button>
+          <Button size="sm" onClick={handleOpenShift} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+            ยืนยันเปิดกะ
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
       {/* CASH IN/OUT MODAL */}
       <Dialog open={cashActionModalOpen} onOpenChange={setCashActionModalOpen}>
         <DialogHeader>
@@ -437,14 +601,13 @@ export default function ShiftManagementPage() {
               {actionError}
             </div>
           )}
-          <p className="text-[11px] text-slate-500">รายการนี้ใช้คำนวณในหน้านี้เท่านั้น ไม่ถูกบันทึกเป็นค่าใช้จ่ายในระบบ</p>
         </DialogContent>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => setCashActionModalOpen(false)}>
             ยกเลิก
           </Button>
-          <Button size="sm" onClick={handleAddMovement} className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
-            เพิ่มรายการ
+          <Button size="sm" onClick={handleAddMovement} disabled={savingAction} className="bg-blue-600 hover:bg-blue-700 text-white font-bold">
+            {savingAction ? "กำลังบันทึก..." : "เพิ่มรายการ"}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -473,9 +636,15 @@ export default function ShiftManagementPage() {
               <span className={discrepancy < 0 ? "text-rose-600" : "text-emerald-700"}>{discrepancyText}</span>
             </div>
           </div>
-          <p className="text-amber-700">
-            ระบบยังไม่บันทึกการปิดกะลงฐานข้อมูล กรุณาพิมพ์ใบสรุปและให้ผู้จัดการลงชื่อเก็บไว้เป็นหลักฐาน
-          </p>
+          <div>
+            <label className="font-semibold text-slate-700 mb-1 block">หมายเหตุการปิดกะ (ถ้ามี)</label>
+            <Input
+              placeholder="เช่น เงินสดใส่ซองส่งมอบเรียบร้อย"
+              value={closeNote}
+              onChange={(e) => setCloseNote(e.target.value)}
+              className="text-xs"
+            />
+          </div>
         </DialogContent>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => setCloseShiftModalOpen(false)}>
@@ -491,10 +660,32 @@ export default function ShiftManagementPage() {
       <Dialog open={shiftReportModalOpen} onOpenChange={setShiftReportModalOpen}>
         <div className="max-w-md w-full">
           <DialogHeader>
-            <DialogTitle onClose={() => setShiftReportModalOpen(false)}>ใบสรุปรายงานปิดกะ (Shift Z-Report 80mm)</DialogTitle>
+            <DialogTitle onClose={() => setShiftReportModalOpen(false)}>ใบสรุปรายงานปิดกะ (Shift Z-Report)</DialogTitle>
           </DialogHeader>
-          <DialogContent className="p-4 bg-slate-100 flex justify-center">
-            <div className="thermal-80mm bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900">
+          <DialogContent className="p-4 bg-slate-100 flex flex-col items-center">
+            {/* Format toggle */}
+            <div className="flex items-center gap-2 mb-3 bg-white p-1 rounded-xl border border-slate-300 text-xs no-print">
+              <button
+                type="button"
+                onClick={() => setSlipWidth("80mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  slipWidth === "80mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 80 มม.
+              </button>
+              <button
+                type="button"
+                onClick={() => setSlipWidth("58mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  slipWidth === "58mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 58 มม.
+              </button>
+            </div>
+
+            <div className={`${slipWidth === "58mm" ? "thermal-58mm" : "thermal-80mm"} bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900`}>
               <div className="text-center border-b border-dashed border-slate-400 pb-2">
                 <div className="font-extrabold text-sm">MOBILESHOP HUB</div>
                 <div className="text-[10px]">{currentBranch.name}</div>
@@ -502,9 +693,9 @@ export default function ShiftManagementPage() {
                 <div className="text-[9px] text-slate-500">วันที่ {bangkokToday()}</div>
               </div>
               <div className="text-[10px] space-y-0.5 border-b border-dashed border-slate-400 pb-2">
-                <div>แคชเชียร์: {currentUser.name}</div>
+                <div>แคชเชียร์: {closedBy || currentUser.name}</div>
                 <div>
-                  เวลาเปิด: {openingTime} • ปิด: {closedAt || "-"}
+                  เวลาเปิด: {openingTime} • ปิด: {closedAt || bangkokTime()}
                 </div>
               </div>
               <div className="space-y-1 text-[10px] border-b border-dashed border-slate-400 pb-2">
@@ -561,7 +752,6 @@ export default function ShiftManagementPage() {
                   <span>{discrepancyText}</span>
                 </div>
               </div>
-              <div className="text-center text-[9px] text-slate-500">* เอกสารนี้ไม่ได้ถูกบันทึกในระบบ *</div>
               <div className="pt-4 text-center text-[10px] space-y-4">
                 <div>ลงชื่อ แคชเชียร์: ............................</div>
                 <div>ลงชื่อ ผู้จัดการ: ............................</div>
@@ -572,9 +762,9 @@ export default function ShiftManagementPage() {
             <Button variant="outline" size="sm" onClick={() => setShiftReportModalOpen(false)}>
               ปิด
             </Button>
-            <Button size="sm" onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5">
+            <Button size="sm" onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 font-bold">
               <Printer className="h-4 w-4" />
-              <span>พิมพ์สลิป 80mm</span>
+              <span>พิมพ์สลิป ({slipWidth})</span>
             </Button>
           </DialogFooter>
         </div>

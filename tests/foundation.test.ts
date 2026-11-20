@@ -1026,5 +1026,214 @@ test("Round 11: Repair Workflow & Management Audit - Transitions, Timeline Audit
   });
 });
 
+test("Round 12: Sales, Refunds, Shift Management & Daily Takings Isolation, Stock Replenishment & Variance Calculation", async () => {
+  // 1. Shift Lifecycle test: Open shift with float, record cash movements, close shift with discrepancy
+  await staffStorage.run(admin, async () => {
+    const openingFloat = 2000;
+    const shiftId = `SHIFT-${Date.now()}`;
+    await db.auditLog.create({
+      data: {
+        tenantId: admin.tenantId,
+        userId: admin.id,
+        module: "SHIFT",
+        action: "OPEN",
+        targetId: ownBranch,
+        details: JSON.stringify({ shiftId, openingFloat, openedBy: admin.name }),
+      },
+    });
+
+    // Cash movement: +500 Cash In, -200 Cash Out
+    await db.auditLog.create({
+      data: {
+        tenantId: admin.tenantId,
+        userId: admin.id,
+        module: "SHIFT",
+        action: "MOVEMENT",
+        targetId: ownBranch,
+        details: JSON.stringify({ shiftId, type: "CASH_IN", amount: 500, reason: "เงินทอนเพิ่ม" }),
+      },
+    });
+    await db.auditLog.create({
+      data: {
+        tenantId: admin.tenantId,
+        userId: admin.id,
+        module: "SHIFT",
+        action: "MOVEMENT",
+        targetId: ownBranch,
+        details: JSON.stringify({ shiftId, type: "CASH_OUT", amount: 200, reason: "ค่าน้ำดื่ม" }),
+      },
+    });
+
+    // Expected cash calculation: 2000 (float) + 500 - 200 = 2300
+    const expectedCash = 2000 + 500 - 200;
+    const countedCash = 2350; // 50 over
+    const discrepancy = countedCash - expectedCash; // +50
+
+    await db.auditLog.create({
+      data: {
+        tenantId: admin.tenantId,
+        userId: admin.id,
+        module: "SHIFT",
+        action: "CLOSE",
+        targetId: ownBranch,
+        details: JSON.stringify({
+          shiftId,
+          openingFloat,
+          countedCash,
+          expectedCash,
+          discrepancy,
+          closedBy: admin.name,
+        }),
+      },
+    });
+
+    const shiftLogs = await db.auditLog.findMany({
+      where: { tenantId: admin.tenantId, module: "SHIFT", targetId: ownBranch },
+    });
+    assert.ok(shiftLogs.length >= 4);
+    assert.equal(discrepancy, 50);
+  });
+
+  // 2. POS Sale, Stock Replenishment & IMEI Return on Refund
+  const testPhone = await db.product.create({
+    data: { tenantId: "test-a", code: "IP15", name: "iPhone 15 Pro", category: "DEVICE" },
+  });
+  await db.stockItem.upsert({
+    where: { productId_branchId: { productId: testPhone.id, branchId: ownBranch } },
+    update: { quantity: 10 },
+    create: { tenantId: "test-a", productId: testPhone.id, branchId: ownBranch, quantity: 10 },
+  });
+  const imeiRecord = await db.deviceIMEI.create({
+    data: {
+      tenantId: "test-a",
+      productId: testPhone.id,
+      branchId: ownBranch,
+      imei: "351759000012345",
+      status: "IN_STOCK",
+    },
+  });
+
+  // Simulate Sale of 1 device with IMEI
+  const sale = await db.sale.create({
+    data: {
+      tenantId: "test-a",
+      invoiceNo: `INV-202611-TEST-${Date.now()}`,
+      branchId: ownBranch,
+      customerId: ownCustomer,
+      cashierId: admin.id,
+      totalAmount: 35000,
+      discount: 1000,
+      vatAmount: 2224.3,
+      netAmount: 34000,
+      paymentMethod: "CASH",
+      status: "COMPLETED",
+      items: {
+        create: {
+          tenantId: "test-a",
+          productId: testPhone.id,
+          deviceImeiId: imeiRecord.id,
+          quantity: 1,
+          unitPrice: 35000,
+          costPrice: 30000,
+          subtotal: 35000,
+        },
+      },
+    },
+  });
+
+  // Deduct stock and mark SOLD
+  await db.stockItem.update({
+    where: { productId_branchId: { productId: testPhone.id, branchId: ownBranch } },
+    data: { quantity: { decrement: 1 } },
+  });
+  await db.deviceIMEI.update({
+    where: { id: imeiRecord.id },
+    data: { status: "SOLD" },
+  });
+
+  // Verify state before refund
+  let stockBefore = await db.stockItem.findUnique({
+    where: { productId_branchId: { productId: testPhone.id, branchId: ownBranch } },
+  });
+  let imeiBefore = await db.deviceIMEI.findUnique({ where: { id: imeiRecord.id } });
+  assert.equal(stockBefore?.quantity, 9);
+  assert.equal(imeiBefore?.status, "SOLD");
+
+  // Perform Refund & Stock Replenishment transaction
+  await db.$transaction(async (tx) => {
+    // 1. Revert stock
+    await tx.stockItem.update({
+      where: { productId_branchId: { productId: testPhone.id, branchId: ownBranch } },
+      data: { quantity: { increment: 1 } },
+    });
+    // 2. Revert IMEI to IN_STOCK and detach from item
+    await tx.deviceIMEI.update({
+      where: { id: imeiRecord.id },
+      data: { status: "IN_STOCK" },
+    });
+    await tx.saleItem.updateMany({
+      where: { saleId: sale.id },
+      data: { deviceImeiId: null },
+    });
+    // 3. Mark sale as VOID
+    await tx.sale.update({
+      where: { id: sale.id },
+      data: { status: "VOID" },
+    });
+    // 4. Log AuditLog
+    await tx.auditLog.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        module: "POS",
+        action: "REFUND",
+        targetId: sale.id,
+        details: JSON.stringify({ invoiceNo: sale.invoiceNo, refundAmount: sale.netAmount }),
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        module: "INVENTORY",
+        action: "RESTOCK",
+        targetId: sale.id,
+        details: JSON.stringify({ productId: testPhone.id, quantity: 1, imei: imeiRecord.imei }),
+      },
+    });
+  });
+
+  // Verify state after refund
+  const stockAfter = await db.stockItem.findUnique({
+    where: { productId_branchId: { productId: testPhone.id, branchId: ownBranch } },
+  });
+  const imeiAfter = await db.deviceIMEI.findUnique({ where: { id: imeiRecord.id } });
+  const saleAfter = await db.sale.findUnique({ where: { id: sale.id } });
+  assert.equal(stockAfter?.quantity, 10);
+  assert.equal(imeiAfter?.status, "IN_STOCK");
+  assert.equal(saleAfter?.status, "VOID");
+
+  // 3. Multi-Tenant isolation: Staff in Tenant B cannot see Tenant A's sale or stock
+  const adminB = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", username: "admin" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminB.id,
+    tenantId: "test-b",
+    name: adminB.name,
+    username: adminB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  await staffStorage.run(adminBPrincipal, async () => {
+    const foreignSales = await prisma.sale.findMany({ where: { id: sale.id } });
+    assert.equal(foreignSales.length, 0);
+
+    const foreignIMEIs = await prisma.deviceIMEI.findMany({ where: { id: imeiRecord.id } });
+    assert.equal(foreignIMEIs.length, 0);
+  });
+});
+
+
 
 

@@ -1,22 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   RotateCcw,
   Search,
   Printer,
-  Building2,
-  Calendar,
+  Receipt,
+  ChevronRight,
   CheckCircle2,
   AlertTriangle,
-  Receipt,
-  ArrowRight,
-  PackageCheck,
-  ChevronRight,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -34,6 +30,16 @@ interface RefundRecord {
   reason: string;
   approvedBy: string;
   imeiCount: number;
+  status: string;
+}
+
+interface SaleLookupItem {
+  id: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  subtotal: number;
+  imei?: string;
 }
 
 interface SaleLookup {
@@ -41,9 +47,11 @@ interface SaleLookup {
   invoiceNo: string;
   createdAt: string;
   customerName: string;
-  items: string;
   netAmount: number;
+  totalAmount: number;
+  discount: number;
   paymentMethod: string;
+  items: SaleLookupItem[];
 }
 
 const VOID_REASONS = [
@@ -55,9 +63,8 @@ const VOID_REASONS = [
 
 const formatBkk = (d: string) => new Date(d).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", dateStyle: "medium", timeStyle: "short" });
 const itemsText = (items: any[]) =>
-  (items ?? []).map((it) => `${it.product?.name ?? "-"} (${it.quantity} ชิ้น)${it.imei ? ` IMEI ${it.imei}` : ""}`).join(", ");
+  (items ?? []).map((it) => `${it.product?.name ?? it.name ?? "-"} (${it.quantity ?? it.qty} ชิ้น)${it.imei ? ` IMEI ${it.imei}` : ""}`).join(", ");
 
-// Map a VOID sale from /api/sales (with voidInfo from the audit log) to a refund row.
 function toRefund(s: any): RefundRecord {
   return {
     id: s.id,
@@ -70,6 +77,7 @@ function toRefund(s: any): RefundRecord {
     reason: s.voidInfo?.reason || "-",
     approvedBy: s.voidInfo?.voidedBy?.name ?? "-",
     imeiCount: (s.items ?? []).filter((it: any) => it.imei).length,
+    status: s.status,
   };
 }
 
@@ -83,12 +91,14 @@ export default function RefundsPage() {
 
   const [selectedRefund, setSelectedRefund] = useState<RefundRecord | null>(null);
   const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [slipWidth, setSlipWidth] = useState<"80mm" | "58mm">("80mm");
 
-  // Create refund (full void) by invoice number
+  // Create refund modal
   const [createOpen, setCreateOpen] = useState(false);
   const [lookupNo, setLookupNo] = useState("");
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupResult, setLookupResult] = useState<SaleLookup | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<Record<string, boolean>>({});
   const [reason, setReason] = useState(VOID_REASONS[0]);
   const [reasonNote, setReasonNote] = useState("");
   const [voidBusy, setVoidBusy] = useState(false);
@@ -100,11 +110,12 @@ export default function RefundsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const params = new URLSearchParams({ branch: currentBranch.code, status: "VOID", take: "300" });
+      const params = new URLSearchParams({ branch: currentBranch.code, status: "ALL", take: "300" });
       const res = await fetch(`/api/sales?${params.toString()}`, { cache: "no-store" });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) throw new Error(json?.error || "โหลดรายการคืนเงินไม่สำเร็จ");
-      setRefunds((json.data as any[]).map(toRefund));
+      const voidSales = (json.data as any[]).filter((s) => s.status === "VOID" || s.status === "PARTIAL_REFUND");
+      setRefunds(voidSales.map(toRefund));
     } catch (err: any) {
       setLoadError(err?.message || "โหลดรายการคืนเงินไม่สำเร็จ");
     } finally {
@@ -121,6 +132,7 @@ export default function RefundsPage() {
   const openCreate = () => {
     setLookupNo("");
     setLookupResult(null);
+    setSelectedItemIds({});
     setReason(VOID_REASONS[0]);
     setReasonNote("");
     setFormError(null);
@@ -140,15 +152,33 @@ export default function RefundsPage() {
       if (!res.ok || !json?.success) throw new Error(json?.error || "ค้นหาบิลไม่สำเร็จ");
       const sale = (json.data as any[]).find((s) => s.invoiceNo.toLowerCase() === no.toLowerCase());
       if (!sale) throw new Error("ไม่พบบิลเลขที่นี้ในสาขาปัจจุบัน");
-      if (sale.status !== "COMPLETED") throw new Error("บิลนี้ถูกยกเลิก/คืนเงินไปแล้ว");
+      if (sale.status === "VOID") throw new Error("บิลนี้ถูกยกเลิก/คืนเงินครบถ้วนไปแล้ว");
+
+      const items: SaleLookupItem[] = (sale.items ?? []).map((it: any) => ({
+        id: it.id,
+        name: it.product?.name ?? "-",
+        qty: it.quantity,
+        unitPrice: it.unitPrice,
+        subtotal: it.subtotal,
+        imei: it.imei ?? undefined,
+      }));
+
+      const initialSelected: Record<string, boolean> = {};
+      items.forEach((it) => {
+        initialSelected[it.id] = true;
+      });
+      setSelectedItemIds(initialSelected);
+
       setLookupResult({
         id: sale.id,
         invoiceNo: sale.invoiceNo,
         createdAt: sale.createdAt,
         customerName: sale.customer?.name ?? "ลูกค้าทั่วไป (Walk-in)",
-        items: itemsText(sale.items),
         netAmount: sale.netAmount,
+        totalAmount: sale.totalAmount,
+        discount: sale.discount,
         paymentMethod: sale.paymentMethod,
+        items,
       });
     } catch (err: any) {
       setFormError(err?.message || "ค้นหาบิลไม่สำเร็จ");
@@ -157,20 +187,43 @@ export default function RefundsPage() {
     }
   };
 
+  const calculatedRefundTotal = useMemo(() => {
+    if (!lookupResult) return 0;
+    const items = lookupResult.items.filter((it) => selectedItemIds[it.id]);
+    if (items.length === 0) return 0;
+    if (items.length === lookupResult.items.length) return lookupResult.netAmount;
+    const gross = items.reduce((acc, it) => acc + it.subtotal, 0);
+    const disc = lookupResult.totalAmount > 0 ? (gross / lookupResult.totalAmount) * lookupResult.discount : 0;
+    return Math.max(0, Math.round((gross - disc) * 100) / 100);
+  }, [lookupResult, selectedItemIds]);
+
   const handleVoid = async () => {
     if (!lookupResult || voidBusy) return;
     const finalReason = reasonNote.trim() ? `${reason} - ${reasonNote.trim()}` : reason;
+
+    const itemsToRefund = lookupResult.items
+      .filter((it) => selectedItemIds[it.id])
+      .map((it) => ({ saleItemId: it.id, quantity: it.qty }));
+
+    if (itemsToRefund.length === 0) {
+      setFormError("กรุณาเลือกรายการสินค้าที่ต้องการคืนเงินอย่างน้อย 1 รายการ");
+      return;
+    }
+
     setVoidBusy(true);
     setFormError(null);
     try {
-      const res = await fetch(`/api/sales/${encodeURIComponent(lookupResult.id)}/void`, {
+      const res = await fetch(`/api/sales/${encodeURIComponent(lookupResult.id)}/refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: finalReason }),
+        body: JSON.stringify({
+          reason: finalReason,
+          items: itemsToRefund.length === lookupResult.items.length ? undefined : itemsToRefund,
+        }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) throw new Error(json?.error || "คืนเงินไม่สำเร็จ");
-      setNotice(`คืนเงินบิล ${lookupResult.invoiceNo} (${formatTHB(lookupResult.netAmount)}) และคืนสินค้าเข้าสต็อกเรียบร้อย`);
+      setNotice(`คืนเงินบิล ${lookupResult.invoiceNo} (${formatTHB(calculatedRefundTotal)}) และคืนสินค้าเข้าสต็อกเรียบร้อย`);
       setCreateOpen(false);
       await loadRefunds();
     } catch (err: any) {
@@ -205,19 +258,19 @@ export default function RefundsPage() {
             </h1>
           </div>
           <p className="text-sm text-slate-500">
-            บันทึกรายการคืนเงินลูกค้า ตรวจสอบการนำสินค้าคืนคลัง (Inventory Restock) และพิมพ์ใบลดหนี้/ใบรับคืนสินค้า
+            บันทึกรายการคืนเงินลูกค้า คืนสินค้าเข้าสต็อกสาขาอัตโนมัติ (Inventory Restock) และพิมพ์ใบลดหนี้/ใบรับคืนสินค้า
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <Link href="/sales-history">
-            <Button variant="outline" size="sm" className="text-xs gap-1.5">
+            <Button variant="outline" size="sm" className="text-xs gap-1.5 font-semibold">
               <Receipt className="h-4 w-4" />
               <span>กลับไปประวัติการขาย</span>
             </Button>
           </Link>
           {canVoid && (
-            <Button size="sm" onClick={openCreate} className="bg-rose-600 hover:bg-rose-700 text-white text-xs gap-1.5">
+            <Button size="sm" onClick={openCreate} className="bg-rose-600 hover:bg-rose-700 text-white text-xs gap-1.5 font-bold">
               <RotateCcw className="h-4 w-4" />
               <span>คืนเงิน / ยกเลิกบิล</span>
             </Button>
@@ -242,15 +295,15 @@ export default function RefundsPage() {
         <Card className="p-4 space-y-1">
           <span className="text-xs font-semibold text-slate-500">ยอดเงินคืนรวม (Total Refunded)</span>
           <div className="text-2xl font-bold font-mono text-rose-700">{formatTHB(totalRefundAmount)}</div>
-          <div className="text-[11px] text-slate-400">จากทั้งหมด {refunds.length} บิลที่ยกเลิก</div>
+          <div className="text-[11px] text-slate-400">จากทั้งหมด {refunds.length} บิลที่ยกเลิก/คืนเงิน</div>
         </Card>
 
         <Card className="p-4 space-y-1 border-emerald-200 bg-emerald-50/40">
           <span className="text-xs font-semibold text-emerald-800">คืนสินค้าเข้าคลังแล้ว (Restocked)</span>
           <div className="text-2xl font-bold font-mono text-emerald-700">
-            {refunds.length} บิล
+            {refunds.length} รายการ
           </div>
-          <div className="text-[11px] text-emerald-800">ยกเลิกทั้งบิล คืนสินค้าเข้าสต็อกอัตโนมัติทุกรายการ</div>
+          <div className="text-[11px] text-emerald-800">สินค้าทุกรายการคืนเข้าสต็อกสาขาและบันทึก Audit Log</div>
         </Card>
 
         <Card className="p-4 space-y-1">
@@ -258,7 +311,7 @@ export default function RefundsPage() {
           <div className="text-2xl font-bold font-mono text-slate-900">
             {refunds.reduce((sum, r) => sum + r.imeiCount, 0)} เครื่อง
           </div>
-          <div className="text-[11px] text-slate-400">ตัดของเสีย / คืนบางรายการ: ยังไม่รองรับ</div>
+          <div className="text-[11px] text-slate-400">สถานะ IMEI กลับเป็น IN_STOCK พร้อมขายใหม่</div>
         </Card>
       </div>
 
@@ -279,7 +332,7 @@ export default function RefundsPage() {
                 <th className="p-3 text-left">สินค้าที่คืน</th>
                 <th className="p-3 text-right">ยอดเงินคืน</th>
                 <th className="p-3 text-left">เหตุผล</th>
-                <th className="p-3 text-center">คืนสต็อก?</th>
+                <th className="p-3 text-center">ประเภท</th>
                 <th className="p-3 text-right">สลิปคืนเงิน</th>
               </tr>
             </thead>
@@ -312,14 +365,18 @@ export default function RefundsPage() {
                   </td>
                   <td className="p-3 text-blue-700 font-semibold">
                     {r.originalInvoiceNo}
-                    <div className="text-[10px] text-slate-400 font-normal">ขายเมื่อ {formatBkk(r.saleDate)}</div>
+                    <div className="text-[10px] text-slate-400 font-normal font-sans">ขายเมื่อ {formatBkk(r.saleDate)}</div>
                   </td>
                   <td className="p-3 font-sans text-slate-800">{r.customerName}</td>
                   <td className="p-3 font-sans text-slate-600 truncate max-w-xs">{r.items}</td>
                   <td className="p-3 text-right font-bold text-rose-700">{formatTHB(r.amount)}</td>
                   <td className="p-3 font-sans text-slate-500 text-[11px]">{r.reason}</td>
                   <td className="p-3 text-center font-sans">
-                    <Badge variant="success" className="text-[10px]">คืนคลังแล้ว</Badge>
+                    {r.status === "PARTIAL_REFUND" ? (
+                      <Badge variant="warning" className="text-[10px] bg-amber-100 text-amber-800 border-amber-300">คืนบางส่วน</Badge>
+                    ) : (
+                      <Badge variant="success" className="text-[10px]">คืนคลังแล้ว</Badge>
+                    )}
                   </td>
                   <td className="p-3 text-right font-sans">
                     <Button
@@ -329,7 +386,7 @@ export default function RefundsPage() {
                         setSelectedRefund(r);
                         setPrintModalOpen(true);
                       }}
-                      className="text-xs h-7 px-2 gap-1"
+                      className="text-xs h-7 px-2 gap-1 font-semibold"
                     >
                       <Printer className="h-3 w-3" />
                       <span>พิมพ์สลิป</span>
@@ -342,17 +399,39 @@ export default function RefundsPage() {
         </div>
       </Card>
 
-      {/* REFUND SLIP 80MM MODAL */}
+      {/* REFUND SLIP 80MM / 58MM MODAL */}
       <Dialog open={printModalOpen} onOpenChange={setPrintModalOpen}>
         <div className="max-w-md w-full">
           <DialogHeader>
             <DialogTitle onClose={() => setPrintModalOpen(false)}>
-              ใบคืนเงิน / ใบลดหนี้ (Credit Note Slip 80mm)
+              ใบคืนเงิน / ใบลดหนี้ (Credit Note Slip)
             </DialogTitle>
           </DialogHeader>
-          <DialogContent className="p-4 bg-slate-100 flex justify-center">
+          <DialogContent className="p-4 bg-slate-100 flex flex-col items-center">
+            {/* Format toggle */}
+            <div className="flex items-center gap-2 mb-3 bg-white p-1 rounded-xl border border-slate-300 text-xs no-print">
+              <button
+                type="button"
+                onClick={() => setSlipWidth("80mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  slipWidth === "80mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 80 มม.
+              </button>
+              <button
+                type="button"
+                onClick={() => setSlipWidth("58mm")}
+                className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                  slipWidth === "58mm" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                สลิป 58 มม.
+              </button>
+            </div>
+
             {selectedRefund && (
-              <div className="thermal-80mm bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900">
+              <div className={`${slipWidth === "58mm" ? "thermal-58mm" : "thermal-80mm"} bg-white border border-slate-300 p-4 text-xs font-mono space-y-2 rounded shadow-sm text-slate-900`}>
                 <div className="text-center border-b border-dashed border-slate-400 pb-2">
                   <div className="font-extrabold text-sm">MOBILESHOP HUB</div>
                   <div className="text-[10px]">{currentBranch.name}</div>
@@ -383,22 +462,22 @@ export default function RefundsPage() {
             <Button variant="outline" size="sm" onClick={() => setPrintModalOpen(false)}>
               ปิด
             </Button>
-            <Button size="sm" onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5">
+            <Button size="sm" onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 font-bold">
               <Printer className="h-4 w-4" />
-              <span>พิมพ์สลิป 80mm</span>
+              <span>พิมพ์สลิป ({slipWidth})</span>
             </Button>
           </DialogFooter>
         </div>
       </Dialog>
 
-      {/* CREATE REFUND (FULL VOID) MODAL */}
+      {/* CREATE REFUND MODAL WITH ITEM SELECTION */}
       <Dialog open={createOpen} onOpenChange={(o) => !voidBusy && setCreateOpen(o)} preventClose={voidBusy}>
         <DialogHeader>
-          <DialogTitle onClose={() => !voidBusy && setCreateOpen(false)}>คืนเงิน / ยกเลิกบิลขาย (ทั้งบิล)</DialogTitle>
+          <DialogTitle onClose={() => !voidBusy && setCreateOpen(false)}>คืนเงิน / ยกเลิกบิลขาย (Refund / Void)</DialogTitle>
         </DialogHeader>
         <DialogContent className="space-y-3 text-xs">
           <div>
-            <label className="font-semibold text-slate-700 mb-1 block">เลขที่ใบเสร็จ *</label>
+            <label className="font-semibold text-slate-700 mb-1 block">ค้นหาเลขที่ใบเสร็จ *</label>
             <div className="flex gap-2">
               <Input
                 placeholder="INV-202611-0001"
@@ -409,7 +488,7 @@ export default function RefundsPage() {
                 }}
                 className="font-mono text-xs"
               />
-              <Button variant="outline" size="sm" onClick={handleLookup} disabled={lookupBusy || !lookupNo.trim()} className="gap-1 text-xs">
+              <Button variant="outline" size="sm" onClick={handleLookup} disabled={lookupBusy || !lookupNo.trim()} className="gap-1 text-xs font-semibold">
                 <Search className="h-3.5 w-3.5" />
                 <span>{lookupBusy ? "กำลังค้นหา..." : "ค้นหา"}</span>
               </Button>
@@ -421,13 +500,46 @@ export default function RefundsPage() {
               <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3 space-y-1 font-mono">
                 <div className="flex justify-between font-bold text-slate-900">
                   <span>เลขที่บิล: {lookupResult.invoiceNo}</span>
-                  <span className="text-rose-700">{formatTHB(lookupResult.netAmount)}</span>
+                  <span className="text-rose-700">ยอดเงินคืน: {formatTHB(calculatedRefundTotal)}</span>
                 </div>
                 <div className="text-slate-500 font-sans">
                   {formatBkk(lookupResult.createdAt)} • ลูกค้า: {lookupResult.customerName} • {lookupResult.paymentMethod}
                 </div>
-                <div className="text-slate-600 font-sans">{lookupResult.items}</div>
               </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 mb-1.5 block">
+                  เลือกสินค้าที่ต้องการรับคืน (ติ๊กเพื่อคืนเงิน):
+                </label>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-2 bg-slate-50">
+                  {lookupResult.items.map((it) => (
+                    <label
+                      key={it.id}
+                      className="flex items-center justify-between p-1.5 rounded hover:bg-white cursor-pointer transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedItemIds[it.id]}
+                          onChange={(e) => {
+                            setSelectedItemIds((prev) => ({
+                              ...prev,
+                              [it.id]: e.target.checked,
+                            }));
+                          }}
+                          className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                        />
+                        <span className="font-medium text-slate-800">
+                          {it.qty}x {it.name}
+                          {it.imei && <span className="font-mono text-blue-600 text-[10px]"> (IMEI: {it.imei})</span>}
+                        </span>
+                      </div>
+                      <span className="font-mono font-bold text-slate-700">{formatTHB(it.subtotal)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="font-semibold text-slate-700 mb-1 block">เหตุผลการคืนเงิน *</label>
                 <select
@@ -442,13 +554,17 @@ export default function RefundsPage() {
                   ))}
                 </select>
               </div>
+
               <div>
                 <label className="font-semibold text-slate-700 mb-1 block">รายละเอียดเพิ่มเติม (ถ้ามี)</label>
                 <Input value={reasonNote} maxLength={300} onChange={(e) => setReasonNote(e.target.value)} className="text-xs" />
               </div>
+
               <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-slate-600">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                <span>คืนเงินเต็มจำนวนทั้งบิล และคืนสินค้า/เครื่อง IMEI ทุกรายการเข้าสต็อก (ยังไม่รองรับคืนบางรายการ)</span>
+                <span>
+                  สินค้าและเครื่อง IMEI ที่เลือกจะถูกคืนเข้าสต็อกสาขาอัตโนมัติ และบันทึก Audit Log เพื่อตรวจสอบ
+                </span>
               </div>
             </>
           )}
@@ -466,10 +582,10 @@ export default function RefundsPage() {
           <Button
             size="sm"
             onClick={handleVoid}
-            disabled={!lookupResult || voidBusy}
+            disabled={!lookupResult || voidBusy || calculatedRefundTotal <= 0}
             className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
           >
-            {voidBusy ? "กำลังดำเนินการ..." : "ยืนยันคืนเงิน & ยกเลิกบิล"}
+            {voidBusy ? "กำลังดำเนินการ..." : `ยืนยันคืนเงิน (${formatTHB(calculatedRefundTotal)})`}
           </Button>
         </DialogFooter>
       </Dialog>
