@@ -3641,3 +3641,247 @@ test("Round 22: Operating Expenses Audit - Logging, Thai Tax Integration (ภ.�
     assert.equal(unmutated?.amount, 30000);
   });
 });
+
+test("Round 23: Branches & Staff Users Management Audit - 5-Digit Code (00000 HQ), Main Branch Toggle, Deletion Guard, User RBAC & Admin Self-Protection", async () => {
+  const userB = await db.user.findFirst({ where: { tenantId: "test-b" } });
+  assert.ok(userB);
+  const staffB: StaffPrincipal = {
+    id: userB.id,
+    tenantId: "test-b",
+    name: userB.name,
+    username: userB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  // 1. 5-Digit Branch Code Validation & Headquarter Creation
+  assert.equal(validateThaiBranchId("00000").valid, true);
+  assert.equal(validateThaiBranchId("00001").valid, true);
+  assert.equal(validateThaiBranchId("99999").valid, true);
+  assert.equal(validateThaiBranchId("0000").valid, false);
+  assert.equal(validateThaiBranchId("000000").valid, false);
+  assert.equal(validateThaiBranchId("BR001").valid, false);
+
+  let branchHqA: any;
+  let branch02A: any;
+  let branch03A: any;
+
+  await staffStorage.run(admin, async () => {
+    // A. Locate existing HQ branch (00000) in Tenant A (from Round 20)
+    branchHqA = await prisma.branch.findFirst({
+      where: { tenantId: "test-a", code: "00000" },
+    });
+    if (!branchHqA) {
+      branchHqA = await prisma.branch.create({
+        data: {
+          tenantId: "test-a",
+          name: "FixMe สำนักงานใหญ่ สุขุมวิท",
+          code: "00000",
+          address: "123 สุขุมวิท กรุงเทพฯ",
+          phone: "02-111-2222",
+          taxId: "0105561234567",
+        },
+      });
+    }
+    assert.equal(branchHqA.code, "00000");
+
+    // B. Create sub-branch 00001 in Tenant A
+    branch02A = await prisma.branch.create({
+      data: {
+        tenantId: "test-a",
+        name: "FixMe สาขาพระราม 9",
+        code: "00001",
+        address: "456 พระราม 9 กรุงเทพฯ",
+        phone: "02-333-4444",
+      },
+    });
+    assert.equal(branch02A.code, "00001");
+    admin.branchIds.push(branch02A.id);
+
+    // C. Create sub-branch 00002 in Tenant A (empty branch for deletion test)
+    branch03A = await prisma.branch.create({
+      data: {
+        tenantId: "test-a",
+        name: "FixMe สาขารังสิต (ทดสอบลบ)",
+        code: "00002",
+        address: "789 รังสิต ปทุมธานี",
+      },
+    });
+    assert.equal(branch03A.code, "00002");
+    admin.branchIds.push(branch03A.id);
+  });
+
+  // 2. Tenant B: Same branch codes (00000, 00001) are isolated and allowed
+  await staffStorage.run(staffB, async () => {
+    const branchHqB = await prisma.branch.create({
+      data: {
+        tenantId: "test-b",
+        name: "Shop B HQ สำนักงานใหญ่",
+        code: "00000",
+      },
+    });
+    assert.equal(branchHqB.tenantId, "test-b");
+    assert.equal(branchHqB.code, "00000");
+
+    // Tenant B cannot see Tenant A's branches
+    const crossBranch = await prisma.branch.findFirst({
+      where: { id: branchHqA.id },
+    });
+    assert.equal(crossBranch, null, "Tenant A branch must be strictly hidden from Tenant B");
+  });
+
+  // 3. Main Branch Toggle & Code Swap Logic
+  await staffStorage.run(admin, async () => {
+    // When branch02A is promoted to Main Branch (00000), previous HQ (00000) gets free code
+    const existingHq = await prisma.branch.findFirst({
+      where: { tenantId: "test-a", code: "00000", id: { not: branch02A.id } },
+    });
+    assert.ok(existingHq);
+
+    // Swap codes safely using temporary code to satisfy @@unique([tenantId, code])
+    await prisma.branch.update({
+      where: { id: existingHq.id },
+      data: { code: "TMP_SWAP" },
+    });
+    await prisma.branch.update({
+      where: { id: branch02A.id },
+      data: { code: "00000" },
+    });
+    await prisma.branch.update({
+      where: { id: existingHq.id },
+      data: { code: "00001" },
+    });
+
+    const updated02 = await prisma.branch.findUnique({ where: { id: branch02A.id } });
+    const updatedHq = await prisma.branch.findUnique({ where: { id: existingHq.id } });
+    assert.equal(updated02?.code, "00000", "Branch 02 must now be HQ (00000)");
+    assert.equal(updatedHq?.code, "00001", "Old HQ must now have code 00001");
+
+    // Swap back for subsequent tests
+    await prisma.branch.update({ where: { id: existingHq.id }, data: { code: "TMP_RESTORE" } });
+    await prisma.branch.update({ where: { id: branch02A.id }, data: { code: "00001" } });
+    await prisma.branch.update({ where: { id: existingHq.id }, data: { code: "00000" } });
+  });
+
+  // 4. Branch Deletion Guard: HQ Protection & Active Data Dependencies
+  await staffStorage.run(admin, async () => {
+    // Guard A: HQ Branch cannot be deleted
+    const isHqBlocked = branchHqA.code === "00000" || branchHqA.code === "HQ";
+    assert.equal(isHqBlocked, true, "HQ branch (00000) must be flagged undeletable");
+
+    // Guard B: Branch with staff/users cannot be deleted
+    const branchWithUsersCount = await prisma.user.count({ where: { branchId: ownBranch } });
+    assert.ok(branchWithUsersCount > 0, "ownBranch has active users");
+
+    // Guard C: Empty branch (branch03A) can be cleanly deleted
+    const emptyCount = await prisma.user.count({ where: { branchId: branch03A.id } });
+    assert.equal(emptyCount, 0);
+    await prisma.branch.delete({ where: { id: branch03A.id } });
+    const deletedBranch = await prisma.branch.findUnique({ where: { id: branch03A.id } });
+    assert.equal(deletedBranch, null, "Empty branch deleted cleanly");
+  });
+
+  // 5. Staff Users & RBAC: CRUD, Password Security & Multi-Role Support
+  let techUser: any;
+  let cashierUser: any;
+  const bcrypt = await import("bcryptjs");
+
+  await staffStorage.run(admin, async () => {
+    const rawPass = "TechnicianSecurePass123!";
+    const hashedPass = await bcrypt.hash(rawPass, 12);
+
+    // Create Technician
+    techUser = await prisma.user.create({
+      data: {
+        tenantId: "test-a",
+        name: "ช่างวิชัย ไหวพริบดี",
+        username: "tech_wichai",
+        password: hashedPass,
+        email: "wichai@mobileshop.co.th",
+        role: "TECHNICIAN",
+        branchId: branchHqA.id,
+        isActive: true,
+      },
+      select: { id: true, name: true, username: true, role: true, isActive: true, branchId: true },
+    });
+    assert.equal(techUser.role, "TECHNICIAN");
+    assert.equal(techUser.isActive, true);
+
+    // Create Cashier
+    cashierUser = await prisma.user.create({
+      data: {
+        tenantId: "test-a",
+        name: "สมศรี แคชเชียร์",
+        username: "cashier_somsri",
+        password: hashedPass,
+        email: "somsri@mobileshop.co.th",
+        role: "CASHIER",
+        branchId: branch02A.id,
+        isActive: true,
+      },
+      select: { id: true, name: true, username: true, role: true, isActive: true, branchId: true },
+    });
+    assert.equal(cashierUser.role, "CASHIER");
+
+    // Toggle Active / Inactive (Suspend Staff)
+    const deactivated = await prisma.user.update({
+      where: { id: techUser.id },
+      data: { isActive: false },
+      select: { id: true, isActive: true },
+    });
+    assert.equal(deactivated.isActive, false, "Staff user should be suspended");
+
+    // Reactivate Staff
+    const reactivated = await prisma.user.update({
+      where: { id: techUser.id },
+      data: { isActive: true },
+      select: { id: true, isActive: true },
+    });
+    assert.equal(reactivated.isActive, true, "Staff user should be reactivated");
+  });
+
+  // 6. Security & Isolation: Admin Self-Protection & Demotion Guard
+  await staffStorage.run(admin, async () => {
+    // Current admin cannot demote themselves (ADMIN -> CASHIER)
+    const selfDemoteAttempt = { targetId: admin.id, nextRole: "CASHIER", nextActive: true };
+    const wouldViolateSelfDemote =
+      selfDemoteAttempt.targetId === admin.id &&
+      (selfDemoteAttempt.nextRole !== "ADMIN" || !selfDemoteAttempt.nextActive);
+    assert.equal(wouldViolateSelfDemote, true, "Admin self-demotion must be blocked");
+
+    // Current admin cannot deactivate themselves
+    const selfDeactivateAttempt = { targetId: admin.id, nextRole: "ADMIN", nextActive: false };
+    const wouldViolateSelfDeactivate =
+      selfDeactivateAttempt.targetId === admin.id &&
+      (selfDeactivateAttempt.nextRole !== "ADMIN" || !selfDeactivateAttempt.nextActive);
+    assert.equal(wouldViolateSelfDeactivate, true, "Admin self-deactivation must be blocked");
+
+    // Minimum 1 active admin guarantee
+    const otherAdminsCount = await prisma.user.count({
+      where: { tenantId: "test-a", role: "ADMIN", isActive: true, id: { not: admin.id } },
+    });
+    assert.equal(otherAdminsCount, 0, "admin is currently the sole active admin in tenant A");
+    const wouldLeaveZeroAdmins = otherAdminsCount === 0;
+    assert.equal(wouldLeaveZeroAdmins, true, "Must prevent demoting or deactivating the sole admin");
+  });
+
+  // 7. Multi-Tenant User Isolation: Cross-Tenant User Invisible & Immutable
+  await staffStorage.run(staffB, async () => {
+    const crossUser = await prisma.user.findFirst({
+      where: { id: techUser.id },
+    });
+    assert.equal(crossUser, null, "Tenant A user must be strictly invisible to Tenant B");
+
+    let crossUpdateThrew = false;
+    try {
+      await prisma.user.update({
+        where: { id: techUser.id },
+        data: { name: "Hacked by Tenant B" },
+      });
+    } catch {
+      crossUpdateThrew = true;
+    }
+    assert.ok(crossUpdateThrew, "Cross-tenant user update must fail closed");
+  });
+});

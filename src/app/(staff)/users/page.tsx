@@ -8,33 +8,31 @@ import {
   ShieldAlert,
   Wrench,
   ShoppingCart,
-  Plus,
   Search,
   Building2,
   Edit2,
   Trash2,
-  Key,
-  CheckCircle2,
-  XCircle,
-  Mail,
+  Eye,
+  EyeOff,
   UserPlus,
+  Lock,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table";
 
-export type RoleType = "SUPER_ADMIN" | "BRANCH_MANAGER" | "TECHNICIAN" | "CASHIER";
+export type RoleType = "ADMIN" | "MANAGER" | "TECHNICIAN" | "CASHIER";
 
 interface UserProfile {
   id: string;
   name: string;
   username: string;
   email?: string | null;
-  role: string;
+  role: RoleType | string;
   branchId: string;
   branch?: {
     id: string;
@@ -44,9 +42,13 @@ interface UserProfile {
   isActive?: boolean;
 }
 
-// UI role labels <-> API roles
-const toUiRole = (role: string) => (role === "ADMIN" ? "SUPER_ADMIN" : role === "MANAGER" ? "BRANCH_MANAGER" : role);
-const toApiRole = (role: string) => (role === "SUPER_ADMIN" ? "ADMIN" : role === "BRANCH_MANAGER" ? "MANAGER" : role);
+/** Normalize role strings from API or legacy format */
+const normalizeRole = (role: string): RoleType => {
+  if (role === "SUPER_ADMIN") return "ADMIN";
+  if (role === "BRANCH_MANAGER") return "MANAGER";
+  if (role === "ADMIN" || role === "MANAGER" || role === "TECHNICIAN" || role === "CASHIER") return role;
+  return "CASHIER";
+};
 
 /** Reads the JSON error message from a failed API response. */
 async function apiError(res: Response, fallback: string): Promise<string> {
@@ -54,53 +56,38 @@ async function apiError(res: Response, fallback: string): Promise<string> {
     const json = await res.json();
     if (json && typeof json.error === "string" && json.error) return json.error;
   } catch {
-    // Non-JSON body; use the fallback message.
+    // Non-JSON body; use fallback
   }
   return fallback;
 }
 
-
 const ROLE_CONFIG: Record<
-  string,
+  RoleType,
   { label: string; color: string; bg: string; border: string; icon: React.ComponentType<{ className?: string }> }
 > = {
-  SUPER_ADMIN: {
-    label: "ผู้ดูแลระบบสูงสุด",
-    color: "text-purple-700",
-    bg: "bg-purple-50",
-    border: "border-purple-200",
-    icon: Shield,
-  },
   ADMIN: {
-    label: "ผู้ดูแลระบบ",
+    label: "ผู้ดูแลระบบ (Admin)",
     color: "text-purple-700",
     bg: "bg-purple-50",
     border: "border-purple-200",
     icon: Shield,
-  },
-  BRANCH_MANAGER: {
-    label: "ผู้จัดการสาขา",
-    color: "text-blue-700",
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    icon: Building2,
   },
   MANAGER: {
-    label: "ผู้จัดการสาขา",
+    label: "ผู้จัดการสาขา (Manager)",
     color: "text-blue-700",
     bg: "bg-blue-50",
     border: "border-blue-200",
     icon: Building2,
   },
   TECHNICIAN: {
-    label: "ช่างเทคนิคซ่อม",
+    label: "ช่างเทคนิคซ่อม (Technician)",
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     border: "border-emerald-200",
     icon: Wrench,
   },
   CASHIER: {
-    label: "แคชเชียร์หน้าร้าน",
+    label: "แคชเชียร์หน้าร้าน (Cashier)",
     color: "text-amber-700",
     bg: "bg-amber-50",
     border: "border-amber-200",
@@ -109,11 +96,12 @@ const ROLE_CONFIG: Record<
 };
 
 export default function UsersPage() {
-  const { currentBranch, branches } = useApp();
+  const { currentBranch, branches, currentUser } = useApp();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [branchFilter, setBranchFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -122,16 +110,16 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  // Row-level busy state for toggle/delete actions
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Form Fields
   const [formName, setFormName] = useState("");
   const [formUsername, setFormUsername] = useState("");
   const [formPassword, setFormPassword] = useState("");
   const [formEmail, setFormEmail] = useState("");
-  const [formRole, setFormRole] = useState<string>("TECHNICIAN");
-  const [formBranchId, setFormBranchId] = useState(currentBranch.id);
+  const [formRole, setFormRole] = useState<RoleType>("TECHNICIAN");
+  const [formBranchId, setFormBranchId] = useState(currentBranch.id || "");
 
   // Fetch users from API
   useEffect(() => {
@@ -152,7 +140,13 @@ export default function UsersPage() {
         return;
       }
       setLoadError(null);
-      setUsers(data.map((u: UserProfile) => ({ ...u, role: toUiRole(u.role), isActive: u.isActive !== false })));
+      setUsers(
+        data.map((u: UserProfile) => ({
+          ...u,
+          role: normalizeRole(u.role),
+          isActive: u.isActive !== false,
+        }))
+      );
     } catch {
       setLoadError("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
     } finally {
@@ -165,9 +159,10 @@ export default function UsersPage() {
     setFormName("");
     setFormUsername("");
     setFormPassword("");
+    setShowPassword(false);
     setFormEmail("");
     setFormRole("TECHNICIAN");
-    setFormBranchId(currentBranch.id);
+    setFormBranchId(currentBranch.id || (branches[0]?.id ?? ""));
     setFormError(null);
     setModalOpen(true);
   };
@@ -177,8 +172,9 @@ export default function UsersPage() {
     setFormName(u.name);
     setFormUsername(u.username);
     setFormPassword("");
+    setShowPassword(false);
     setFormEmail(u.email || "");
-    setFormRole(u.role);
+    setFormRole(normalizeRole(u.role));
     setFormBranchId(u.branchId);
     setFormError(null);
     setModalOpen(true);
@@ -190,7 +186,13 @@ export default function UsersPage() {
       setFormError("กรุณากรอกชื่อและชื่อผู้ใช้งาน (Username)");
       return;
     }
-    // Password: required on create, optional on edit; 12-72 chars (server re-validates).
+
+    if (!formBranchId) {
+      setFormError("กรุณาเลือกสาขาที่พนักงานสังกัด");
+      return;
+    }
+
+    // Password validation: required on create, optional on edit
     if (!editingUser || formPassword) {
       if (formPassword.length < 12 || formPassword.length > 72) {
         setFormError("รหัสผ่านต้องยาว 12-72 ตัวอักษร");
@@ -198,11 +200,18 @@ export default function UsersPage() {
       }
     }
 
+    // Self demotion check in UI
+    const isSelf = editingUser && editingUser.id === currentUser?.id;
+    if (isSelf && formRole !== "ADMIN") {
+      setFormError("ไม่สามารถลดสิทธิ์บัญชีของตัวเองได้ (ต้องคงสถานะผู้ดูแลระบบ ADMIN)");
+      return;
+    }
+
     const payload: Record<string, unknown> = {
-      name: formName,
-      username: formUsername,
-      email: formEmail,
-      role: toApiRole(formRole),
+      name: formName.trim(),
+      username: formUsername.trim(),
+      email: formEmail.trim() || null,
+      role: formRole,
       branchId: formBranchId,
     };
     if (formPassword) payload.password = formPassword;
@@ -232,8 +241,15 @@ export default function UsersPage() {
 
   const handleToggleActive = async (u: UserProfile) => {
     if (busyUserId) return;
+    if (u.id === currentUser?.id) {
+      alert("ไม่สามารถระงับบัญชีของตัวเองได้");
+      return;
+    }
+
     const next = !u.isActive;
-    if (!next && !confirm(`ระงับการเข้าใช้งานของ "${u.name}" ใช่หรือไม่? ผู้ใช้จะถูกออกจากระบบทันที`)) return;
+    if (!next && !confirm(`ระงับการเข้าใช้งานของ "${u.name}" ใช่หรือไม่? ผู้ใช้จะถูกออกจากระบบทันที`)) {
+      return;
+    }
     setBusyUserId(u.id);
     try {
       const res = await fetch("/api/users", {
@@ -253,10 +269,20 @@ export default function UsersPage() {
     }
   };
 
-  // Server performs a soft delete (deactivate + revoke sessions).
   const handleDeleteUser = async (id: string, name: string) => {
     if (busyUserId) return;
-    if (!confirm(`ต้องการปิดการใช้งานพนักงาน "${name}" หรือไม่? (ข้อมูลประวัติจะยังถูกเก็บไว้ และเปิดใช้งานใหม่ได้ภายหลัง)`)) return;
+    if (id === currentUser?.id) {
+      alert("ไม่สามารถลบบัญชีของตัวเองได้");
+      return;
+    }
+
+    if (
+      !confirm(
+        `ต้องการปิดการใช้งานพนักงาน "${name}" หรือไม่?\n(ข้อมูลประวัติการทำงาน การซ่อม และการขายจะยังคงอยู่ และเปิดใช้งานใหม่ได้เสมอ)`
+      )
+    ) {
+      return;
+    }
     setBusyUserId(id);
     try {
       const res = await fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -274,19 +300,19 @@ export default function UsersPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
-      const matchRole =
-        roleFilter === "ALL" ||
-        u.role === roleFilter ||
-        (roleFilter === "SUPER_ADMIN" && u.role === "ADMIN") ||
-        (roleFilter === "BRANCH_MANAGER" && u.role === "MANAGER");
+      const matchRole = roleFilter === "ALL" || u.role === roleFilter;
+      const matchStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ACTIVE" && u.isActive) ||
+        (statusFilter === "INACTIVE" && !u.isActive);
       const matchBranch = branchFilter === "ALL" || u.branch?.code === branchFilter || u.branchId === branchFilter;
       const matchSearch =
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchRole && matchBranch && matchSearch;
+      return matchRole && matchStatus && matchBranch && matchSearch;
     });
-  }, [users, roleFilter, branchFilter, searchQuery]);
+  }, [users, roleFilter, statusFilter, branchFilter, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -298,10 +324,10 @@ export default function UsersPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">
-              พนักงาน & สิทธิ์การใช้งาน (Staff & Permissions)
+              พนักงาน & สิทธิ์การใช้งาน (Staff & RBAC)
             </h1>
             <p className="text-xs text-slate-500">
-              จัดการบทบาทหน้าที่ (Super Admin, Branch Manager, Technician, Cashier) สังกัดสาขา และอัตราคอมมิชชั่น
+              กำหนดบทบาท (Admin, Manager, Technician, Cashier) สาขาที่สังกัด ความปลอดภัยรหัสผ่าน และสถานะการทำงาน
             </p>
           </div>
         </div>
@@ -338,7 +364,7 @@ export default function UsersPage() {
               <Shield className="h-4 w-4 text-purple-600" />
             </div>
             <div className="text-2xl font-bold text-purple-900 tabular-nums">
-              {users.filter((u) => u.role.includes("ADMIN") || u.role.includes("MANAGER")).length}{" "}
+              {users.filter((u) => u.role === "ADMIN" || u.role === "MANAGER").length}{" "}
               <span className="text-xs font-normal text-purple-600">คน</span>
             </div>
           </CardContent>
@@ -347,7 +373,7 @@ export default function UsersPage() {
         <Card className="border-emerald-200 bg-emerald-50/40 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between text-xs text-emerald-700 mb-1">
-              <span>ช่างเทคนิคประจำร้าน</span>
+              <span>ช่างเทคนิคซ่อม</span>
               <Wrench className="h-4 w-4 text-emerald-600" />
             </div>
             <div className="text-2xl font-bold text-emerald-800 tabular-nums">
@@ -385,14 +411,14 @@ export default function UsersPage() {
               <option value="ALL">ทุกสาขา</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.code}>
-                  {b.name}
+                  {b.name} ({b.code})
                 </option>
               ))}
             </select>
           </div>
 
           <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-1 bg-slate-50 text-xs">
-            {["ALL", "SUPER_ADMIN", "BRANCH_MANAGER", "TECHNICIAN", "CASHIER"].map((r) => (
+            {(["ALL", "ADMIN", "MANAGER", "TECHNICIAN", "CASHIER"] as const).map((r) => (
               <button
                 key={r}
                 onClick={() => setRoleFilter(r)}
@@ -403,10 +429,28 @@ export default function UsersPage() {
                 }`}
               >
                 {r === "ALL" && "ทั้งหมด"}
-                {r === "SUPER_ADMIN" && "Admin"}
-                {r === "BRANCH_MANAGER" && "ผู้จัดการ"}
-                {r === "TECHNICIAN" && "ช่าง"}
+                {r === "ADMIN" && "Admin"}
+                {r === "MANAGER" && "ผู้จัดการ"}
+                {r === "TECHNICIAN" && "ช่างซ่อม"}
                 {r === "CASHIER" && "แคชเชียร์"}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-1 bg-slate-50 text-xs">
+            {(["ALL", "ACTIVE", "INACTIVE"] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                  statusFilter === st
+                    ? "bg-white text-slate-900 shadow-2xs border border-slate-200/80 font-semibold"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                {st === "ALL" && "ทุกสถานะ"}
+                {st === "ACTIVE" && "ใช้งานอยู่"}
+                {st === "INACTIVE" && "ถูกระงับ"}
               </button>
             ))}
           </div>
@@ -430,96 +474,118 @@ export default function UsersPage() {
             <TableHeader className="bg-slate-50/75 border-b border-slate-200">
               <TableRow>
                 <TableHead className="text-xs font-semibold text-slate-600">พนักงาน / ข้อมูลติดต่อ</TableHead>
-                <TableHead className="text-xs font-semibold text-slate-600">ตำแหน่ง & สิทธิ์</TableHead>
-                <TableHead className="text-xs font-semibold text-slate-600">สาขาประจำการ</TableHead>
-                <TableHead className="text-xs font-semibold text-slate-600 text-center">สถานะ</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-600">ตำแหน่ง & สิทธิ์ (Role)</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-600">สังกัดสาขา</TableHead>
+                <TableHead className="text-xs font-semibold text-slate-600 text-center">สถานะการใช้งาน</TableHead>
                 <TableHead className="text-xs font-semibold text-slate-600 text-center">จัดการ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(loading || loadError || filteredUsers.length === 0) && (
                 <TableRow>
-                  <TableCell colSpan={5} className={`py-8 text-center text-xs ${loadError ? "text-rose-600" : "text-slate-400"}`}>
-                    {loading ? "กำลังโหลด..." : loadError ? loadError : "ไม่พบพนักงาน"}
+                  <TableCell
+                    colSpan={5}
+                    className={`py-8 text-center text-xs ${loadError ? "text-rose-600" : "text-slate-400"}`}
+                  >
+                    {loading ? "กำลังโหลดข้อมูล..." : loadError ? loadError : "ไม่พบพนักงานที่ค้นหา"}
                   </TableCell>
                 </TableRow>
               )}
-              {!loading && filteredUsers.map((u) => {
-                const conf = ROLE_CONFIG[u.role] || ROLE_CONFIG.CASHIER;
-                const RoleIcon = conf.icon;
+              {!loading &&
+                filteredUsers.map((u) => {
+                  const roleKey = normalizeRole(u.role);
+                  const conf = ROLE_CONFIG[roleKey] || ROLE_CONFIG.CASHIER;
+                  const RoleIcon = conf.icon;
+                  const isSelf = u.id === currentUser?.id;
 
-                return (
-                  <TableRow key={u.id} className="hover:bg-slate-50/60 transition-colors">
-                    <TableCell className="py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 font-bold text-xs text-slate-700 border border-slate-200">
-                          {u.name.slice(0, 2)}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-xs text-slate-900">{u.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">
-                            @{u.username} • {u.email || "ไม่มีอีเมล"}
+                  return (
+                    <TableRow key={u.id} className="hover:bg-slate-50/60 transition-colors">
+                      <TableCell className="py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 font-bold text-xs text-slate-700 border border-slate-200">
+                            {u.name.slice(0, 2)}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-xs text-slate-900">{u.name}</span>
+                              {isSelf && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                                  บัญชีของคุณ
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              @{u.username} • {u.email || "ไม่มีอีเมล"}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </TableCell>
+                      </TableCell>
 
-                    <TableCell className="py-3">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${conf.bg} ${conf.color} ${conf.border}`}
-                      >
-                        <RoleIcon className="h-3 w-3" />
-                        <span>{conf.label}</span>
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="py-3">
-                      <span className="text-xs font-medium text-slate-700">
-                        {u.branch?.name || u.branchId}
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="py-3 text-center">
-                      <button
-                        onClick={() => handleToggleActive(u)}
-                        disabled={busyUserId !== null}
-                        className="cursor-pointer disabled:cursor-wait disabled:opacity-60"
-                        title="คลิกเพื่อสลับสถานะ"
-                      >
-                        {u.isActive ? (
-                          <Badge variant="success" className="text-[10px]">
-                            เปิดใช้งาน
-                          </Badge>
-                        ) : (
-                          <Badge variant="danger" className="text-[10px]">
-                            ระงับการเข้าใช้
-                          </Badge>
-                        )}
-                      </button>
-                    </TableCell>
-
-                    <TableCell className="py-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          onClick={() => openEditModal(u)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-                          title="แก้ไขข้อมูลพนักงาน"
+                      <TableCell className="py-3">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${conf.bg} ${conf.color} ${conf.border}`}
                         >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
+                          <RoleIcon className="h-3 w-3" />
+                          <span>{conf.label}</span>
+                        </span>
+                      </TableCell>
+
+                      <TableCell className="py-3">
+                        <div className="text-xs font-medium text-slate-700">
+                          {u.branch?.name || "ไม่ระบุสาขา"}
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          รหัสสาขา: {u.branch?.code || "-"}
+                        </span>
+                      </TableCell>
+
+                      <TableCell className="py-3 text-center">
                         <button
-                          onClick={() => handleDeleteUser(u.id, u.name)}
-                          disabled={busyUserId !== null || !u.isActive}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="ปิดการใช้งานพนักงาน"
+                          onClick={() => handleToggleActive(u)}
+                          disabled={busyUserId !== null || isSelf}
+                          className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 transition-opacity"
+                          title={
+                            isSelf
+                              ? "ไม่สามารถระงับบัญชีของตัวเองได้"
+                              : u.isActive
+                              ? "คลิกเพื่อระงับการเข้าใช้"
+                              : "คลิกเพื่อเปิดใช้งาน"
+                          }
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          {u.isActive ? (
+                            <Badge variant="success" className="text-[10px]">
+                              เปิดใช้งาน
+                            </Badge>
+                          ) : (
+                            <Badge variant="danger" className="text-[10px]">
+                              ระงับการเข้าใช้
+                            </Badge>
+                          )}
                         </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                      </TableCell>
+
+                      <TableCell className="py-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => openEditModal(u)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                            title="แก้ไขข้อมูลพนักงาน"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.name)}
+                            disabled={busyUserId !== null || !u.isActive || isSelf}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                            title={isSelf ? "ไม่สามารถลบบัญชีของตัวเองได้" : "ปิดการใช้งานพนักงาน (Soft Delete)"}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
             </TableBody>
           </Table>
         </div>
@@ -533,6 +599,16 @@ export default function UsersPage() {
           </DialogTitle>
         </DialogHeader>
         <DialogContent className="space-y-4">
+          {editingUser?.id === currentUser?.id && (
+            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>คุณกำลังแก้ไขบัญชีของตัวเอง:</strong> ต้องคงสถานะผู้ดูแลระบบ (ADMIN) และเปิดใช้งานอยู่เสมอ
+                เพื่อป้องกันการสูญเสียสิทธิ์การบริหารระบบ
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-700 mb-1 block">ชื่อ-นามสกุล *</label>
@@ -557,15 +633,27 @@ export default function UsersPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-700 mb-1 block">
-                {editingUser ? "รหัสผ่านใหม่ 12-72 ตัว (เว้นว่างหากไม่เปลี่ยน)" : "รหัสผ่านเริ่มต้น * (12-72 ตัวอักษร)"}
+                {editingUser ? "รหัสผ่านใหม่ (เว้นว่างหากไม่ต้องการเปลี่ยน)" : "รหัสผ่านเริ่มต้น * (12-72 ตัวอักษร)"}
               </label>
-              <Input
-                type="password"
-                placeholder={editingUser ? "••••••••" : "อย่างน้อย 12 ตัวอักษร"}
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                className="text-xs h-9 font-mono"
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder={editingUser ? "••••••••••••" : "อย่างน้อย 12 ตัวอักษร"}
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  className="text-xs h-9 font-mono pr-8"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                ความยาว 12 - 72 ตัวอักษร (เข้ารหัสด้วย Bcrypt 12 rounds)
+              </span>
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-700 mb-1 block">อีเมลพนักงาน</label>
@@ -581,14 +669,15 @@ export default function UsersPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-700 mb-1 block">ตำแหน่ง & สิทธิ์ *</label>
+              <label className="text-xs font-semibold text-slate-700 mb-1 block">ตำแหน่ง & สิทธิ์ (Role) *</label>
               <select
                 value={formRole}
-                onChange={(e) => setFormRole(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 bg-white"
+                onChange={(e) => setFormRole(e.target.value as RoleType)}
+                disabled={editingUser?.id === currentUser?.id}
+                className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 bg-white disabled:bg-slate-100 disabled:cursor-not-allowed"
               >
-                <option value="SUPER_ADMIN">ผู้ดูแลระบบสูงสุด (SUPER_ADMIN)</option>
-                <option value="BRANCH_MANAGER">ผู้จัดการสาขา (BRANCH_MANAGER)</option>
+                <option value="ADMIN">ผู้ดูแลระบบ (ADMIN)</option>
+                <option value="MANAGER">ผู้จัดการสาขา (MANAGER)</option>
                 <option value="TECHNICIAN">ช่างเทคนิคซ่อม (TECHNICIAN)</option>
                 <option value="CASHIER">แคชเชียร์หน้าร้าน (CASHIER)</option>
               </select>
@@ -610,9 +699,13 @@ export default function UsersPage() {
             </div>
           </div>
 
-          <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-400">
-            ค่าคอมมิชชั่นและฐานเงินเดือน: ยังไม่รองรับในหน้านี้ (จัดการได้ที่เมนูเงินเดือน)
-          </p>
+          <div className="border-t border-slate-100 pt-3 flex items-center gap-2 text-[11px] text-slate-500">
+            <Lock className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <span>
+              การเปลี่ยนรหัสผ่าน สิทธิ์ หรือสาขา จะเพิกถอน Session เดิมที่เข้าใช้งานอยู่ทันทีเพื่อความปลอดภัย
+            </span>
+          </div>
+
           {formError && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">
               {formError}

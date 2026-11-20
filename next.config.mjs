@@ -17,6 +17,23 @@ const nextConfig = {
   devIndicators: false,
   poweredByHeader: false,
   distDir: process.env.PORTAL_E2E === "true" ? ".local/next-e2e" : ".next",
+  webpack: (config) => {
+    config.resolve.plugins = config.resolve.plugins || [];
+    config.resolve.plugins.push({
+      apply: (resolver) => {
+        const target = resolver.ensureHook("resolve");
+        resolver.getHook("resolve").tapAsync("CrossDriveWorktreePlugin", (request, resolveContext, callback) => {
+          if (request.request && /^\.[\\/][A-Za-z]:[\\/]/.test(request.request)) {
+            const fixedPath = request.request.replace(/^\.[\\/]/, "");
+            const obj = { ...request, request: fixedPath };
+            return resolver.doResolve(target, obj, null, resolveContext, callback);
+          }
+          callback();
+        });
+      },
+    });
+    return config;
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

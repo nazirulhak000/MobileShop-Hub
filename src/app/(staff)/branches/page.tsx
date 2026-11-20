@@ -8,24 +8,22 @@ import {
   Search,
   MapPin,
   Phone,
-  FileText,
   Users,
   Wrench,
-  Package,
   Edit2,
   Trash2,
   CheckCircle2,
   ArrowRight,
   ShieldCheck,
-  Building,
+  Star,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table";
+import { validateThaiTaxId } from "@/lib/utils";
 
 interface BranchItem {
   id: string;
@@ -39,6 +37,8 @@ interface BranchItem {
     repairJobs: number;
     stockItems: number;
     sales: number;
+    deviceImeis?: number;
+    expenses?: number;
   };
 }
 
@@ -66,9 +66,12 @@ export default function BranchesPage() {
   // Form State
   const [formName, setFormName] = useState("");
   const [formCode, setFormCode] = useState("");
+  const [formIsMain, setFormIsMain] = useState(false);
   const [formAddress, setFormAddress] = useState("");
   const [formPhone, setFormPhone] = useState("");
-  const [formTaxId, setFormTaxId] = useState("0105567012345");
+  const [formTaxId, setFormTaxId] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Load from API
   useEffect(() => {
@@ -94,44 +97,89 @@ export default function BranchesPage() {
     }
   };
 
+  const getSuggestedNextCode = () => {
+    const hasHq = branches.some((b) => b.code === "00000" || b.code === "HQ");
+    if (!hasHq) return "00000";
+
+    const used = new Set(branches.map((b) => b.code));
+    for (let i = 1; i <= 99999; i++) {
+      const candidate = String(i).padStart(5, "0");
+      if (!used.has(candidate)) return candidate;
+    }
+    return `0000${branches.length + 1}`.slice(-5);
+  };
+
   const openCreateModal = () => {
     setEditingBranch(null);
+    const hasHq = branches.some((b) => b.code === "00000" || b.code === "HQ");
+    const nextCode = getSuggestedNextCode();
     setFormName("");
-    setFormCode(`BR-0${branches.length + 1}`);
+    setFormCode(nextCode);
+    setFormIsMain(!hasHq);
     setFormAddress("");
-    setFormPhone("02-xxx-xxxx");
+    setFormPhone("");
     setFormTaxId("0105567012345");
+    setFormError(null);
     setModalOpen(true);
   };
 
   const openEditModal = (b: BranchItem) => {
+    const isHq = b.code === "00000" || b.code === "HQ";
     setEditingBranch(b);
     setFormName(b.name);
     setFormCode(b.code);
+    setFormIsMain(isHq);
     setFormAddress(b.address || "");
     setFormPhone(b.phone || "");
     setFormTaxId(b.taxId || "0105567012345");
+    setFormError(null);
     setModalOpen(true);
   };
 
+  const handleToggleIsMain = (checked: boolean) => {
+    setFormIsMain(checked);
+    if (checked) {
+      setFormCode("00000");
+    } else {
+      if (formCode === "00000" || formCode === "HQ") {
+        setFormCode(getSuggestedNextCode());
+      }
+    }
+  };
+
   const handleSaveBranch = async () => {
-    if (!formName || !formCode) {
-      alert("กรุณาระบุชื่อสาขาและรหัสสาขา");
+    if (!formName.trim()) {
+      setFormError("กรุณาระบุชื่อสาขา");
+      return;
+    }
+    const cleanCode = formCode.trim().toUpperCase();
+    if (!cleanCode) {
+      setFormError("กรุณาระบุรหัสสาขา (5 หลัก เช่น 00000)");
       return;
     }
 
-    try {
-      if (editingBranch) {
-        // Update
-        const payload = {
-          id: editingBranch.id,
-          name: formName,
-          code: formCode,
-          address: formAddress,
-          phone: formPhone,
-          taxId: formTaxId,
-        };
+    if (formTaxId.trim() && formTaxId.trim() !== "0105567012345") {
+      const taxValidation = validateThaiTaxId(formTaxId.trim());
+      if (!taxValidation.valid) {
+        setFormError(taxValidation.message || "เลขประจำตัวผู้เสียภาษี 13 หลักไม่ถูกต้อง");
+        return;
+      }
+    }
 
+    setSaving(true);
+    setFormError(null);
+    try {
+      const payload: Record<string, any> = {
+        name: formName.trim(),
+        code: cleanCode,
+        isMain: formIsMain,
+        address: formAddress.trim() || null,
+        phone: formPhone.trim() || null,
+        taxId: formTaxId.trim() || null,
+      };
+
+      if (editingBranch) {
+        payload.id = editingBranch.id;
         const res = await fetch("/api/branches", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -139,23 +187,10 @@ export default function BranchesPage() {
         });
 
         if (!res.ok) {
-          alert(await readApiError(res));
+          setFormError(await readApiError(res));
           return;
         }
-        const updated = await res.json();
-        setBranches((prev) =>
-          prev.map((b) => (b.id === editingBranch.id ? { ...b, ...updated } : b))
-        );
       } else {
-        // Create
-        const payload = {
-          name: formName,
-          code: formCode,
-          address: formAddress,
-          phone: formPhone,
-          taxId: formTaxId,
-        };
-
         const res = await fetch("/api/branches", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -163,33 +198,77 @@ export default function BranchesPage() {
         });
 
         if (!res.ok) {
-          alert(await readApiError(res));
+          setFormError(await readApiError(res));
           return;
         }
-        await fetchBranches();
       }
 
+      await fetchBranches();
       setModalOpen(false);
-    } catch (err) {
-      console.error("Save error:", err);
-      alert("บันทึกไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่");
+    } catch {
+      setFormError("บันทึกไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่");
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDeleteBranch = async (id: string, code: string) => {
-    if (code === "HQ") {
-      alert("ไม่สามารถลบสำนักงานใหญ่ (HQ) ได้");
+  const handleSetMainBranch = async (b: BranchItem) => {
+    if (!confirm(`คุณต้องการตั้งสาขา "${b.name}" ให้เป็นสำนักงานใหญ่ (HQ - 00000) ใช่หรือไม่?\n(ระบบจะสลับรหัสสาขาสำนักงานใหญ่เดิมให้อัตโนมัติ)`)) {
       return;
     }
-    if (confirm(`คุณแน่ใจว่าต้องการลบสาขา ${code} หรือไม่?`)) {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/branches", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: b.id, isMain: true }),
+      });
+      if (!res.ok) {
+        alert(await readApiError(res));
+        return;
+      }
+      await fetchBranches();
+    } catch {
+      alert("ไม่สามารถเปลี่ยนสำนักงานใหญ่ได้ กรุณาลองใหม่");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteBranch = async (b: BranchItem) => {
+    const isHq = b.code === "00000" || b.code === "HQ";
+    if (isHq) {
+      alert("ไม่สามารถลบสาขาสำนักงานใหญ่ (HQ - 00000) ได้");
+      return;
+    }
+
+    const totalActive =
+      (b._count?.users ?? 0) +
+      (b._count?.repairJobs ?? 0) +
+      (b._count?.stockItems ?? 0) +
+      (b._count?.sales ?? 0);
+
+    if (totalActive > 0) {
+      alert(
+        `ไม่สามารถลบสาขา ${b.code} ได้ เนื่องจากยังมีข้อมูลผูกอยู่:\n` +
+          `- พนักงาน: ${b._count?.users ?? 0} คน\n` +
+          `- งานซ่อม: ${b._count?.repairJobs ?? 0} รายการ\n` +
+          `- สต็อกสินค้า: ${b._count?.stockItems ?? 0} รายการ\n` +
+          `- ยอดขาย: ${b._count?.sales ?? 0} รายการ\n\n` +
+          `กรุณาย้ายหรือเคลียร์ข้อมูลดังกล่าวก่อนทำการลบสาขา`
+      );
+      return;
+    }
+
+    if (confirm(`คุณแน่ใจว่าต้องการลบสาขา "${b.name}" (${b.code}) หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้`)) {
       try {
-        const res = await fetch(`/api/branches?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+        const res = await fetch(`/api/branches?id=${encodeURIComponent(b.id)}`, { method: "DELETE" });
         if (!res.ok) {
           alert(await readApiError(res));
           return;
         }
-        setBranches((prev) => prev.filter((b) => b.id !== id));
-      } catch (err) {
+        setBranches((prev) => prev.filter((item) => item.id !== b.id));
+      } catch {
         alert("ลบสาขาไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่");
       }
     }
@@ -199,7 +278,8 @@ export default function BranchesPage() {
     (b) =>
       b.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (b.address && b.address.toLowerCase().includes(searchQuery.toLowerCase()))
+      (b.address && b.address.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (b.taxId && b.taxId.includes(searchQuery))
   );
 
   return (
@@ -215,7 +295,7 @@ export default function BranchesPage() {
               จัดการข้อมูลสาขา (Branch Management)
             </h1>
             <p className="text-xs text-slate-500">
-              จัดการข้อมูลที่ตั้ง เลขประจำตัวผู้เสียภาษี เบอร์ติดต่อ และโอนย้ายสลับสาขาทำงาน
+              จัดการสำนักงานใหญ่ (HQ - 00000) สาขาย่อย เลขประจำตัวผู้เสียภาษี และสลับสาขาทำงาน
             </p>
           </div>
         </div>
@@ -248,11 +328,11 @@ export default function BranchesPage() {
         <Card className="border-emerald-200 bg-emerald-50/40 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between text-xs text-emerald-700 mb-1">
-              <span>สาขาที่ใช้งานปัจจุบัน</span>
+              <span>สาขาที่เปิดใช้งานขณะนี้</span>
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
             <div className="text-lg font-bold text-emerald-800 truncate">
-              {currentBranch.code} ({currentBranch.name.split(" ")[1] || "HQ"})
+              {currentBranch.code || "00000"} : {currentBranch.name || "สำนักงานใหญ่"}
             </div>
           </CardContent>
         </Card>
@@ -264,7 +344,7 @@ export default function BranchesPage() {
               <Users className="h-4 w-4 text-blue-600" />
             </div>
             <div className="text-2xl font-bold text-blue-900 tabular-nums">
-              {branches.reduce((acc, b) => acc + (b._count?.users || 2), 0)}{" "}
+              {branches.reduce((acc, b) => acc + (b._count?.users ?? 0), 0)}{" "}
               <span className="text-xs font-normal text-blue-600">คน</span>
             </div>
           </CardContent>
@@ -277,7 +357,7 @@ export default function BranchesPage() {
               <Wrench className="h-4 w-4 text-purple-600" />
             </div>
             <div className="text-2xl font-bold text-purple-900 tabular-nums">
-              {branches.reduce((acc, b) => acc + (b._count?.repairJobs || 3), 0)}{" "}
+              {branches.reduce((acc, b) => acc + (b._count?.repairJobs ?? 0), 0)}{" "}
               <span className="text-xs font-normal text-purple-600">เคส</span>
             </div>
           </CardContent>
@@ -289,7 +369,7 @@ export default function BranchesPage() {
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
           <Input
-            placeholder="ค้นหาชื่อสาขา, รหัสสาขา, หรือที่อยู่..."
+            placeholder="ค้นหาชื่อสาขา, รหัสสาขา (00000), หรือที่อยู่..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 text-xs h-9 bg-slate-50/50"
@@ -298,9 +378,18 @@ export default function BranchesPage() {
       </div>
 
       {/* Branch Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {loading && branches.length === 0 ? (
+        <div className="py-12 text-center text-xs text-slate-400">กำลังโหลดข้อมูลสาขา...</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredBranches.map((b) => {
           const isCurrent = currentBranch.code === b.code || currentBranch.id === b.id;
+          const isHq = b.code === "00000" || b.code === "HQ";
+          const hasDependencies =
+            (b._count?.users ?? 0) > 0 ||
+            (b._count?.repairJobs ?? 0) > 0 ||
+            (b._count?.stockItems ?? 0) > 0 ||
+            (b._count?.sales ?? 0) > 0;
 
           return (
             <Card
@@ -308,6 +397,8 @@ export default function BranchesPage() {
               className={`border transition-all duration-200 shadow-2xs relative ${
                 isCurrent
                   ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/15"
+                  : isHq
+                  ? "border-purple-300/80 bg-purple-50/10 hover:border-purple-400"
                   : "border-slate-200 bg-white hover:border-slate-300"
               }`}
             >
@@ -315,28 +406,46 @@ export default function BranchesPage() {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-center gap-2.5">
                     <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-xl font-bold text-sm ${
-                        b.code === "HQ"
+                      className={`flex h-10 w-10 items-center justify-center rounded-xl font-mono font-bold text-xs ${
+                        isHq
                           ? "bg-purple-100 text-purple-700 border border-purple-200"
                           : "bg-blue-100 text-blue-700 border border-blue-200"
                       }`}
+                      title={isHq ? "สำนักงานใหญ่ (HQ - 00000)" : `รหัสสาขา: ${b.code}`}
                     >
                       {b.code}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="font-bold text-sm text-slate-900">{b.name}</h3>
+                        {isHq && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">
+                            <ShieldCheck className="h-3 w-3" />
+                            สำนักงานใหญ่ (HQ)
+                          </span>
+                        )}
                         {isCurrent && (
                           <Badge variant="default" className="text-[10px] bg-blue-600 text-white font-semibold">
                             กำลังใช้งาน
                           </Badge>
                         )}
                       </div>
-                      <span className="text-[11px] text-slate-400 font-mono">Tax ID: {b.taxId || "0105567012345"}</span>
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        Tax ID: {b.taxId || "ยังไม่ระบุเลขประจำตัวผู้เสียภาษี"}
+                      </span>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {!isHq && (
+                      <button
+                        onClick={() => handleSetMainBranch(b)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-purple-700 hover:bg-purple-50 transition-colors"
+                        title="ตั้งสาขานี้เป็นสำนักงานใหญ่ (HQ - 00000)"
+                      >
+                        <Star className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openEditModal(b)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
@@ -344,11 +453,20 @@ export default function BranchesPage() {
                     >
                       <Edit2 className="h-4 w-4" />
                     </button>
-                    {b.code !== "HQ" && (
+                    {!isHq && (
                       <button
-                        onClick={() => handleDeleteBranch(b.id, b.code)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                        title="ลบสาขา"
+                        onClick={() => handleDeleteBranch(b)}
+                        disabled={hasDependencies}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          hasDependencies
+                            ? "text-slate-300 cursor-not-allowed"
+                            : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                        }`}
+                        title={
+                          hasDependencies
+                            ? "ไม่สามารถลบสาขาได้เนื่องจากมีข้อมูลผูกอยู่ (พนักงาน/งานซ่อม/สต็อก/การขาย)"
+                            : "ลบสาขา"
+                        }
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -356,7 +474,7 @@ export default function BranchesPage() {
                   </div>
                 </div>
 
-                <div className="space-y-2 text-xs text-slate-600 bg-slate-50/60 p-3 rounded-lg border border-slate-100 mb-4">
+                <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50/60 p-3 rounded-lg border border-slate-100 mb-4">
                   <div className="flex items-start gap-2">
                     <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
                     <span>{b.address || "ยังไม่ได้ระบุที่อยู่สาขา"}</span>
@@ -368,18 +486,22 @@ export default function BranchesPage() {
                 </div>
 
                 {/* Branch stats bar */}
-                <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-center mb-4">
+                <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3 text-center mb-4">
                   <div>
                     <div className="text-[11px] text-slate-400">พนักงาน</div>
-                    <div className="font-bold text-xs text-slate-800">{b._count?.users ?? 2} คน</div>
+                    <div className="font-bold text-xs text-slate-800">{b._count?.users ?? 0} คน</div>
                   </div>
                   <div>
                     <div className="text-[11px] text-slate-400">งานซ่อม</div>
-                    <div className="font-bold text-xs text-slate-800">{b._count?.repairJobs ?? 3} เคส</div>
+                    <div className="font-bold text-xs text-slate-800">{b._count?.repairJobs ?? 0} เคส</div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-slate-400">รายการสต็อก</div>
-                    <div className="font-bold text-xs text-slate-800">{b._count?.stockItems ?? 25} ชนิด</div>
+                    <div className="text-[11px] text-slate-400">สต็อกสินค้า</div>
+                    <div className="font-bold text-xs text-slate-800">{b._count?.stockItems ?? 0} รายการ</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-400">ยอดขาย</div>
+                    <div className="font-bold text-xs text-slate-800">{b._count?.sales ?? 0} บิล</div>
                   </div>
                 </div>
 
@@ -389,7 +511,6 @@ export default function BranchesPage() {
                     variant="outline"
                     onClick={() => {
                       setCurrentBranch({ id: b.id, name: b.name, code: b.code });
-                      alert(`สลับการทำงานเป็นสาขา "${b.name}" สำเร็จ`);
                     }}
                     className="w-full text-xs h-8 border-slate-300 hover:border-blue-600 hover:text-blue-600 transition-colors gap-1.5"
                   >
@@ -407,6 +528,7 @@ export default function BranchesPage() {
           );
         })}
       </div>
+      )}
 
       {/* Branch Modal */}
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
@@ -416,20 +538,53 @@ export default function BranchesPage() {
           </DialogTitle>
         </DialogHeader>
         <DialogContent className="space-y-4">
+          {/* Main Branch Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-purple-50/70 border border-purple-200">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-600 text-white">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-purple-900">กำหนดเป็นสำนักงานใหญ่ (HQ - 00000)</div>
+                <div className="text-[11px] text-purple-700">
+                  รหัสสาขา 00000 ตามมาตรฐานสรรพากร (ภ.พ.30 / ใบกำกับภาษีเต็มรูป)
+                </div>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formIsMain}
+                onChange={(e) => handleToggleIsMain(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-700 mb-1 block">รหัสสาขา *</label>
+              <label className="text-xs font-semibold text-slate-700 mb-1 block">รหัสสาขา 5 หลัก *</label>
               <Input
-                placeholder="เช่น BR-03"
+                placeholder="เช่น 00000 หรือ 00001"
                 value={formCode}
-                onChange={(e) => setFormCode(e.target.value.toUpperCase())}
-                className="text-xs h-9 font-mono"
+                onChange={(e) => {
+                  const val = e.target.value.toUpperCase();
+                  setFormCode(val);
+                  if (val === "00000" || val === "HQ") {
+                    setFormIsMain(true);
+                  } else {
+                    setFormIsMain(false);
+                  }
+                }}
+                className="text-xs h-9 font-mono font-semibold"
               />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">00000 = สนญ.</span>
             </div>
             <div className="col-span-2">
               <label className="text-xs font-semibold text-slate-700 mb-1 block">ชื่อสาขา *</label>
               <Input
-                placeholder="เช่น MobileShop สาขา 3 (ฟิวเจอร์พาร์ครังสิต)"
+                placeholder="เช่น MobileShop สำนักงานใหญ่ (สุขุมวิท)"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 className="text-xs h-9"
@@ -468,13 +623,23 @@ export default function BranchesPage() {
               className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
+
+          {formError && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">
+              {formError}
+            </div>
+          )}
         </DialogContent>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setModalOpen(false)} className="text-xs">
+          <Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving} className="text-xs">
             ยกเลิก
           </Button>
-          <Button onClick={handleSaveBranch} className="text-xs bg-blue-600 text-white hover:bg-blue-700">
-            {editingBranch ? "บันทึกการแก้ไข" : "บันทึกสาขาใหม่"}
+          <Button
+            onClick={handleSaveBranch}
+            disabled={saving}
+            className="text-xs bg-blue-600 text-white hover:bg-blue-700"
+          >
+            {saving ? "กำลังบันทึก..." : editingBranch ? "บันทึกการแก้ไข" : "บันทึกสาขาใหม่"}
           </Button>
         </DialogFooter>
       </Dialog>
