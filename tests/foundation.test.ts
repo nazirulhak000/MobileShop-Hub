@@ -1377,7 +1377,7 @@ test("Round 12: POS Core Checkout & Sales Management Audit - Sequential Invoicin
     assert.equal(updatedImei?.status, "SOLD");
 
     // Guard: Prevent selling already SOLD IMEI
-    assert.equal(updatedImei?.status === "IN_STOCK", false);
+    assert.notEqual(updatedImei?.status as string, "IN_STOCK");
 
     // Guard: Prevent overselling stock
     const remainingStock = updatedStock?.quantity ?? 0;
