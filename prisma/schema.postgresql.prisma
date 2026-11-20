@@ -814,9 +814,9 @@ model Supplier {
   address        String?
   taxId          String?
   creditTerms    String?         @default("เครดิต 30 วัน")
-  bankName          String?
+  bankName       String?
   bankAccountNumber String?
-  bankAccountName   String?
+  bankAccountName String?
   categories     String?         // comma-separated or JSON string
   active         Boolean         @default(true)
   purchaseOrders PurchaseOrder[]

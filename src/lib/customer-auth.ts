@@ -5,7 +5,26 @@ import { AccessError } from "./staff-context";
 import { cookieOptions, hashToken, throttle } from "./staff-auth";
 import { isKnownIp } from "./client-ip";
 
-export const CUSTOMER_COOKIE = "mobileshop_customer_session";
+export const LEGACY_CUSTOMER_COOKIE = "mobileshop_customer_session";
+export const SECURE_CUSTOMER_COOKIE = "__Host-mobileshop_customer_session";
+export const CUSTOMER_COOKIE = process.env.NODE_ENV === "production" ? SECURE_CUSTOMER_COOKIE : LEGACY_CUSTOMER_COOKIE;
+export const CUSTOMER_COOKIE_NAMES = [SECURE_CUSTOMER_COOKIE, LEGACY_CUSTOMER_COOKIE] as const;
+
+export function getCustomerToken(store: { get(name: string): { value: string } | undefined }): string | undefined {
+  for (const name of CUSTOMER_COOKIE_NAMES) {
+    const val = store.get(name)?.value;
+    if (val) return val;
+  }
+  return undefined;
+}
+
+export function clearCustomerCookies(store: { set(name: string, value: string, options: Record<string, unknown>): unknown }) {
+  store.set(LEGACY_CUSTOMER_COOKIE, "", { ...cookieOptions, maxAge: 0 });
+  if (process.env.NODE_ENV === "production") {
+    store.set(SECURE_CUSTOMER_COOKIE, "", { ...cookieOptions, secure: true, maxAge: 0 });
+  }
+}
+
 export function normalizePhone(value: unknown) {
   if (typeof value !== "string") throw new AccessError(400, "กรุณากรอกเบอร์โทรศัพท์มือถือ");
   let phone = value.replace(/[\s()-]/g, "");
@@ -112,7 +131,7 @@ export async function verifyCustomerWithTicketProof(
   const shop = await resolveShop(shopSlug);
   const phone = normalizePhone(inputPhone);
   const trimmedName = typeof displayName === "string" ? displayName.trim() : "";
-  const proof = typeof inputProof === "string" ? inputProof.trim().toLowerCase().replace(/[\s-]/g, "") : "";
+  const proof = typeof inputProof === "string" ? inputProof.trim().toLowerCase().replace(/[^a-zA-Z0-9]/g, "") : "";
 
   if (trimmedName.length < 2 || trimmedName.length > 100) {
     throw new AccessError(400, "กรุณาระบุชื่อของคุณ (อย่างน้อย 2 ตัวอักษร)");
@@ -121,7 +140,7 @@ export async function verifyCustomerWithTicketProof(
     throw new AccessError(400, "กรุณากรอกเลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อม");
   }
 
-  // Rate limiting to prevent brute force
+  // Rate limiting to prevent brute force per phone
   await throttle(`customer-verify:${shop.id}:${phone}`, 15, 15 * 60_000);
 
   return db.$transaction(async (tx) => {
@@ -140,47 +159,86 @@ export async function verifyCustomerWithTicketProof(
       })
       .map((c) => c.id);
 
-    let matchedCustomerId: string | null = null;
+    // Fail closed if customer does not exist in tenant's CRM
+    if (matchedCustomerIds.length === 0) {
+      throw new AccessError(
+        404,
+        "ไม่พบข้อมูลลูกค้าหรือประวัติงานซ่อมในระบบของร้านนี้ กรุณาตรวจสอบเบอร์โทรศัพท์หรือติดต่อร้าน"
+      );
+    }
 
-    if (matchedCustomerIds.length > 0) {
-      const repairJobs = await tx.repairJob.findMany({
-        where: {
-          tenantId: shop.id,
-          customerId: { in: matchedCustomerIds },
-        },
+    let matchedCustomerId: string | null = null;
+    let matchedEvidence = "VERIFIED_TICKET_PROOF";
+
+    const repairJobs = await tx.repairJob.findMany({
+      where: {
+        tenantId: shop.id,
+        customerId: { in: matchedCustomerIds },
+      },
+      select: {
+        id: true,
+        customerId: true,
+        trackingCode: true,
+        serialIMEI: true,
+      },
+    });
+
+    if (repairJobs.length > 0) {
+      // Check if proof matches any repair job's IMEI or trackingCode (last 4 chars or exact match)
+      const matchedJob = repairJobs.find((job) => {
+        const cleanIMEI = (job.serialIMEI || "").toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+        const cleanTracking = (job.trackingCode || "").toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+        const cleanId = job.id.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+
+        return (
+          (cleanIMEI.length >= 4 && (cleanIMEI.endsWith(proof) || cleanIMEI === proof)) ||
+          (cleanTracking.length >= 4 && (cleanTracking.endsWith(proof) || cleanTracking === proof)) ||
+          cleanId.endsWith(proof)
+        );
+      });
+
+      if (matchedJob) {
+        matchedCustomerId = matchedJob.customerId;
+      }
+    }
+
+    // Also check sales with serialized device IMEI or invoiceNo if no repair job matched
+    if (!matchedCustomerId) {
+      const sales = await tx.sale.findMany({
+        where: { tenantId: shop.id, customerId: { in: matchedCustomerIds } },
         select: {
           id: true,
           customerId: true,
-          trackingCode: true,
-          serialIMEI: true,
+          invoiceNo: true,
+          items: { select: { deviceImei: { select: { imei: true } } } },
         },
       });
 
-      if (repairJobs.length > 0) {
-        // Check if proof matches any repair job's IMEI or trackingCode (last 4 chars or exact match)
-        const matchedJob = repairJobs.find((job) => {
-          const cleanIMEI = (job.serialIMEI || "").toLowerCase().replace(/[\s-]/g, "");
-          const cleanTracking = (job.trackingCode || "").toLowerCase().replace(/[\s-]/g, "");
-          const cleanId = job.id.toLowerCase().replace(/[\s-]/g, "");
+      const matchedSale = sales.find((sale) => {
+        const cleanInvoice = (sale.invoiceNo || "").toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+        const cleanSaleId = sale.id.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+        const imeis = sale.items
+          .map((i) => (i.deviceImei?.imei || "").toLowerCase().replace(/[^a-zA-Z0-9]/g, ""))
+          .filter(Boolean);
 
-          return (
-            (cleanIMEI.length >= 4 && (cleanIMEI.endsWith(proof) || cleanIMEI === proof)) ||
-            (cleanTracking.length >= 4 && (cleanTracking.endsWith(proof) || cleanTracking === proof)) ||
-            cleanId.endsWith(proof)
-          );
-        });
+        return (
+          (cleanInvoice.length >= 4 && (cleanInvoice.endsWith(proof) || cleanInvoice === proof)) ||
+          cleanSaleId.endsWith(proof) ||
+          imeis.some((im) => im.length >= 4 && (im.endsWith(proof) || im === proof))
+        );
+      });
 
-        if (!matchedJob) {
-          throw new AccessError(
-            401,
-            "เลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อมไม่ตรงกับข้อมูลในระบบ กรุณาตรวจสอบจากใบรับเครื่อง"
-          );
-        }
-        matchedCustomerId = matchedJob.customerId;
-      } else {
-        // Customer exists in CRM but no repair jobs yet
-        matchedCustomerId = matchedCustomerIds[0];
+      if (matchedSale) {
+        matchedCustomerId = matchedSale.customerId;
+        matchedEvidence = "VERIFIED_SALE_PROOF";
       }
+    }
+
+    if (!matchedCustomerId) {
+      throw new AccessError(
+        401,
+        "เลขท้าย 4 ตัวของ IMEI หรือเลขที่ใบรับซ่อมไม่ตรงกับข้อมูลในระบบ กรุณาตรวจสอบจากใบรับเครื่อง"
+      );
     }
 
     // 2. Upsert CustomerAccount
@@ -191,45 +249,35 @@ export async function verifyCustomerWithTicketProof(
     });
 
     if (account.status !== "ACTIVE") {
-      throw new AccessError(403, "บัญชีนี้ไม่พร้อมใช้งาน กรุณาติดต่อร้าน");
+      throw new AccessError(403, "บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อร้าน");
     }
 
-    // 3. Link account to CRM customer
-    if (matchedCustomerId) {
-      await tx.customerAccountLink.upsert({
-        where: { accountId: account.id },
-        create: {
-          tenantId: shop.id,
-          accountId: account.id,
-          customerId: matchedCustomerId,
-          approvedBy: account.id,
-          evidence: "VERIFIED_TICKET_PROOF",
-        },
-        update: {
-          customerId: matchedCustomerId,
-          evidence: "VERIFIED_TICKET_PROOF",
-        },
-      });
-    } else {
-      // New customer: create CRM record
-      const newCustomer = await tx.customer.create({
-        data: { tenantId: shop.id, name: account.displayName, phone },
-      });
-      await tx.customerAccountLink.upsert({
-        where: { accountId: account.id },
-        create: {
-          tenantId: shop.id,
-          accountId: account.id,
-          customerId: newCustomer.id,
-          approvedBy: account.id,
-          evidence: "NEW_CRM_INITIAL_PIN",
-        },
-        update: {
-          customerId: newCustomer.id,
-          evidence: "NEW_CRM_INITIAL_PIN",
-        },
+    // 3. Link account to CRM customer (clean up stale links on customerId if from another account)
+    const existingLinkOnCustomer = await tx.customerAccountLink.findUnique({
+      where: { customerId: matchedCustomerId },
+    });
+    if (existingLinkOnCustomer && existingLinkOnCustomer.accountId !== account.id) {
+      await tx.customerAccountLink.delete({ where: { id: existingLinkOnCustomer.id } });
+      await tx.customerSession.updateMany({
+        where: { tenantId: shop.id, accountId: existingLinkOnCustomer.accountId },
+        data: { revokedAt: new Date() },
       });
     }
+
+    await tx.customerAccountLink.upsert({
+      where: { accountId: account.id },
+      create: {
+        tenantId: shop.id,
+        accountId: account.id,
+        customerId: matchedCustomerId,
+        approvedBy: account.id,
+        evidence: matchedEvidence,
+      },
+      update: {
+        customerId: matchedCustomerId,
+        evidence: matchedEvidence,
+      },
+    });
 
     return account;
   });
@@ -272,16 +320,21 @@ export async function verifyOtp(shopSlug: unknown, inputPhone: unknown, challeng
   });
 }
 export async function startCustomerSession(accountId: string, tenantId: string) {
-  const previous = (await cookies()).get(CUSTOMER_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const previous = getCustomerToken(cookieStore);
   if (previous) await db.customerSession.updateMany({ where: { tokenHash: hashToken(previous) }, data: { revokedAt: new Date() } });
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 86_400_000);
   await db.customerSession.create({ data: { accountId, tenantId, tokenHash: hashToken(token), expiresAt } });
-  (await cookies()).set(CUSTOMER_COOKIE, token, { ...cookieOptions, expires: expiresAt });
+  cookieStore.set(CUSTOMER_COOKIE, token, { ...cookieOptions, expires: expiresAt });
+  if (process.env.NODE_ENV === "production") {
+    cookieStore.set(LEGACY_CUSTOMER_COOKIE, "", { ...cookieOptions, maxAge: 0 });
+  }
 }
 export async function requireCustomer(shopSlug: unknown) {
   const shop = await resolveShop(shopSlug);
-  const token = (await cookies()).get(CUSTOMER_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const token = getCustomerToken(cookieStore);
   const session = token ? await db.customerSession.findUnique({ where: { tokenHash: hashToken(token) } }) : null;
   if (!session || session.tenantId !== shop.id || session.revokedAt || session.expiresAt <= new Date()) throw new AccessError(401, "กรุณาเข้าสู่บัญชีลูกค้าของร้านนี้");
 
@@ -294,7 +347,7 @@ export async function requireCustomer(shopSlug: unknown) {
       data: { expiresAt: newExpiresAt },
     }).catch(() => {});
     try {
-      (await cookies()).set(CUSTOMER_COOKIE, token!, { ...cookieOptions, expires: newExpiresAt });
+      cookieStore.set(CUSTOMER_COOKIE, token!, { ...cookieOptions, expires: newExpiresAt });
     } catch {
       // In Server Components where cookies are immutable during render, ignore
     }
