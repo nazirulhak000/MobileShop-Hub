@@ -1,5 +1,4 @@
 import React from "react";
-import { db as prisma } from "@/lib/db";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Store, Sparkles, Phone, MessageCircle, UserRound, Navigation } from "lucide-react";
@@ -15,13 +14,20 @@ import { ShopLocation } from "@/components/landing/ShopLocation";
 import { LandingFaq } from "@/components/landing/LandingFaq";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { MobileQuickBar } from "@/components/landing/MobileQuickBar";
+import { DynamicBlockRenderer } from "@/components/landing/blocks";
 import {
   DEFAULT_STOREFRONT_CONFIG,
   StorefrontThemeColor,
+  StorefrontFontFamily,
+  HeroLayoutType,
+  FONT_FAMILY_CONFIG,
   THEME_PALETTES,
   safeParseBeforeAfterCases,
   safeParsePricingRates,
   safeParseFaqs,
+  safeParseSectionsOrder,
+  safeParseCustomSections,
+  safeParseNavMenu,
 } from "@/lib/storefrontTheme";
 import { resolveTenantBySlug } from "@/lib/storefrontTenant";
 
@@ -103,6 +109,8 @@ export default async function TenantStorePage({ params }: StorePageProps) {
   // Merge tenant config with safe defaults
   const config = {
     themeColor: (rawConfig?.themeColor as StorefrontThemeColor) || DEFAULT_STOREFRONT_CONFIG.themeColor,
+    fontFamily: (rawConfig?.fontFamily as StorefrontFontFamily) || DEFAULT_STOREFRONT_CONFIG.fontFamily || "anuphan",
+    heroLayout: (rawConfig?.heroLayout as HeroLayoutType) || DEFAULT_STOREFRONT_CONFIG.heroLayout || "split",
     headline: rawConfig?.headline ?? DEFAULT_STOREFRONT_CONFIG.headline,
     subheadline: rawConfig?.subheadline ?? DEFAULT_STOREFRONT_CONFIG.subheadline,
     badge: rawConfig?.badge ?? DEFAULT_STOREFRONT_CONFIG.badge,
@@ -122,6 +130,9 @@ export default async function TenantStorePage({ params }: StorePageProps) {
     showLocationSection: rawConfig?.showLocationSection ?? true,
     showFaqSection: rawConfig?.showFaqSection ?? true,
     showMobileQuickBar: rawConfig?.showMobileQuickBar ?? true,
+    sectionsOrder: rawConfig?.sectionsOrder,
+    customSections: rawConfig?.customSections,
+    navigationMenu: rawConfig?.navigationMenu,
     customBeforeAfterCases: rawConfig?.customBeforeAfterCases,
     customPricingRates: rawConfig?.customPricingRates,
     customFaqs: rawConfig?.customFaqs,
@@ -132,10 +143,19 @@ export default async function TenantStorePage({ params }: StorePageProps) {
   const themeColor = config.themeColor;
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
 
+  // Resolve dynamic font configuration
+  const fontConfig = FONT_FAMILY_CONFIG[config.fontFamily] || FONT_FAMILY_CONFIG.anuphan;
+
   // Safe-parse custom configurations so corrupted data in DB never crashes storefront
   const parsedCases = (safeParseBeforeAfterCases(config.customBeforeAfterCases) as BeforeAfterCase[]) || undefined;
   const parsedPricingRates = safeParsePricingRates(config.customPricingRates) || undefined;
   const parsedFaqs = safeParseFaqs(config.customFaqs) || undefined;
+  const parsedSectionsOrder = safeParseSectionsOrder(config.sectionsOrder);
+  const parsedCustomSections = safeParseCustomSections(config.customSections);
+  const parsedNavMenu = safeParseNavMenu(config.navigationMenu);
+
+  // Map custom sections by ID
+  const customSectionsMap = new Map(parsedCustomSections.map((block) => [block.id, block]));
 
   // Calculate hidden menu anchors for navigation bar and footer
   const hiddenSections: string[] = [];
@@ -169,14 +189,157 @@ export default async function TenantStorePage({ params }: StorePageProps) {
     config.showBeforeAfterSlider ||
     config.showCustomerReviews ||
     config.showLocationSection ||
-    config.showFaqSection
+    config.showFaqSection ||
+    parsedCustomSections.some((b) => b.enabled !== false && b.visible !== false)
   );
 
   const mobilePadding = config.showMobileQuickBar ? "pb-20 sm:pb-0" : "";
 
+  // Set to track rendered sections and prevent duplicate render
+  const renderedSectionIds = new Set<string>();
+
+  // Modular Section Item Renderer according to dynamic sectionsOrder
+  const renderSectionItem = (sectionId: string) => {
+    const normalizedId = sectionId.toLowerCase().trim();
+    if (renderedSectionIds.has(normalizedId)) return null;
+    renderedSectionIds.add(normalizedId);
+
+    switch (normalizedId) {
+      case "hero":
+        return (
+          <LandingHero
+            key="section-hero"
+            shopName={shopName}
+            shopSlug={shopSlug}
+            headline={config.headline}
+            subheadline={config.subheadline}
+            badge={config.badge}
+            themeColor={themeColor}
+            showScanner={config.showHardwareScanner}
+            showLiveTracking={config.showLiveTracking}
+            heroLayout={config.heroLayout}
+          />
+        );
+
+      case "services":
+      case "bento":
+        if (!config.showServicesBento) return null;
+        return (
+          <ServicesBento
+            key="section-services"
+            lineId={config.lineId}
+            showEstimate={config.showPriceEstimator}
+            showLiveTracking={config.showLiveTracking}
+            showLocation={config.showLocationSection}
+          />
+        );
+
+      case "tracking":
+        if (!config.showLiveTracking) return null;
+        return <LiveTrackingShowcase key="section-tracking" />;
+
+      case "inspection":
+      case "bench":
+        if (!config.showInspectionBench) return null;
+        return (
+          <InspectionStandard
+            key="section-inspection"
+            showEstimate={config.showPriceEstimator}
+            showBench={config.showInspectionBench}
+            themeColor={themeColor}
+          />
+        );
+
+      case "estimator":
+        if (!config.showPriceEstimator) return null;
+        return (
+          <PriceEstimator
+            key="section-estimator"
+            phone={config.phone}
+            lineId={config.lineId}
+            themeColor={themeColor}
+            customRates={parsedPricingRates}
+          />
+        );
+
+      case "reviews":
+      case "slider":
+        if (!config.showBeforeAfterSlider && !config.showCustomerReviews) return null;
+        return (
+          <CustomerReviews
+            key="section-reviews"
+            showSlider={config.showBeforeAfterSlider}
+            showReviews={config.showCustomerReviews}
+            customCases={parsedCases}
+            themeColor={themeColor}
+          />
+        );
+
+      case "location":
+        if (!config.showLocationSection) return null;
+        return (
+          <ShopLocation
+            key="section-location"
+            shopName={shopName}
+            branchName={branchName}
+            address={address}
+            phone={config.phone}
+            lineId={config.lineId}
+            googleMapsUrl={config.googleMapsUrl}
+          />
+        );
+
+      case "faq":
+        if (!config.showFaqSection) return null;
+        return (
+          <LandingFaq
+            key="section-faq"
+            lineId={config.lineId}
+            themeColor={themeColor}
+            customFaqs={parsedFaqs}
+          />
+        );
+
+      default: {
+        // Check if sectionId refers to a custom section block by ID
+        const customBlock = customSectionsMap.get(sectionId);
+        if (customBlock && customBlock.enabled !== false && customBlock.visible !== false) {
+          return (
+            <DynamicBlockRenderer
+              key={`custom-block-${customBlock.id}`}
+              block={customBlock}
+              themeColor={themeColor}
+              tenantInfo={{
+                phone: config.phone,
+                lineId: config.lineId,
+                shopName,
+                branchName,
+              }}
+            />
+          );
+        }
+        return null;
+      }
+    }
+  };
+
+  // Find any remaining custom blocks in customSections not explicitly listed in sectionsOrder
+  const remainingCustomBlocks = parsedCustomSections.filter(
+    (b) => !renderedSectionIds.has(b.id.toLowerCase().trim()) && b.enabled !== false && b.visible !== false
+  );
+
   return (
-    <div className={`min-h-screen bg-white text-slate-900 ${selectionClass} ${mobilePadding}`}>
-      {/* 0. Top Announcement Bar */}
+    <div
+      className={`min-h-screen bg-white text-slate-900 ${selectionClass} ${mobilePadding}`}
+      style={{ fontFamily: fontConfig.fontFamily }}
+    >
+      {/* 0. Dynamic Font Stylesheet */}
+      <link
+        rel="stylesheet"
+        href={`https://fonts.googleapis.com/css2?family=${fontConfig.googleFont}&display=swap`}
+      />
+
+      {/* 1. Top Announcement Bar */}
       {config.announcementEnabled && config.announcementText && (
         <AnnouncementBar
           text={config.announcementText}
@@ -185,81 +348,35 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         />
       )}
 
-      {/* 1. Sticky Glassmorphism Header */}
+      {/* 2. Sticky Glassmorphism Header with Dynamic Navigation */}
       <LandingNavbar
         shopName={shopName}
         shopSlug={shopSlug}
         phone={config.phone}
         lineId={config.lineId}
         hiddenSections={hiddenSections}
+        navigationMenu={parsedNavMenu}
+        isSubpage={false}
       />
 
       <main id="main-content">
-        {/* 2. Hero Section with dynamic headlines, badge, and toggles */}
-        <LandingHero
-          shopName={shopName}
-          shopSlug={shopSlug}
-          headline={config.headline}
-          subheadline={config.subheadline}
-          badge={config.badge}
-          themeColor={themeColor}
-          showScanner={config.showHardwareScanner}
-          showLiveTracking={config.showLiveTracking}
-        />
+        {/* 3. Modular Sections Ordered Dynamically */}
+        {parsedSectionsOrder.map((sectionId) => renderSectionItem(sectionId))}
 
-        {/* 3. Core Services Bento Grid */}
-        {config.showServicesBento && (
-          <ServicesBento
-            lineId={config.lineId}
-            showEstimate={config.showPriceEstimator}
-            showLiveTracking={config.showLiveTracking}
-            showLocation={config.showLocationSection}
-          />
-        )}
-
-        {/* 4. Tracking workflow demo animation */}
-        {config.showLiveTracking && <LiveTrackingShowcase />}
-
-        {/* 5. 10-Point Pre & Post Inspection Standard & Diagnostic Bench */}
-        {config.showInspectionBench && (
-          <InspectionStandard
-            showEstimate={config.showPriceEstimator}
-            showBench={config.showInspectionBench}
+        {/* 4. Any remaining custom blocks created by the shop owner */}
+        {remainingCustomBlocks.map((block) => (
+          <DynamicBlockRenderer
+            key={`remaining-block-${block.id}`}
+            block={block}
             themeColor={themeColor}
+            tenantInfo={{
+              phone: config.phone,
+              lineId: config.lineId,
+              shopName,
+              branchName,
+            }}
           />
-        )}
-
-        {/* 6. Price & Duration Estimator */}
-        {config.showPriceEstimator && (
-          <PriceEstimator phone={config.phone} lineId={config.lineId} themeColor={themeColor} customRates={parsedPricingRates} />
-        )}
-
-        {/* 7. Interactive Draggable Before / After Split Slider & Customer Reviews */}
-        {(config.showBeforeAfterSlider || config.showCustomerReviews) && (
-          <CustomerReviews
-            showSlider={config.showBeforeAfterSlider}
-            showReviews={config.showCustomerReviews}
-            customCases={parsedCases}
-            themeColor={themeColor}
-          />
-        )}
-
-        {/* 8. Store Location & Contact */}
-        {config.showLocationSection && (
-          <ShopLocation
-            shopName={shopName}
-            branchName={branchName}
-            address={address}
-            phone={config.phone}
-            lineId={config.lineId}
-            googleMapsUrl={config.googleMapsUrl}
-          />
-        )}
-
-        {/* 9. Technical FAQ Accordion */}
-        {config.showFaqSection && (
-          <LandingFaq lineId={config.lineId} themeColor={themeColor} customFaqs={parsedFaqs} />
-        )}
+        ))}
 
         {/* Edge Case Fallback: When shop turns off ALL optional sections, render a clean contact & overview card so the page remains informative and functional without awkward white spaces */}
         {!hasAnyOptionalSection && (
@@ -324,7 +441,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         )}
       </main>
 
-      {/* 10. Footer */}
+      {/* 5. Footer */}
       <LandingFooter
         shopName={shopName}
         shopSlug={shopSlug}
@@ -333,7 +450,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         hiddenSections={hiddenSections}
       />
 
-      {/* 11. Mobile Sticky Action Bar */}
+      {/* 6. Mobile Sticky Action Bar */}
       {config.showMobileQuickBar && (
         <MobileQuickBar
           shopSlug={shopSlug}

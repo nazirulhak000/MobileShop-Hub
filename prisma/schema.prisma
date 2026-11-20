@@ -254,6 +254,8 @@ model StorefrontConfig {
   tenantId               String   @unique
   tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   themeColor             String   @default("emerald") // emerald, cyan, blue, purple, amber, slate
+  fontFamily             String   @default("anuphan") // anuphan, prompt, sarabun, mitr, kanit, inter
+  heroLayout             String   @default("split") // split, centered, banner
   headline               String?
   subheadline            String?
   badge                  String?
@@ -273,6 +275,11 @@ model StorefrontConfig {
   showLocationSection    Boolean  @default(true)
   showFaqSection         Boolean  @default(true)
   showMobileQuickBar     Boolean  @default(true)
+  sectionsOrder          String?  // JSON array of section IDs in display order
+  customSections         String?  // JSON array of user-defined custom blocks
+  customPages            String?  // JSON array of custom subpages ({ slug, title, subtitle, content, sections })
+  navigationMenu         String?  // JSON array of navbar links ({ label, href, isExternal })
+  footerSocialLinks      String?  // JSON of social URLs ({ facebook, tiktok, instagram, youtube, line })
   customBeforeAfterCases String?  // JSON string
   customPricingRates     String?  // JSON string
   customFaqs             String?  // JSON string

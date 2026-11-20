@@ -3,7 +3,14 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { checkOrigin, hashToken, requireStaffSession, staffTokens } from "@/lib/staff-auth";
 import { safeError } from "@/lib/staff-http";
-import { DEFAULT_STOREFRONT_CONFIG, StorefrontThemeColor } from "@/lib/storefrontTheme";
+import {
+  DEFAULT_STOREFRONT_CONFIG,
+  StorefrontThemeColor,
+  StorefrontFontFamily,
+  HeroLayoutType,
+  ALLOWED_FONT_FAMILIES,
+  ALLOWED_HERO_LAYOUTS,
+} from "@/lib/storefrontTheme";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +115,8 @@ export async function GET(req: NextRequest) {
         create: {
           tenantId: tenant.id,
           themeColor: DEFAULT_STOREFRONT_CONFIG.themeColor,
+          fontFamily: DEFAULT_STOREFRONT_CONFIG.fontFamily || "anuphan",
+          heroLayout: DEFAULT_STOREFRONT_CONFIG.heroLayout || "split",
           headline: DEFAULT_STOREFRONT_CONFIG.headline,
           subheadline: DEFAULT_STOREFRONT_CONFIG.subheadline,
           badge: DEFAULT_STOREFRONT_CONFIG.badge,
@@ -127,6 +136,11 @@ export async function GET(req: NextRequest) {
           showLocationSection: DEFAULT_STOREFRONT_CONFIG.showLocationSection,
           showFaqSection: DEFAULT_STOREFRONT_CONFIG.showFaqSection,
           showMobileQuickBar: DEFAULT_STOREFRONT_CONFIG.showMobileQuickBar,
+          sectionsOrder: DEFAULT_STOREFRONT_CONFIG.sectionsOrder,
+          customSections: DEFAULT_STOREFRONT_CONFIG.customSections,
+          customPages: DEFAULT_STOREFRONT_CONFIG.customPages,
+          navigationMenu: DEFAULT_STOREFRONT_CONFIG.navigationMenu,
+          footerSocialLinks: DEFAULT_STOREFRONT_CONFIG.footerSocialLinks,
           customBeforeAfterCases: DEFAULT_STOREFRONT_CONFIG.customBeforeAfterCases,
           customPricingRates: DEFAULT_STOREFRONT_CONFIG.customPricingRates,
           customFaqs: DEFAULT_STOREFRONT_CONFIG.customFaqs,
@@ -137,6 +151,8 @@ export async function GET(req: NextRequest) {
     // Return sanitized public storefront config
     const sanitizedConfig = {
       themeColor: config.themeColor,
+      fontFamily: config.fontFamily || "anuphan",
+      heroLayout: config.heroLayout || "split",
       headline: config.headline,
       subheadline: config.subheadline,
       badge: config.badge,
@@ -156,6 +172,11 @@ export async function GET(req: NextRequest) {
       showLocationSection: config.showLocationSection,
       showFaqSection: config.showFaqSection,
       showMobileQuickBar: config.showMobileQuickBar,
+      sectionsOrder: config.sectionsOrder,
+      customSections: config.customSections,
+      customPages: config.customPages,
+      navigationMenu: config.navigationMenu,
+      footerSocialLinks: config.footerSocialLinks,
       customBeforeAfterCases: config.customBeforeAfterCases,
       customPricingRates: config.customPricingRates,
       customFaqs: config.customFaqs,
@@ -218,6 +239,30 @@ export async function PUT(req: NextRequest) {
       updateData.themeColor = theme;
     }
 
+    // 1.1 Validate fontFamily strictly against allowed fonts
+    if (body.fontFamily !== undefined) {
+      const font = String(body.fontFamily).trim().toLowerCase();
+      if (!ALLOWED_FONT_FAMILIES.includes(font as StorefrontFontFamily)) {
+        return NextResponse.json(
+          { success: false, error: `fontFamily ไม่ถูกต้อง รองรับเฉพาะ: ${ALLOWED_FONT_FAMILIES.join(", ")}` },
+          { status: 400 }
+        );
+      }
+      updateData.fontFamily = font;
+    }
+
+    // 1.2 Validate heroLayout strictly against allowed layouts
+    if (body.heroLayout !== undefined) {
+      const layout = String(body.heroLayout).trim().toLowerCase();
+      if (!ALLOWED_HERO_LAYOUTS.includes(layout as HeroLayoutType)) {
+        return NextResponse.json(
+          { success: false, error: `heroLayout ไม่ถูกต้อง รองรับเฉพาะ: ${ALLOWED_HERO_LAYOUTS.join(", ")}` },
+          { status: 400 }
+        );
+      }
+      updateData.heroLayout = layout;
+    }
+
     // 2. Validate URL fields strictly
     if (body.googleMapsUrl !== undefined) {
       const url = body.googleMapsUrl ? String(body.googleMapsUrl).trim() : null;
@@ -272,10 +317,15 @@ export async function PUT(req: NextRequest) {
     if (body.showFaqSection !== undefined) updateData.showFaqSection = Boolean(body.showFaqSection);
     if (body.showMobileQuickBar !== undefined) updateData.showMobileQuickBar = Boolean(body.showMobileQuickBar);
 
-    // 5. Custom JSON strings (capped at 200KB)
+    // 5. Custom JSON strings (capped at safe byte bounds)
     if (body.customBeforeAfterCases !== undefined) updateData.customBeforeAfterCases = stringifyIfNeeded(body.customBeforeAfterCases)?.slice(0, 200000) ?? null;
     if (body.customPricingRates !== undefined) updateData.customPricingRates = stringifyIfNeeded(body.customPricingRates)?.slice(0, 200000) ?? null;
     if (body.customFaqs !== undefined) updateData.customFaqs = stringifyIfNeeded(body.customFaqs)?.slice(0, 200000) ?? null;
+    if (body.sectionsOrder !== undefined) updateData.sectionsOrder = stringifyIfNeeded(body.sectionsOrder)?.slice(0, 100000) ?? null;
+    if (body.customSections !== undefined) updateData.customSections = stringifyIfNeeded(body.customSections)?.slice(0, 500000) ?? null;
+    if (body.customPages !== undefined) updateData.customPages = stringifyIfNeeded(body.customPages)?.slice(0, 500000) ?? null;
+    if (body.navigationMenu !== undefined) updateData.navigationMenu = stringifyIfNeeded(body.navigationMenu)?.slice(0, 100000) ?? null;
+    if (body.footerSocialLinks !== undefined) updateData.footerSocialLinks = stringifyIfNeeded(body.footerSocialLinks)?.slice(0, 50000) ?? null;
 
     // Atomically upsert config for authorized tenant
     const config = await db.storefrontConfig.upsert({
@@ -283,6 +333,8 @@ export async function PUT(req: NextRequest) {
       create: {
         tenantId,
         themeColor: updateData.themeColor || DEFAULT_STOREFRONT_CONFIG.themeColor,
+        fontFamily: updateData.fontFamily || DEFAULT_STOREFRONT_CONFIG.fontFamily || "anuphan",
+        heroLayout: updateData.heroLayout || DEFAULT_STOREFRONT_CONFIG.heroLayout || "split",
         headline: updateData.headline ?? DEFAULT_STOREFRONT_CONFIG.headline,
         subheadline: updateData.subheadline ?? DEFAULT_STOREFRONT_CONFIG.subheadline,
         badge: updateData.badge ?? DEFAULT_STOREFRONT_CONFIG.badge,
@@ -302,6 +354,11 @@ export async function PUT(req: NextRequest) {
         showLocationSection: updateData.showLocationSection ?? DEFAULT_STOREFRONT_CONFIG.showLocationSection,
         showFaqSection: updateData.showFaqSection ?? DEFAULT_STOREFRONT_CONFIG.showFaqSection,
         showMobileQuickBar: updateData.showMobileQuickBar ?? DEFAULT_STOREFRONT_CONFIG.showMobileQuickBar,
+        sectionsOrder: updateData.sectionsOrder ?? DEFAULT_STOREFRONT_CONFIG.sectionsOrder,
+        customSections: updateData.customSections ?? DEFAULT_STOREFRONT_CONFIG.customSections,
+        customPages: updateData.customPages ?? DEFAULT_STOREFRONT_CONFIG.customPages,
+        navigationMenu: updateData.navigationMenu ?? DEFAULT_STOREFRONT_CONFIG.navigationMenu,
+        footerSocialLinks: updateData.footerSocialLinks ?? DEFAULT_STOREFRONT_CONFIG.footerSocialLinks,
         customBeforeAfterCases: updateData.customBeforeAfterCases ?? DEFAULT_STOREFRONT_CONFIG.customBeforeAfterCases,
         customPricingRates: updateData.customPricingRates ?? DEFAULT_STOREFRONT_CONFIG.customPricingRates,
         customFaqs: updateData.customFaqs ?? DEFAULT_STOREFRONT_CONFIG.customFaqs,

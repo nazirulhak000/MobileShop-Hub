@@ -636,3 +636,245 @@ test("Round 4 & Round 5: Defensive JSON Parsing, Corrupted Data Handling & Navig
 
   assert.equal(navLinks.length, 0, "All links must be safely filtered when optional sections are off");
 });
+
+test("Customer Management & Appointments Isolation: Cross-tenant customers, accounts, links, and policies strictly isolated", async () => staffStorage.run(admin, async () => {
+  // 1. Customer listing and lookup scoping
+  const ownCustList = await prisma.customer.findMany({ where: { tenantId: admin.tenantId } });
+  assert.ok(ownCustList.some((c) => c.id === ownCustomer));
+  assert.ok(!ownCustList.some((c) => c.id === foreignCustomer));
+
+  const foreignCustLookup = await prisma.customer.findFirst({
+    where: { id: foreignCustomer, tenantId: admin.tenantId },
+  });
+  assert.equal(foreignCustLookup, null, "Foreign customer lookup must return null");
+
+  // 2. CustomerAccount and CustomerAccountLink scoping
+  const accB = await db.customerAccount.create({
+    data: { tenantId: "test-b", phone: "0898887766", displayName: "Customer B Account" },
+  });
+  const accListA = await prisma.customerAccount.findMany({ where: { tenantId: admin.tenantId } });
+  assert.ok(!accListA.some((a) => a.id === accB.id), "Tenant A must not see Tenant B accounts");
+
+  const foreignAccountInShopA = await prisma.customerAccount.findFirst({
+    where: { id: accB.id, tenantId: admin.tenantId },
+  });
+  assert.equal(foreignAccountInShopA, null, "Foreign customer account in shop A must return null");
+
+  // 3. Appointments & Branch Policy scoping
+  const policyB = await db.bookingPolicy.upsert({
+    where: { branchId: foreignBranch },
+    create: {
+      tenantId: "test-b",
+      branchId: foreignBranch,
+      opensMinute: 600,
+      closesMinute: 1100,
+      capacity: 3,
+    },
+    update: { opensMinute: 600, closesMinute: 1100, capacity: 3 },
+  });
+
+  const policiesA = await prisma.bookingPolicy.findMany({ where: { tenantId: admin.tenantId } });
+  assert.ok(!policiesA.some((p) => p.branchId === foreignBranch), "Tenant A must not see Tenant B booking policies");
+
+  const foreignBranchInShopA = await prisma.branch.findFirst({
+    where: { id: foreignBranch, tenantId: admin.tenantId },
+  });
+  assert.equal(foreignBranchInShopA, null, "Foreign branch in Shop A must return null");
+}));
+
+test("Modular Custom Blocks & DynamicBlockRenderer: All 7 blocks render and dispatch cleanly with zero error", async () => {
+  const { renderToString } = await import("react-dom/server");
+  const React = await import("react");
+  const {
+    PromoBannerBlock,
+    PhotoGalleryBlock,
+    VideoEmbedBlock,
+    RichTextBlock,
+    CtaBlock,
+    HtmlEmbedBlock,
+    BusinessHoursBlock,
+    DynamicBlockRenderer,
+  } = await import("../src/components/landing/blocks");
+
+  // 1. PromoBannerBlock
+  const promoHtml = renderToString(
+    React.createElement(PromoBannerBlock, {
+      title: "โปรโมชั่นเปลี่ยนแบตเตอรี่แท้",
+      discountTag: "BATTERY20",
+      themeColor: "emerald",
+    })
+  );
+  assert.ok(promoHtml.includes("โปรโมชั่นเปลี่ยนแบตเตอรี่แท้"));
+  assert.ok(promoHtml.includes("BATTERY20"));
+
+  // 2. PhotoGalleryBlock
+  const galleryHtml = renderToString(
+    React.createElement(PhotoGalleryBlock, {
+      title: "ผลงานการซ่อมล่าสุด",
+      columns: 3,
+      images: ["https://example.com/p1.jpg", "https://example.com/p2.jpg"],
+    })
+  );
+  assert.ok(galleryHtml.includes("ผลงานการซ่อมล่าสุด"));
+
+  // 3. VideoEmbedBlock
+  const videoHtml = renderToString(
+    React.createElement(VideoEmbedBlock, {
+      title: "วิดีโอสาธิต",
+      videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    })
+  );
+  assert.ok(videoHtml.includes("youtube-nocookie.com/embed/dQw4w9WgXcQ"));
+
+  // 4. RichTextBlock
+  const richHtml = renderToString(
+    React.createElement(RichTextBlock, {
+      title: "เกี่ยวกับทีมช่าง",
+      content: "## มาตรฐานสากล\nทีมงานผู้เชี่ยวชาญกว่า 10 ปี",
+      author: "หัวหน้าช่าง",
+    })
+  );
+  assert.ok(richHtml.includes("มาตรฐานสากล"));
+  assert.ok(richHtml.includes("หัวหน้าช่าง"));
+
+  // 5. CtaBlock
+  const ctaHtml = renderToString(
+    React.createElement(CtaBlock, {
+      title: "แอดไลน์รับสิทธิ์",
+      lineId: "@testshop",
+      phone: "081-111-2222",
+    })
+  );
+  assert.ok(ctaHtml.includes("@testshop"));
+  assert.ok(ctaHtml.includes("081-111-2222"));
+
+  // 6. HtmlEmbedBlock
+  const htmlBlock = renderToString(
+    React.createElement(HtmlEmbedBlock, {
+      html: "<iframe src='https://example.com/map'></iframe>",
+      title: "แผนที่ร้าน",
+    })
+  );
+  assert.ok(htmlBlock.includes("https://example.com/map"));
+
+  // 7. BusinessHoursBlock
+  const hoursHtml = renderToString(
+    React.createElement(BusinessHoursBlock, {
+      title: "เวลาเปิดทำการ",
+      showLiveStatus: true,
+    })
+  );
+  assert.ok(hoursHtml.includes("เวลาเปิดทำการ"));
+
+  // 8. DynamicBlockRenderer master dispatcher
+  const testBlocks = [
+    { id: "1", type: "promo_banner", title: "Promo 1" },
+    { id: "2", type: "photo_gallery", title: "Gallery 1" },
+    { id: "3", type: "video_embed", title: "Video 1", videoUrl: "https://youtu.be/abc" },
+    { id: "4", type: "rich_text", title: "Rich 1" },
+    { id: "5", type: "cta", title: "CTA 1" },
+    { id: "6", type: "html_embed", title: "HTML 1", html: "<p>Hello</p>" },
+    { id: "7", type: "business_hours", title: "Hours 1" },
+  ];
+
+  for (const blk of testBlocks) {
+    const rendered = renderToString(
+      React.createElement(DynamicBlockRenderer, { block: blk, themeColor: "blue" })
+    );
+    assert.ok(rendered.length > 0, `DynamicBlockRenderer must render ${blk.type}`);
+  }
+
+  // 9. Hidden block must not render
+  const hiddenRender = renderToString(
+    React.createElement(DynamicBlockRenderer, {
+      block: { id: "h1", type: "cta", visible: false },
+    })
+  );
+  assert.equal(hiddenRender, "");
+});
+
+test("Dynamic Subpage Routing & Modular Block Storefront: safe parsers, layouts, and navigation", () => {
+  const React = require("react");
+  const { renderToString } = require("react-dom/server");
+  const {
+    safeParseCustomPages,
+    safeParseSectionsOrder,
+    safeParseNavMenu,
+    FONT_FAMILY_CONFIG,
+    DEFAULT_CUSTOM_PAGES,
+    DEFAULT_SECTIONS_ORDER,
+  } = require("../src/lib/storefrontTheme");
+  const { LandingHero } = require("../src/components/landing/LandingHero");
+  const { LandingNavbar } = require("../src/components/landing/LandingNavbar");
+
+  // 1. Custom pages parsing & slug normalization
+  const customPages = safeParseCustomPages(
+    JSON.stringify([
+      { slug: " About Us ", title: "เกี่ยวกับเรา", published: true },
+      { slug: "WARRANTY-POLICY", title: "เงื่อนไขการรับประกัน", published: true },
+      { slug: "draft", title: "แบบร่าง", published: false },
+    ])
+  );
+  assert.equal(customPages.length, 3);
+  assert.equal(customPages[0].slug, "about-us");
+  assert.equal(customPages[1].slug, "warranty-policy");
+  assert.equal(customPages[2].published, false);
+
+  // 2. Fallback on invalid custom pages
+  assert.deepEqual(safeParseCustomPages(null), []);
+  assert.deepEqual(safeParseCustomPages("corrupt-json"), []);
+
+  // 3. Sections order with custom block IDs
+  const customOrder = ["hero", "custom-promo-1", "bento", "reviews", "faq"];
+  const parsedOrder = safeParseSectionsOrder(JSON.stringify(customOrder));
+  assert.deepEqual(parsedOrder, customOrder);
+  assert.deepEqual(safeParseSectionsOrder(null), DEFAULT_SECTIONS_ORDER);
+
+  // 4. Navigation menu parsing
+  const navMenu = safeParseNavMenu(
+    JSON.stringify([
+      { label: "หน้าแรก", href: "#" },
+      { label: "เกี่ยวกับเรา", href: "/store/apple-lab/about" },
+      { label: "LINE", href: "https://line.me/ti/p/@test", isExternal: true },
+    ])
+  );
+  assert.equal(navMenu.length, 3);
+  assert.equal(navMenu[1].href, "/store/apple-lab/about");
+  assert.equal(navMenu[2].isExternal, true);
+
+  // 5. LandingNavbar subpage anchor resolution
+  const navbarHtml = renderToString(
+    React.createElement(LandingNavbar, {
+      shopName: "Apple Lab",
+      shopSlug: "apple-lab",
+      navigationMenu: navMenu,
+      isSubpage: true,
+    })
+  );
+  assert.ok(navbarHtml.includes("Apple Lab"));
+  assert.ok(navbarHtml.includes("เกี่ยวกับเรา"));
+  assert.ok(navbarHtml.includes('href="https://line.me/ti/p/@test"'));
+
+  // 6. LandingHero 3 layouts
+  for (const layout of ["split", "centered", "banner"]) {
+    const heroHtml = renderToString(
+      React.createElement(LandingHero, {
+        shopName: "Apple Lab",
+        shopSlug: "apple-lab",
+        heroLayout: layout,
+        showScanner: true,
+        showLiveTracking: true,
+      })
+    );
+    assert.ok(heroHtml.includes("Apple Lab"));
+    assert.ok(heroHtml.includes("LIVE HARDWARE SCANNER"));
+  }
+
+  // 7. Typography config
+  for (const font of ["anuphan", "prompt", "sarabun", "mitr", "kanit", "inter"]) {
+    const cfg = FONT_FAMILY_CONFIG[font];
+    assert.ok(cfg && cfg.googleFont && cfg.fontFamily);
+  }
+});
+
+

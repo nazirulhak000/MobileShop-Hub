@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
+import { NavigationMenuItem } from "@/lib/storefrontTheme";
 import {
   Smartphone,
   Search,
@@ -26,6 +27,10 @@ interface LandingNavbarProps {
   lineId?: string | null;
   /** Section anchors (e.g. "#reviews") not rendered on this page — removed from the menu. */
   hiddenSections?: string[];
+  /** Dynamic custom navigation links configured in storefront settings */
+  navigationMenu?: NavigationMenuItem[];
+  /** Whether the current page is a subpage (e.g. /store/[shopSlug]/[pageSlug]) */
+  isSubpage?: boolean;
 }
 
 export function LandingNavbar({
@@ -34,6 +39,8 @@ export function LandingNavbar({
   shopSlug,
   lineId,
   hiddenSections = [],
+  navigationMenu,
+  isSubpage = false,
 }: LandingNavbarProps = {}) {
   const lineUrl = lineId
     ? `https://line.me/R/ti/p/${encodeURIComponent(lineId.trim().startsWith("@") ? lineId.trim() : `@${lineId.trim()}`)}`
@@ -52,15 +59,26 @@ export function LandingNavbar({
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const navLinks = [
-    { label: "บริการช่าง", href: "#services" },
-    { label: "ติดตามงานซ่อม", href: "#track-search" },
-    { label: "ตรวจเช็ค 10 จุด", href: "#inspection" },
-    { label: "ประเมินราคา", href: "#estimate" },
-    { label: "ผลงานก่อน-หลังซ่อม", href: "#reviews" },
-    { label: "ที่ตั้งศูนย์", href: "#location" },
-    { label: "คำถามพบบ่อย", href: "#faq" },
-  ].filter((link) => !hiddenSections.includes(link.href));
+  const defaultLinks = [
+    { label: "บริการช่าง", href: "#services", isExternal: false },
+    { label: "ติดตามงานซ่อม", href: "#track-search", isExternal: false },
+    { label: "ตรวจเช็ค 10 จุด", href: "#inspection", isExternal: false },
+    { label: "ประเมินราคา", href: "#estimate", isExternal: false },
+    { label: "ผลงานก่อน-หลังซ่อม", href: "#reviews", isExternal: false },
+    { label: "ที่ตั้งศูนย์", href: "#location", isExternal: false },
+    { label: "คำถามพบบ่อย", href: "#faq", isExternal: false },
+  ];
+
+  const rawLinks =
+    navigationMenu && navigationMenu.length > 0
+      ? navigationMenu.map((item) => ({
+          label: item.label,
+          href: item.href,
+          isExternal: Boolean(item.isExternal),
+        }))
+      : defaultLinks;
+
+  const navLinks = rawLinks.filter((link) => !hiddenSections.includes(link.href));
 
   const handleQuickTrackSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,15 +168,49 @@ export function LandingNavbar({
             {/* Desktop Navigation Links */}
             {navLinks.length > 0 && (
               <nav className="hidden xl:flex items-center gap-1.5 lg:gap-3" aria-label="เมนูหลัก">
-                {navLinks.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-                  >
-                    {link.label}
-                  </a>
-                ))}
+                {navLinks.map((link) => {
+                  const resolvedHref =
+                    isSubpage && link.href.startsWith("#") && shopSlug
+                      ? `/store/${shopSlug}${link.href}`
+                      : link.href;
+
+                  if (link.isExternal) {
+                    return (
+                      <a
+                        key={link.href}
+                        href={resolvedHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      >
+                        {link.label}
+                      </a>
+                    );
+                  }
+
+                  // If internal page route (not hash), use Link
+                  if (!resolvedHref.startsWith("#")) {
+                    return (
+                      <Link
+                        key={link.href}
+                        href={resolvedHref}
+                        className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                      >
+                        {link.label}
+                      </Link>
+                    );
+                  }
+
+                  return (
+                    <a
+                      key={link.href}
+                      href={resolvedHref}
+                      className="text-xs font-medium text-slate-600 hover:text-slate-900 py-1.5 px-2.5 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                    >
+                      {link.label}
+                    </a>
+                  );
+                })}
               </nav>
             )}
 
@@ -277,17 +329,54 @@ export function LandingNavbar({
 
             {navLinks.length > 0 && (
               <nav className="divide-y divide-slate-100" aria-label="เมนูมือถือ">
-                {navLinks.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
-                  >
-                    <span>{link.label}</span>
-                    <ChevronRight className="h-4 w-4 text-slate-400" />
-                  </a>
-                ))}
+                {navLinks.map((link) => {
+                  const resolvedHref =
+                    isSubpage && link.href.startsWith("#") && shopSlug
+                      ? `/store/${shopSlug}${link.href}`
+                      : link.href;
+
+                  if (link.isExternal) {
+                    return (
+                      <a
+                        key={link.href}
+                        href={resolvedHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                      >
+                        <span>{link.label}</span>
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </a>
+                    );
+                  }
+
+                  if (!resolvedHref.startsWith("#")) {
+                    return (
+                      <Link
+                        key={link.href}
+                        href={resolvedHref}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                      >
+                        <span>{link.label}</span>
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </Link>
+                    );
+                  }
+
+                  return (
+                    <a
+                      key={link.href}
+                      href={resolvedHref}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center justify-between min-h-[44px] py-2.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                    >
+                      <span>{link.label}</span>
+                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                    </a>
+                  );
+                })}
               </nav>
             )}
 

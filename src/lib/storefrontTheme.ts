@@ -354,10 +354,200 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
   },
 };
 
+export type StorefrontFontFamily = "anuphan" | "prompt" | "sarabun" | "mitr" | "kanit" | "inter";
+
+export const ALLOWED_FONT_FAMILIES: readonly StorefrontFontFamily[] = [
+  "anuphan",
+  "prompt",
+  "sarabun",
+  "mitr",
+  "kanit",
+  "inter",
+];
+
+export const FONT_FAMILY_CONFIG: Record<
+  StorefrontFontFamily,
+  { id: StorefrontFontFamily; label: string; googleFont: string; fontFamily: string; className: string }
+> = {
+  anuphan: {
+    id: "anuphan",
+    label: "อนุพันธ์ (Anuphan - ค่าเริ่มต้น/อ่านง่าย)",
+    googleFont: "Anuphan:wght@300;400;500;600;700",
+    fontFamily: "'Anuphan', sans-serif",
+    className: "font-anuphan",
+  },
+  prompt: {
+    id: "prompt",
+    label: "พร้อมท์ (Prompt - โมเดิร์นทันสมัย)",
+    googleFont: "Prompt:wght@300;400;500;600;700",
+    fontFamily: "'Prompt', sans-serif",
+    className: "font-prompt",
+  },
+  sarabun: {
+    id: "sarabun",
+    label: "สารบรรณ (Sarabun - ทางการมาตรฐาน)",
+    googleFont: "Sarabun:wght@300;400;500;600;700",
+    fontFamily: "'Sarabun', sans-serif",
+    className: "font-sarabun",
+  },
+  mitr: {
+    id: "mitr",
+    label: "มิตร (Mitr - มินิมอลอบอุ่น)",
+    googleFont: "Mitr:wght@300;400;500;600",
+    fontFamily: "'Mitr', sans-serif",
+    className: "font-mitr",
+  },
+  kanit: {
+    id: "kanit",
+    label: "คณิต (Kanit - พรีเมียมหนักแน่น)",
+    googleFont: "Kanit:wght@300;400;500;600;700",
+    fontFamily: "'Kanit', sans-serif",
+    className: "font-kanit",
+  },
+  inter: {
+    id: "inter",
+    label: "อินเตอร์ (Inter - สากลเรียบหรู)",
+    googleFont: "Inter:wght@300;400;500;600;700",
+    fontFamily: "'Inter', sans-serif",
+    className: "font-inter",
+  },
+};
+
+export type HeroLayoutType = "split" | "centered" | "banner";
+
+export const ALLOWED_HERO_LAYOUTS: readonly HeroLayoutType[] = [
+  "split",
+  "centered",
+  "banner",
+];
+
+export const HERO_LAYOUT_OPTIONS: Record<HeroLayoutType, { id: HeroLayoutType; label: string; description: string }> = {
+  split: {
+    id: "split",
+    label: "แบบแยกซ้ายขวา (Split Columns)",
+    description: "ข้อความและปุ่มแอ็กชันด้านซ้าย พร้อมเครื่องมือสแกนเนอร์/ภาพประกอบทางวิศวกรรมด้านขวา",
+  },
+  centered: {
+    id: "centered",
+    label: "แบบกึ่งกลางโดดเด่น (Centered Hero)",
+    description: "เน้นหัวข้อและสโลแกนตรงกลาง จัดวางเรียบหรู เหมาะกับร้านค้าที่มีภาพลักษณ์มินิมอลพรีเมียม",
+  },
+  banner: {
+    id: "banner",
+    label: "แบบภาพแบนเนอร์กว้าง (Fullwidth Banner)",
+    description: "แบนเนอร์ภาพกราฟิกขนาดใหญ่เต็มความกว้างพร้อมกล่องข้อความโปรโมชันซ้อนทับ",
+  },
+};
+
+export type CustomBlockType =
+  | "promo_banner"
+  | "photo_gallery"
+  | "video_embed"
+  | "rich_text"
+  | "cta"
+  | "html_embed"
+  | "business_hours"
+  | string;
+
+export interface CustomBlock {
+  id: string;
+  type: CustomBlockType;
+  title?: string;
+  subtitle?: string;
+  content?: string;
+  badge?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  imageUrl?: string;
+  images?: Array<string | { url: string; caption?: string }>;
+  videoUrl?: string;
+  videoType?: "youtube" | "tiktok" | "mp4" | string;
+  html?: string;
+  columns?: number;
+  align?: "left" | "center" | "right";
+  hours?: Array<{ day: string; open: string; close: string; isClosed?: boolean }>;
+  enabled?: boolean;
+  order?: number;
+  metadata?: Record<string, any>;
+  [key: string]: any;
+}
+
+export interface CustomPage {
+  id?: string;
+  slug: string;
+  title: string;
+  subtitle?: string;
+  content?: string;
+  sections?: CustomBlock[];
+  metaDescription?: string;
+  published?: boolean;
+  updatedAt?: string;
+}
+
+export interface NavigationMenuItem {
+  id?: string;
+  label: string;
+  href: string;
+  isExternal?: boolean;
+  icon?: string;
+}
+
+export interface FooterSocialLinks {
+  facebook?: string;
+  tiktok?: string;
+  instagram?: string;
+  youtube?: string;
+  line?: string;
+}
+
+export const DEFAULT_SECTIONS_ORDER: string[] = [
+  "hero",
+  "services",
+  "tracking",
+  "inspection",
+  "estimator",
+  "reviews",
+  "location",
+  "faq",
+];
+
+export const DEFAULT_CUSTOM_PAGES: CustomPage[] = [
+  {
+    id: "page-about",
+    slug: "about",
+    title: "เกี่ยวกับศูนย์บริการ",
+    subtitle: "ทีมช่างผู้ชำนาญการ เครื่องมือมาตรฐานแล็บ อะไหล่แท้ตรงรุ่น",
+    content: "ศูนย์บริการซ่อมสมาร์ตโฟนครบวงจร ดำเนินงานโดยวิศวกรและช่างอิเล็กทรอนิกส์มืออาชีพ พร้อมห้องแล็บปลอดฝุ่นและเครื่องมือวัดทางวิศวกรรมระดับสูง",
+    sections: [],
+    published: true,
+  },
+  {
+    id: "page-warranty",
+    slug: "warranty",
+    title: "นโยบายการรับประกัน",
+    subtitle: "การรับประกันงานซ่อมและเปลี่ยนอะไหล่สูงสุด 1 ปีเต็ม",
+    content: "งานซ่อมทุกชิ้นผ่านการตรวจสอบ 10 จุดตามมาตรฐาน QC และมีบัตรรับประกันอิเล็กทรอนิกส์ ตรวจสอบสถานะและประวัติการซ่อมได้ตลอด 24 ชั่วโมง",
+    sections: [],
+    published: true,
+  },
+];
+
+export const DEFAULT_NAV_MENU: NavigationMenuItem[] = [
+  { id: "nav-services", label: "บริการซ่อม", href: "#services", isExternal: false },
+  { id: "nav-track", label: "ติดตามสถานะ", href: "#track-search", isExternal: false },
+  { id: "nav-inspection", label: "ตรวจเช็ค 10 จุด", href: "#inspection", isExternal: false },
+  { id: "nav-estimate", label: "ประเมินราคา", href: "#estimate", isExternal: false },
+  { id: "nav-reviews", label: "ผลงานซ่อม", href: "#reviews", isExternal: false },
+  { id: "nav-location", label: "ที่ตั้งร้าน", href: "#location", isExternal: false },
+  { id: "nav-faq", label: "คำถามพบบ่อย", href: "#faq", isExternal: false },
+];
+
 export interface StorefrontConfigData {
   id?: string;
   tenantId?: string;
   themeColor: StorefrontThemeColor;
+  fontFamily?: StorefrontFontFamily;
+  heroLayout?: HeroLayoutType;
   headline: string;
   subheadline: string;
   badge: string;
@@ -377,6 +567,11 @@ export interface StorefrontConfigData {
   showLocationSection: boolean;
   showFaqSection: boolean;
   showMobileQuickBar: boolean;
+  sectionsOrder?: string | null;
+  customSections?: string | null;
+  customPages?: string | null;
+  navigationMenu?: string | null;
+  footerSocialLinks?: string | null;
   customBeforeAfterCases?: string | null;
   customPricingRates?: string | null;
   customFaqs?: string | null;
@@ -384,6 +579,8 @@ export interface StorefrontConfigData {
 
 export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfigData = {
   themeColor: "emerald",
+  fontFamily: "anuphan",
+  heroLayout: "split",
   headline: "บริการซ่อมมือถือด่วนมาตรฐานแล็บ รอรับใน 30 นาที พร้อมระบบ Live Tracking ตรวจสอบได้ 24 ชั่วโมง",
   subheadline:
     "ศูนย์บริการซ่อมสมาร์ตโฟนด้วยเครื่องมือวัดทางวิศวกรรมอิเล็กทรอนิกส์ ตรวจสอบประวัติเครื่องและเลข IMEI 15 หลัก พร้อมระบบ Live Tracking บันทึกภาพถ่ายขั้นตอนซ่อมจริงทุกระยะ ตรวจเช็ควิเคราะห์อาการ 10 จุดก่อนซ่อมโดยไม่มีค่าเปิดเครื่อง",
@@ -404,6 +601,11 @@ export const DEFAULT_STOREFRONT_CONFIG: StorefrontConfigData = {
   showLocationSection: true,
   showFaqSection: true,
   showMobileQuickBar: true,
+  sectionsOrder: JSON.stringify(DEFAULT_SECTIONS_ORDER),
+  customSections: "[]",
+  customPages: JSON.stringify(DEFAULT_CUSTOM_PAGES),
+  navigationMenu: JSON.stringify(DEFAULT_NAV_MENU),
+  footerSocialLinks: "{}",
   customBeforeAfterCases: "",
   customPricingRates: "",
   customFaqs: "",
@@ -496,4 +698,147 @@ export function safeParseFaqs(raw: unknown): any[] | null {
     }));
 
   return sanitized.length > 0 ? sanitized : null;
+}
+
+export function safeParseSectionsOrder(raw: unknown): string[] {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return [...DEFAULT_SECTIONS_ORDER];
+  }
+
+  const list = parsed
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+
+  return list.length > 0 ? list : [...DEFAULT_SECTIONS_ORDER];
+}
+
+export function safeParseCustomSections(raw: unknown): CustomBlock[] {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+  return parsed
+    .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
+    .map((item, idx) => {
+      const id = String(item.id || `block-${idx + 1}-${Date.now()}`);
+      const type = String(item.type || "promo_banner").toLowerCase();
+
+      let images: Array<string | { url: string; caption?: string }> | undefined;
+      if (Array.isArray(item.images)) {
+        images = item.images
+          .filter(Boolean)
+          .map((img: any) => {
+            if (typeof img === "string") return img.trim();
+            if (typeof img === "object" && img.url) {
+              return {
+                url: String(img.url).trim(),
+                caption: img.caption ? String(img.caption).trim() : undefined,
+              };
+            }
+            return null;
+          })
+          .filter(Boolean) as Array<string | { url: string; caption?: string }>;
+      }
+
+      let hours: Array<{ day: string; open: string; close: string; isClosed?: boolean }> | undefined;
+      if (Array.isArray(item.hours)) {
+        hours = item.hours
+          .filter((h: any) => Boolean(h && typeof h === "object"))
+          .map((h: any) => ({
+            day: String(h.day || ""),
+            open: String(h.open || "09:00"),
+            close: String(h.close || "19:00"),
+            isClosed: Boolean(h.isClosed),
+          }));
+      }
+
+      return {
+        ...item,
+        id,
+        type,
+        title: item.title ? String(item.title).slice(0, 300) : undefined,
+        subtitle: item.subtitle ? String(item.subtitle).slice(0, 500) : undefined,
+        content: item.content ? String(item.content).slice(0, 50000) : undefined,
+        badge: item.badge ? String(item.badge).slice(0, 100) : undefined,
+        buttonText: item.buttonText ? String(item.buttonText).slice(0, 100) : undefined,
+        buttonUrl: item.buttonUrl ? String(item.buttonUrl).slice(0, 1000) : undefined,
+        imageUrl: item.imageUrl ? String(item.imageUrl).slice(0, 2000) : undefined,
+        images,
+        videoUrl: item.videoUrl ? String(item.videoUrl).slice(0, 1000) : undefined,
+        videoType: item.videoType ? String(item.videoType).slice(0, 50) : undefined,
+        html: item.html ? String(item.html).slice(0, 50000) : undefined,
+        columns: typeof item.columns === "number" ? Math.max(1, Math.min(6, item.columns)) : undefined,
+        align: ["left", "center", "right"].includes(item.align) ? item.align : undefined,
+        hours,
+        enabled: item.enabled !== undefined ? Boolean(item.enabled) : true,
+        order: typeof item.order === "number" ? item.order : idx,
+      };
+    });
+}
+
+export function safeParseCustomPages(raw: unknown): CustomPage[] {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+  return parsed
+    .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
+    .map((item, idx) => {
+      const rawSlug = String(item.slug || `page-${idx + 1}`)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      const slug = rawSlug || `page-${idx + 1}`;
+
+      return {
+        id: String(item.id || `custom-page-${idx + 1}`),
+        slug,
+        title: String(item.title || "หน้าใหม่").slice(0, 200),
+        subtitle: item.subtitle ? String(item.subtitle).slice(0, 500) : undefined,
+        content: item.content ? String(item.content).slice(0, 50000) : undefined,
+        sections: safeParseCustomSections(item.sections),
+        metaDescription: item.metaDescription ? String(item.metaDescription).slice(0, 300) : undefined,
+        published: item.published !== undefined ? Boolean(item.published) : true,
+        updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
+      };
+    });
+}
+
+export function safeParseNavMenu(raw: unknown): NavigationMenuItem[] {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return [...DEFAULT_NAV_MENU];
+  }
+
+  const items = parsed
+    .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
+    .map((item, idx) => ({
+      id: String(item.id || `nav-${idx + 1}`),
+      label: String(item.label || item.title || "เมนู").slice(0, 100),
+      href: String(item.href || item.url || "#").slice(0, 500),
+      isExternal: Boolean(item.isExternal),
+      icon: item.icon ? String(item.icon).slice(0, 50) : undefined,
+    }))
+    .filter((item) => Boolean(item.label && item.href));
+
+  return items.length > 0 ? items : [...DEFAULT_NAV_MENU];
+}
+
+export function safeParseSocialLinks(raw: unknown): FooterSocialLinks {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+
+  const obj = parsed as Record<string, any>;
+  const cleanUrl = (val: unknown) => (typeof val === "string" && val.trim() ? val.trim().slice(0, 500) : undefined);
+
+  return {
+    facebook: cleanUrl(obj.facebook),
+    tiktok: cleanUrl(obj.tiktok),
+    instagram: cleanUrl(obj.instagram),
+    youtube: cleanUrl(obj.youtube),
+    line: cleanUrl(obj.line),
+  };
 }

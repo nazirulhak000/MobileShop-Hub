@@ -4,25 +4,41 @@ import { db } from "@/lib/db";
 import { reqId, withStaff, readJson } from "@/lib/staff-http";
 import { staffContext, AccessError } from "@/lib/staff-context";
 import { retryTransaction } from "@/lib/bookings";
+import { throttle } from "@/lib/staff-auth";
+
 export const GET = withStaff(async () => {
+  const actor = staffContext();
+  const tenantId = actor.tenantId;
   const [appointments, policies, branches] = await Promise.all([
-    prisma.appointment.findMany({ orderBy: { createdAt: "desc" }, take: 200 }),
-    prisma.bookingPolicy.findMany(), prisma.branch.findMany({ select: { id: true, name: true } }),
+    prisma.appointment.findMany({ where: { tenantId }, orderBy: { createdAt: "desc" }, take: 200 }),
+    prisma.bookingPolicy.findMany({ where: { tenantId } }),
+    prisma.branch.findMany({ where: { tenantId }, select: { id: true, name: true, code: true } }),
   ]);
-  const tenantId = staffContext().tenantId;
-  const [slots, accounts] = await Promise.all([
+  const [slots, accounts, links] = await Promise.all([
     db.bookingSlot.findMany({ where: { tenantId, id: { in: appointments.map(a => a.slotId) } } }),
     db.customerAccount.findMany({ where: { tenantId, id: { in: appointments.map(a => a.accountId) } }, select: { id: true, displayName: true, phone: true } }),
+    db.customerAccountLink.findMany({ where: { tenantId, accountId: { in: appointments.map(a => a.accountId) } } }),
   ]);
-  return NextResponse.json({ appointments: appointments.map(a => ({ ...a, slot: slots.find(s => s.id === a.slotId), account: accounts.find(c => c.id === a.accountId) })), policies, branches });
+  return NextResponse.json({
+    appointments: appointments.map(a => ({
+      ...a,
+      slot: slots.find(s => s.id === a.slotId),
+      account: accounts.find(c => c.id === a.accountId),
+      isLinked: links.some(l => l.accountId === a.accountId),
+    })),
+    policies,
+    branches,
+  });
 }, ["ADMIN", "MANAGER", "CASHIER"]);
+
 export const POST = withStaff(async (request: NextRequest) => {
   const actor = staffContext();
+  await throttle(`staff-appointments:${actor.tenantId}:${actor.id}`, 60, 60_000);
   const body = (await readJson<Record<string, any>>(request)) || {};
   if (!body || typeof body !== "object") throw new AccessError(400, "รูปแบบข้อมูลไม่ถูกต้อง");
   if (body.action === "policy") {
     if (!["ADMIN", "MANAGER"].includes(actor.role)) throw new AccessError(403, "ไม่มีสิทธิ์ตั้งค่าคิว");
-    const branch = await prisma.branch.findFirst({ where: { id: reqId(body.branchId, "branchId") } });
+    const branch = await prisma.branch.findFirst({ where: { id: reqId(body.branchId, "branchId"), tenantId: actor.tenantId } });
     if (!branch) throw new AccessError(404, "ไม่พบสาขา");
     if (!Number.isInteger(body.opensMinute) || !Number.isInteger(body.closesMinute) || body.opensMinute < 0 || body.closesMinute > 1440 || body.opensMinute >= body.closesMinute || body.opensMinute % 30 || body.closesMinute % 30 || !Number.isInteger(body.capacity) || body.capacity < 1 || body.capacity > 20 || !Array.isArray(body.closedWeekdays) || body.closedWeekdays.some((n: unknown) => !Number.isInteger(n) || Number(n) < 0 || Number(n) > 6) || !Array.isArray(body.closedDates) || body.closedDates.length > 365 || body.closedDates.some((d: unknown) => typeof d !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(d))) throw new AccessError(400, "เวลาทำการ จำนวนคิว หรือวันหยุดไม่ถูกต้อง");
     await db.bookingPolicy.upsert({ where: { branchId: branch.id }, create: { tenantId: actor.tenantId, branchId: branch.id, opensMinute: body.opensMinute, closesMinute: body.closesMinute, capacity: body.capacity, closedDates: JSON.stringify(body.closedDates), closedWeekdays: JSON.stringify(body.closedWeekdays), active: body.active === true }, update: { opensMinute: body.opensMinute, closesMinute: body.closesMinute, capacity: body.capacity, closedDates: JSON.stringify(body.closedDates), closedWeekdays: JSON.stringify(body.closedWeekdays), active: body.active === true } });
@@ -42,11 +58,77 @@ export const POST = withStaff(async (request: NextRequest) => {
     let repairJobId = current.repairJobId;
     if (body.action === "CHECKED_IN" && !repairJobId) {
       const link = await tx.customerAccountLink.findFirst({ where: { accountId: current.accountId, tenantId: actor.tenantId } });
-      const customer = link ? await tx.customer.findFirst({ where: { id: link.customerId, tenantId: actor.tenantId } }) : null;
-      if (!customer) throw new AccessError(409, "กรุณาตรวจหลักฐานและเชื่อมประวัติลูกค้าก่อนรับเครื่อง");
-      const job = await tx.repairJob.create({ data: { tenantId: actor.tenantId, branchId: current.branchId, customerId: customer.id, trackingCode: `REP-${current.bookingRef}`, deviceBrand: "รอตรวจรับ", deviceModel: current.deviceModel, issueDescription: current.issueDescription, customerApproved: false } });
+      let customer = link ? await tx.customer.findFirst({ where: { id: link.customerId, tenantId: actor.tenantId } }) : null;
+      if (!customer) {
+        const account = await tx.customerAccount.findFirst({ where: { id: current.accountId, tenantId: actor.tenantId } });
+        if (body.customerId) {
+          customer = await tx.customer.findFirst({ where: { id: reqId(body.customerId, "customerId"), tenantId: actor.tenantId } });
+        } else if (account?.phone) {
+          customer = await tx.customer.findFirst({ where: { tenantId: actor.tenantId, phone: account.phone } });
+        }
+        if (!customer && account) {
+          customer = await tx.customer.create({
+            data: {
+              tenantId: actor.tenantId,
+              name: account.displayName || `ลูกค้า ${account.phone || current.bookingRef}`,
+              phone: account.phone || "0000000000",
+            },
+          });
+        }
+        if (!customer) throw new AccessError(404, "ไม่สามารถระบุหรือสร้างประวัติลูกค้าสำหรับเชื่อมต่อระบบได้");
+
+        const existingLink = await tx.customerAccountLink.findFirst({
+          where: { tenantId: actor.tenantId, OR: [{ accountId: current.accountId }, { customerId: customer.id }] },
+        });
+        if (!existingLink) {
+          const evidenceText =
+            typeof body.evidence === "string" && body.evidence.trim().length >= 10
+              ? body.evidence.trim()
+              : `ลูกค้านำเครื่องเข้าตรวจรับที่สาขาตามนัดหมายรหัส ${current.bookingRef}`;
+          await tx.customerAccountLink.create({
+            data: {
+              tenantId: actor.tenantId,
+              accountId: current.accountId,
+              customerId: customer.id,
+              approvedBy: actor.id,
+              evidence: evidenceText,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              tenantId: actor.tenantId,
+              userId: actor.id,
+              module: "CUSTOMERS",
+              action: "PORTAL_LINK",
+              targetId: customer.id,
+              details: JSON.stringify({ accountId: current.accountId, autoLinkedAtCheckin: true, bookingRef: current.bookingRef }),
+            },
+          });
+        }
+      }
+
+      const job = await tx.repairJob.create({
+        data: {
+          tenantId: actor.tenantId,
+          branchId: current.branchId,
+          customerId: customer.id,
+          trackingCode: `REP-${current.bookingRef}`,
+          deviceBrand: (typeof body.deviceBrand === "string" && body.deviceBrand.trim()) || "รอตรวจรับ",
+          deviceModel: current.deviceModel,
+          issueDescription: current.issueDescription,
+          customerApproved: false,
+        },
+      });
       repairJobId = job.id;
-      await tx.repairStatusEvent.create({ data: { tenantId: actor.tenantId, repairJobId: job.id, status: "PENDING", customerMessage: "ร้านรับเครื่องเข้าตรวจแล้ว", actorId: actor.id } });
+      await tx.repairStatusEvent.create({
+        data: {
+          tenantId: actor.tenantId,
+          repairJobId: job.id,
+          status: "PENDING",
+          customerMessage: "ร้านรับเครื่องเข้าตรวจแล้ว",
+          actorId: actor.id,
+        },
+      });
     }
     if (body.action === "CANCELLED") {
       const released = await tx.bookingSlot.updateMany({ where: { id: slot.id, reservedCount: { gt: 0 }, tenantId: actor.tenantId }, data: { reservedCount: { decrement: 1 } } });
