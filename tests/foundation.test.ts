@@ -18,6 +18,22 @@ import {
   calculateCustomerLTV,
   determineCustomerTier,
 } from "../src/lib/customer-utils";
+import {
+  generatePromptPayPayload,
+  verifyPromptPayPayload,
+  validatePromptPayTarget,
+  toSatang,
+  fromSatang,
+  formatPromptPayAmount,
+} from "../src/lib/promptpay";
+import { getStoreSettings, updateStoreSettings } from "../src/lib/settings";
+import {
+  getMasterData,
+  addMasterItem,
+  updateMasterItem,
+  deleteMasterItem,
+  reorderMasterItems,
+} from "../src/lib/masters";
 let admin: StaffPrincipal;
 let cashier: StaffPrincipal;
 let foreignCustomer: string;
@@ -3884,4 +3900,226 @@ test("Round 23: Branches & Staff Users Management Audit - 5-Digit Code (00000 HQ
     }
     assert.ok(crossUpdateThrew, "Cross-tenant user update must fail closed");
   });
+});
+
+test("Round 24: Master Data & General Store Settings Audit - PromptPay EMVCo Satang Precision, Store Settings & Master CRUD Multi-Tenant Isolation", async () => {
+  const userB = await db.user.findFirstOrThrow({ where: { tenantId: "test-b" } });
+  const staffB: StaffPrincipal = {
+    id: userB.id,
+    tenantId: "test-b",
+    name: userB.name,
+    username: userB.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  // 1. PromptPay EMVCo Payload Generation with Satang Precision & CRC-16 Verification
+  {
+    // Mobile phone target with leading zero
+    const mobileTarget = "081-234-5678";
+    const validationMobile = validatePromptPayTarget(mobileTarget);
+    assert.equal(validationMobile.valid, true);
+    assert.equal(validationMobile.type, "MOBILE");
+    assert.equal(validationMobile.formatted, "0066812345678");
+
+    // Dynamic QR with Satang Precision (150.75 THB)
+    const payloadDynamic = generatePromptPayPayload(mobileTarget, 150.75);
+    assert.ok(payloadDynamic.includes("010212"), "Must indicate dynamic initiation (12)");
+    assert.ok(payloadDynamic.includes("5303764"), "Currency must be 764 (THB)");
+    assert.ok(payloadDynamic.includes("5406150.75"), "Amount must have 2-decimal satang precision");
+    assert.ok(payloadDynamic.includes("5802TH"), "Country must be TH");
+
+    const verifiedDynamic = verifyPromptPayPayload(payloadDynamic);
+    assert.equal(verifiedDynamic.valid, true, "CRC-16 checksum must be valid");
+    assert.equal(verifiedDynamic.crcValid, true);
+    assert.equal(verifiedDynamic.target, "0812345678");
+    assert.equal(verifiedDynamic.amount, 150.75);
+
+    // Static QR (no amount) with 13-digit Tax ID
+    const taxIdTarget = "0105558123451";
+    const validationTax = validatePromptPayTarget(taxIdTarget);
+    assert.equal(validationTax.valid, true);
+    assert.equal(validationTax.type, "TAX_ID");
+
+    const payloadStatic = generatePromptPayPayload(taxIdTarget);
+    assert.ok(payloadStatic.includes("010211"), "Must indicate static initiation (11)");
+    assert.ok(payloadStatic.includes("02130105558123451"), "Tax ID must be formatted in Tag 02");
+    assert.ok(!payloadStatic.includes("540"), "Static QR must not include Tag 54 amount");
+
+    const verifiedStatic = verifyPromptPayPayload(payloadStatic);
+    assert.equal(verifiedStatic.valid, true);
+    assert.equal(verifiedStatic.crcValid, true);
+    assert.equal(verifiedStatic.target, "0105558123451");
+    assert.equal(verifiedStatic.amount, undefined);
+
+    // Satang conversions
+    assert.equal(toSatang(150.75), 15075);
+    assert.equal(fromSatang(15075), 150.75);
+    assert.equal(formatPromptPayAmount(2400), "2400.00");
+  }
+
+  // 2. General Store Settings Audit & Strict Multi-Tenant Isolation
+  {
+    // Tenant A updates store settings
+    const updatedA = await staffStorage.run(admin, async () => {
+      return await updateStoreSettings("test-a", admin.id, {
+        shopName: "FixMe สาขาทองหล่อ",
+        shopSlogan: "ศูนย์บริการซ่อมมือถือด่วนพรีเมียม",
+        taxId: "0105558123451",
+        phone: "02-789-0123",
+        email: "thonglor@fixme.co.th",
+        address: "55/1 ซอยทองหล่อ 10 กรุงเทพฯ 10110",
+        branchCode: "00000",
+        branchName: "สาขาทองหล่อ (HQ)",
+        currency: "THB",
+        currencySymbol: "฿",
+        timezone: "Asia/Bangkok",
+        paperWidth: "80mm",
+        receiptHeader: "FIXME THONGLOR PREMIUM REPAIR",
+        receiptFooter: "ขอบคุณที่ใช้บริการ รับประกันงานซ่อม 90 วันเต็ม",
+        showPromptPayQR: true,
+        promptPayId: "0812345678",
+        vatEnabled: true,
+        vatRate: 7,
+        vatPriceMode: "INCLUDED",
+      });
+    });
+
+    assert.equal(updatedA.shopName, "FixMe สาขาทองหล่อ");
+    assert.equal(updatedA.currency, "THB");
+    assert.equal(updatedA.paperWidth, "80mm");
+    assert.equal(updatedA.promptPayId, "0812345678");
+
+    // Tenant B updates distinct store settings
+    const updatedB = await staffStorage.run(staffB, async () => {
+      return await updateStoreSettings("test-b", staffB.id, {
+        shopName: "Mobile Express International",
+        shopSlogan: "Global Phone Repairs & Exports",
+        taxId: "1100500876549",
+        phone: "089-999-8888",
+        email: "express@mobile.com",
+        address: "77 Sukhumvit, Bangkok",
+        branchCode: "00001",
+        branchName: "Branch 1",
+        currency: "USD",
+        currencySymbol: "$",
+        timezone: "UTC",
+        paperWidth: "58mm",
+        receiptHeader: "MOBILE EXPRESS GLOBAL",
+        receiptFooter: "Thanks for shopping",
+        showPromptPayQR: false,
+        promptPayId: "0899998888",
+        vatEnabled: false,
+        vatRate: 0,
+        vatPriceMode: "EXCLUDED",
+      });
+    });
+
+    assert.equal(updatedB.shopName, "Mobile Express International");
+    assert.equal(updatedB.currency, "USD");
+    assert.equal(updatedB.currencySymbol, "$");
+    assert.equal(updatedB.paperWidth, "58mm");
+    assert.equal(updatedB.showPromptPayQR, false);
+
+    // Verify Multi-Tenant Query Isolation: Reading Tenant A yields A's settings without bleeding from B
+    const settingsA = await staffStorage.run(admin, async () => {
+      return await getStoreSettings("test-a");
+    });
+    assert.equal(settingsA.shopName, "FixMe สาขาทองหล่อ");
+    assert.equal(settingsA.currency, "THB");
+    assert.equal(settingsA.paperWidth, "80mm");
+    assert.equal(settingsA.promptPayId, "0812345678");
+    assert.equal(settingsA.vatEnabled, true);
+
+    const settingsB = await staffStorage.run(staffB, async () => {
+      return await getStoreSettings("test-b");
+    });
+    assert.equal(settingsB.shopName, "Mobile Express International");
+    assert.equal(settingsB.currency, "USD");
+    assert.equal(settingsB.paperWidth, "58mm");
+    assert.equal(settingsB.promptPayId, "0899998888");
+    assert.equal(settingsB.vatEnabled, false);
+
+    // Verify AuditLog record created for Tenant A
+    const auditA = await db.auditLog.findFirst({
+      where: { tenantId: "test-a", module: "SETTINGS", action: "UPDATE" },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(auditA, "AuditLog for SETTINGS UPDATE must exist");
+    assert.ok(auditA.details.includes("FixMe สาขาทองหล่อ"));
+  }
+
+  // 3. Master Data CRUD & Multi-Tenant Isolation
+  {
+    // A. Read Default Master Data: Verify core symptoms exist
+    const defaultDataA = await getMasterData("test-a");
+    const symptomNamesA = defaultDataA.symptoms.map((s) => s.name);
+    assert.ok(symptomNamesA.some((n) => n.includes("จอแตก")), "Default symptoms must include จอแตก");
+    assert.ok(symptomNamesA.some((n) => n.includes("แบตเตอรี่เสื่อม")), "Default symptoms must include แบตเตอรี่เสื่อม");
+    assert.ok(symptomNamesA.some((n) => n.includes("เปิดไม่ติด")), "Default symptoms must include เปิดไม่ติด");
+
+    const categoryCodesA = defaultDataA.categories.map((c) => c.code);
+    assert.ok(categoryCodesA.includes("DEVICE"));
+    assert.ok(categoryCodesA.includes("ACCESSORY"));
+    assert.ok(categoryCodesA.includes("SPARE_PART"));
+    assert.ok(categoryCodesA.includes("SERVICE"));
+
+    // B. Add new Common Symptom to Tenant A
+    const addedStoreA = await addMasterItem("test-a", admin.id, "symptoms", {
+      name: "เลนส์กล้อง OIS สั่นกระตุก / กระจกเลนส์แตก",
+      description: "เปลี่ยนโมดูลชุดกล้องแท้และเปลี่ยนกระจกครอบเลนส์กล้อง",
+      baseLaborFee: 950,
+      estimatedHours: 1.2,
+      priority: "MEDIUM",
+      badge: "อะไหล่แท้",
+      displayOrder: 8,
+      isActive: true,
+    });
+
+    const newSymptom = addedStoreA.symptoms.find((s) => s.name.includes("เลนส์กล้อง OIS สั่นกระตุก"));
+    assert.ok(newSymptom, "Added symptom must exist in Tenant A");
+    assert.equal(newSymptom?.baseLaborFee, 950);
+    assert.equal(newSymptom?.badge, "อะไหล่แท้");
+
+    // C. Add new Service to Tenant A
+    const addedServiceStoreA = await addMasterItem("test-a", admin.id, "services", {
+      code: "MICRO_VACUUM",
+      name: "ทำความสะอาดลำโพงและไมโครโฟนด้วยไมโครแวคคั่ม",
+      description: "ดูดฝุ่นผงและคราบสิ่งสกปรกออกจากตะแกรงลำโพงและไมค์สนทนา",
+      standardPrice: 199,
+      estimatedMinutes: 15,
+      badge: "โปรโมชั่น",
+      displayOrder: 6,
+      isActive: true,
+    });
+    const newService = addedServiceStoreA.services.find((s) => s.code === "MICRO_VACUUM");
+    assert.ok(newService, "Added service must exist in Tenant A");
+    assert.equal(newService?.standardPrice, 199);
+
+    // D. Multi-Tenant Master Isolation: Verify Tenant B DOES NOT have Tenant A's additions
+    const masterDataB = await getMasterData("test-b");
+    const symptomNamesB = masterDataB.symptoms.map((s) => s.name);
+    assert.ok(!symptomNamesB.some((n) => n.includes("เลนส์กล้อง OIS สั่นกระตุก")), "Tenant B must not see Tenant A's symptom");
+    const serviceCodesB = masterDataB.services.map((s) => s.code);
+    assert.ok(!serviceCodesB.includes("MICRO_VACUUM"), "Tenant B must not see Tenant A's service");
+
+    // E. Update / Edit Master Item in Tenant A
+    const updatedStoreA = await updateMasterItem("test-a", admin.id, "symptoms", newSymptom!.id, {
+      baseLaborFee: 1100,
+      badge: "ลดราคาพิเศษ",
+    });
+    const editedSymptom = updatedStoreA.symptoms.find((s) => s.id === newSymptom!.id);
+    assert.equal(editedSymptom?.baseLaborFee, 1100);
+    assert.equal(editedSymptom?.badge, "ลดราคาพิเศษ");
+
+    // F. Reorder Items in Tenant A
+    const reversedIds = [...updatedStoreA.symptoms.map((s) => s.id)].reverse();
+    const reorderedStoreA = await reorderMasterItems("test-a", admin.id, "symptoms", reversedIds);
+    assert.equal(reorderedStoreA.symptoms[0].id, reversedIds[0]);
+
+    // G. Delete Master Item in Tenant A
+    const finalStoreA = await deleteMasterItem("test-a", admin.id, "symptoms", newSymptom!.id);
+    assert.ok(!finalStoreA.symptoms.some((s) => s.id === newSymptom!.id), "Deleted symptom must be removed from Tenant A");
+  }
 });

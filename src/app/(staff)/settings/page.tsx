@@ -1,88 +1,137 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { DemoBanner } from "@/components/ui/DemoBanner";
 import {
   Sliders,
   Building2,
   Printer,
   Receipt,
-  Shield,
   Database,
   Save,
   CheckCircle2,
   Copy,
   Check,
   Download,
-  Bell,
   Smartphone,
-  HardDrive,
-  FileText,
   Eye,
   EyeOff,
   Palette,
   Sparkles,
   ArrowRight,
+  Globe,
+  Coins,
+  QrCode,
+  RefreshCw,
+  AlertCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
-
-const NOT_SAVED_MSG = "ยังไม่รองรับการบันทึก — หน้านี้เป็นโหมดตัวอย่าง ข้อมูลจะไม่ถูกเก็บในระบบ";
+import { formatTHB } from "@/lib/utils";
+import { generatePromptPayPayload, validatePromptPayTarget } from "@/lib/promptpay";
+import { GeneralStoreSettings, DEFAULT_STORE_SETTINGS } from "@/types/settings";
+import QRCode from "qrcode";
 
 export default function SettingsPage() {
   const { currentBranch } = useApp();
-  const [activeTab, setActiveTab] = useState<"store" | "receipt" | "tax" | "line" | "backup">("store");
+  const [activeTab, setActiveTab] = useState<"store" | "receipt" | "financial" | "line" | "backup">("store");
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  // Store Profile
-  const [storeName, setStoreName] = useState("บริษัท โมบายช็อป ฮับ จำกัด (MobileShop Hub Co., Ltd.)");
-  const [storeSlogan, setStoreSlogan] = useState("ศูนย์บริการซ่อมมือถือด่วนและจำหน่ายอุปกรณ์แท้ครบวงจร");
-  const [taxId, setTaxId] = useState("0105567012345");
-  const [phone, setPhone] = useState("02-123-4567");
-  const [email, setEmail] = useState("contact@mobileshop.co.th");
-  const [address, setAddress] = useState("เลขที่ 888 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110");
+  // Settings State
+  const [settings, setSettings] = useState<GeneralStoreSettings>(DEFAULT_STORE_SETTINGS);
 
-  // Receipt Settings
-  const [paperWidth, setPaperWidth] = useState<"80mm" | "58mm">("80mm");
-  const [slipFooter, setSlipFooter] = useState("ขอบคุณที่ใช้บริการ งานซ่อมรับประกัน 90 วัน กรุณาเก็บใบเสร็จเพื่อการรับประกัน");
-  const [showPromptPayQR, setShowPromptPayQR] = useState(true);
-  const [promptPayId, setPromptPayId] = useState("0105567012345");
-
-  // Tax Settings
-  const [vatEnabled, setVatEnabled] = useState(true);
-  const [vatRate, setVatRate] = useState(7);
-  const [vatPriceMode, setVatPriceMode] = useState<"INCLUDED" | "EXCLUDED">("INCLUDED");
-
-  // LINE Settings
-  const [lineChannelId, setLineChannelId] = useState("");
-  const [lineChannelSecret, setLineChannelSecret] = useState("");
-  const [lineChannelAccessToken, setLineChannelAccessToken] = useState("");
+  // Password Visibility
   const [showChannelSecret, setShowChannelSecret] = useState(false);
   const [showAccessToken, setShowAccessToken] = useState(false);
-  const [lineNotifyRepairs, setLineNotifyRepairs] = useState(true);
-  const [lineNotifyLowStock, setLineNotifyLowStock] = useState(true);
-  const [lineErrors, setLineErrors] = useState<{ channelId?: string; channelSecret?: string; accessToken?: string }>({});
+
+  // Live PromptPay QR Preview
+  const [qrPreviewUrl, setQrPreviewUrl] = useState<string>("");
+  const [testQrAmount, setTestQrAmount] = useState<number>(150);
 
   const webhookUrl = "https://api.mobileshop.co.th/api/webhook/line";
 
-  const handleSave = () => {
-    // Validate LINE tab inputs when on LINE tab
-    if (activeTab === "line") {
-      const errs: typeof lineErrors = {};
-      if (!lineChannelId.trim()) errs.channelId = "Channel ID ห้ามว่าง";
-      if (!lineChannelSecret.trim()) errs.channelSecret = "Channel Secret ห้ามว่าง";
-      if (!lineChannelAccessToken.trim()) errs.accessToken = "Channel Access Token ห้ามว่าง";
-      if (Object.keys(errs).length > 0) {
-        setLineErrors(errs);
+  // Fetch Settings on mount
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/settings");
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.data) {
+        setSettings(json.data);
+      }
+    } catch (err: any) {
+      console.error("Fetch settings error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  // Update Live PromptPay QR Preview when promptPayId or testQrAmount changes
+  useEffect(() => {
+    const target = settings.promptPayId || settings.taxId || "0105567012345";
+    const payload = generatePromptPayPayload(target, testQrAmount > 0 ? testQrAmount : undefined);
+
+    QRCode.toDataURL(payload, {
+      width: 180,
+      margin: 1,
+      color: { dark: "#0f172a", light: "#ffffff" },
+    })
+      .then(setQrPreviewUrl)
+      .catch((err) => console.error("PromptPay QR generation error:", err));
+  }, [settings.promptPayId, settings.taxId, testQrAmount]);
+
+  const showToast = (text: string, type: "success" | "error" = "success") => {
+    setStatusMsg({ text, type });
+    setTimeout(() => setStatusMsg(null), 3500);
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+
+      // Validate required fields
+      if (!settings.shopName.trim()) {
+        alert("กรุณาระบุชื่อร้านค้าหรือชื่อนิติบุคคล");
         return;
       }
-      setLineErrors({});
+
+      if (settings.showPromptPayQR && settings.promptPayId) {
+        const ppCheck = validatePromptPayTarget(settings.promptPayId);
+        if (!ppCheck.valid) {
+          alert(ppCheck.message || "หมายเลข PromptPay ไม่ถูกต้อง (ต้องเป็นเบอร์มือถือ หรือ Tax ID 13 หลัก)");
+          return;
+        }
+      }
+
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setSettings(json.data);
+        showToast("บันทึกการตั้งค่าระบบทั่วไปสำเร็จ");
+      } else {
+        alert(json?.error || "ไม่สามารถบันทึกการตั้งค่าได้");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setSaving(false);
     }
-    alert(NOT_SAVED_MSG);
   };
 
   const copyWebhook = () => {
@@ -91,9 +140,26 @@ export default function SettingsPage() {
     setTimeout(() => setCopiedWebhook(false), 2000);
   };
 
+  const updateField = <K extends keyof GeneralStoreSettings>(key: K, value: GeneralStoreSettings[K]) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
   return (
     <div className="space-y-6">
-      <DemoBanner message="การตั้งค่าในหน้านี้ยังไม่ถูกบันทึกลงฐานข้อมูล ค่าที่แสดงเป็นตัวอย่าง การสำรองฐานข้อมูลกรุณาติดต่อผู้ดูแลระบบ" />
+      {/* Toast Notification */}
+      {statusMsg && (
+        <div
+          className={`fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition-all ${
+            statusMsg.type === "success"
+              ? "bg-emerald-900 text-emerald-100 border border-emerald-700"
+              : "bg-rose-900 text-rose-100 border border-rose-700"
+          }`}
+        >
+          {statusMsg.type === "success" ? <Check className="h-4 w-4 text-emerald-400" /> : <AlertCircle className="h-4 w-4 text-rose-400" />}
+          <span>{statusMsg.text}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-5">
         <div className="flex items-center gap-2.5">
@@ -105,19 +171,28 @@ export default function SettingsPage() {
               ตั้งค่าระบบทั่วไป (General System Settings)
             </h1>
             <p className="text-xs text-slate-500">
-              จัดการข้อมูลนิติบุคคล หัวใบเสร็จ ภาษีมูลค่าเพิ่ม LINE OA Webhook และสำรองฐานข้อมูล
+              จัดการข้อมูลนิติบุคคล หัวใบเสร็จ PromptPay QR สกุลเงิน เขตเวลา ภาษีมูลค่าเพิ่ม LINE OA และฐานข้อมูล
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Button
-            disabled
-            title="ยังไม่รองรับการบันทึก"
-            className="gap-2 text-xs h-9 bg-slate-300 text-slate-600 shadow-xs cursor-not-allowed"
+            variant="outline"
+            onClick={fetchSettings}
+            disabled={loading || saving}
+            className="gap-1.5 text-xs h-9 text-slate-700"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>รีเฟรช</span>
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
           >
             <Save className="h-3.5 w-3.5" />
-            ยังไม่รองรับการบันทึก
+            <span>{saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}</span>
           </Button>
         </div>
       </div>
@@ -136,7 +211,7 @@ export default function SettingsPage() {
               <span>ปรับแต่งหน้าร้านออนไลน์ (Storefront Customizer)</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              เครื่องมือปรับแต่งหน้าร้านระดับมืออาชีพ เลือกธีมสีพรีเมียม 6 เฉดสี, ปรับแต่งข้อความ Hero & Badge, ตั้งค่าแถบประกาศ (Announcement Bar), จัดการเปิด-ปิดเซกชัน 10 จุดตรวจเช็ค/แท่นเทสฮาร์ดแวร์/สไลเดอร์เปรียบเทียบก่อน-หลังซ่อม พร้อมดู Live Preview แบบตอบสนองทันที
+              เครื่องมือปรับแต่งหน้าร้านระดับมืออาชีพ เลือกธีมสีพรีเมียม 6 เฉดสี, ปรับแต่งข้อความ Hero & Badge, ตั้งค่าแถบประกาศ (Announcement Bar), จัดการเปิด-ปิดเซกชัน พร้อมดู Live Preview แบบตอบสนองทันที
             </p>
           </div>
 
@@ -157,8 +232,8 @@ export default function SettingsPage() {
       <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
         {[
           { id: "store", label: "ข้อมูลร้านค้า & นิติบุคคล", icon: Building2 },
-          { id: "receipt", label: "ใบเสร็จ & การพิมพ์", icon: Printer },
-          { id: "tax", label: "ภาษี & ภ.พ.30", icon: Receipt },
+          { id: "receipt", label: "ใบเสร็จ & PromptPay QR", icon: Printer },
+          { id: "financial", label: "การเงิน ภาษี & เวลา", icon: Receipt },
           { id: "line", label: "การเชื่อมต่อ LINE OA", icon: Smartphone },
           { id: "backup", label: "ฐานข้อมูล & แบ็คอัป", icon: Database },
         ].map((tab) => {
@@ -184,7 +259,7 @@ export default function SettingsPage() {
 
       {/* Tab Panels */}
       <div className="space-y-6">
-        {/* Store Profile Tab */}
+        {/* ================= TAB 1: STORE PROFILE ================= */}
         {activeTab === "store" && (
           <Card className="border-slate-200 shadow-2xs">
             <CardHeader className="pb-3 border-b border-slate-100">
@@ -192,15 +267,16 @@ export default function SettingsPage() {
                 ข้อมูลนิติบุคคลและร้านค้า (Company & Store Profile)
               </CardTitle>
               <CardDescription className="text-xs text-slate-500">
-                ข้อมูลนี้จะปรากฏในใบเสร็จรับเงิน ใบกำกับภาษีเต็มรูป และเอกสารส่งซ่อม
+                ข้อมูลนี้จะปรากฏในใบเสร็จรับเงิน ใบกำกับภาษีเต็มรูป เอกสารส่งซ่อม และระบบใบแจ้งหนี้
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-700 mb-1 block">ชื่อนิติบุคคล / ชื่อร้านค้า *</label>
                 <Input
-                  value={storeName}
-                  onChange={(e) => setStoreName(e.target.value)}
+                  value={settings.shopName}
+                  onChange={(e) => updateField("shopName", e.target.value)}
+                  placeholder="เช่น บริษัท โมบายช็อป ฮับ จำกัด"
                   className="text-xs h-9"
                 />
               </div>
@@ -208,8 +284,9 @@ export default function SettingsPage() {
               <div>
                 <label className="text-xs font-semibold text-slate-700 mb-1 block">สโลแกน / คำอธิบายร้าน</label>
                 <Input
-                  value={storeSlogan}
-                  onChange={(e) => setStoreSlogan(e.target.value)}
+                  value={settings.shopSlogan}
+                  onChange={(e) => updateField("shopSlogan", e.target.value)}
+                  placeholder="เช่น ศูนย์บริการซ่อมมือถือด่วนและจำหน่ายอุปกรณ์แท้ครบวงจร"
                   className="text-xs h-9"
                 />
               </div>
@@ -218,24 +295,49 @@ export default function SettingsPage() {
                 <div>
                   <label className="text-xs font-semibold text-slate-700 mb-1 block">เลขประจำตัวผู้เสียภาษี (13 หลัก) *</label>
                   <Input
-                    value={taxId}
-                    onChange={(e) => setTaxId(e.target.value)}
+                    value={settings.taxId}
+                    onChange={(e) => updateField("taxId", e.target.value)}
+                    placeholder="เช่น 0105567012345"
                     className="text-xs h-9 font-mono"
                   />
                 </div>
                 <div>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 block">รหัสสาขาหลัก (5 หลัก) *</label>
+                  <Input
+                    value={settings.branchCode}
+                    onChange={(e) => updateField("branchCode", e.target.value)}
+                    placeholder="00000"
+                    maxLength={5}
+                    className="text-xs h-9 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 block">ชื่อสาขาหลัก</label>
+                  <Input
+                    value={settings.branchName}
+                    onChange={(e) => updateField("branchName", e.target.value)}
+                    placeholder="สำนักงานใหญ่ (HQ)"
+                    className="text-xs h-9"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
                   <label className="text-xs font-semibold text-slate-700 mb-1 block">เบอร์โทรศัพท์ติดต่อ</label>
                   <Input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    value={settings.phone}
+                    onChange={(e) => updateField("phone", e.target.value)}
+                    placeholder="เช่น 02-123-4567, 081-234-5678"
                     className="text-xs h-9"
                   />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 mb-1 block">อีเมลติดต่อ</label>
                   <Input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={settings.email}
+                    onChange={(e) => updateField("email", e.target.value)}
+                    placeholder="contact@mobileshop.co.th"
                     className="text-xs h-9"
                   />
                 </div>
@@ -245,166 +347,309 @@ export default function SettingsPage() {
                 <label className="text-xs font-semibold text-slate-700 mb-1 block">ที่อยู่จดทะเบียนสำนักงานใหญ่</label>
                 <textarea
                   rows={2}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  value={settings.address}
+                  onChange={(e) => updateField("address", e.target.value)}
+                  placeholder="เลขที่ ถนน แขวง เขต จังหวัด รหัสไปรษณีย์"
                   className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{saving ? "กำลังบันทึก..." : "บันทึกข้อมูลร้านค้า"}</span>
+                </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Receipt Tab */}
+        {/* ================= TAB 2: RECEIPT & PROMPTPAY QR ================= */}
         {activeTab === "receipt" && (
           <Card className="border-slate-200 shadow-2xs">
             <CardHeader className="pb-3 border-b border-slate-100">
               <CardTitle className="text-sm font-bold text-slate-900">
-                ตั้งค่าใบเสร็จรับเงินและการพิมพ์ (Receipt & Slip Options)
+                ตั้งค่าใบเสร็จรับเงิน & PromptPay QR (Receipt & Cashier QR Options)
               </CardTitle>
+              <CardDescription className="text-xs text-slate-500">
+                กำหนดหัว-ท้ายสลิปกระดาษความร้อน และหมายเลข PromptPay EMVCo สำหรับการชำระเงินด่วนที่แคชเชียร์
+              </CardDescription>
             </CardHeader>
-            <CardContent className="p-5 space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-slate-700 mb-1 block">ขนาดกระดาษความร้อน Thermal Slip</label>
-                <div className="grid grid-cols-2 gap-3 max-w-sm">
-                  {[
-                    { id: "80mm", label: "80 mm (มาตรฐานร้านค้า)" },
-                    { id: "58mm", label: "58 mm (พกพา/ประหยัด)" },
-                  ].map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setPaperWidth(p.id as any)}
-                      className={`p-2.5 rounded-lg border text-xs font-bold transition-all ${
-                        paperWidth === p.id
-                          ? "border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
-                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-700 mb-1 block">ข้อความท้ายสลิปใบเสร็จ (Footer Message)</label>
-                <textarea
-                  rows={2}
-                  value={slipFooter}
-                  onChange={(e) => setSlipFooter(e.target.value)}
-                  className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800"
-                />
-              </div>
-
-              <div className="border border-slate-200 p-3 rounded-lg bg-slate-50/50 space-y-3">
-                <div className="flex items-center justify-between">
+            <CardContent className="p-5 space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Left Form (7 cols) */}
+                <div className="lg:col-span-7 space-y-4">
                   <div>
-                    <div className="text-xs font-semibold text-slate-900">แสดง PromptPay QR Code ท้ายสลิป</div>
-                    <div className="text-[11px] text-slate-500">พิมพ์ QR พร้อมเพย์ให้ลูกค้าสแกนจ่ายเงินได้ทันที</div>
+                    <label className="text-xs font-semibold text-slate-700 mb-1 block">ขนาดกระดาษความร้อน Thermal Slip</label>
+                    <div className="grid grid-cols-2 gap-3 max-w-sm">
+                      {[
+                        { id: "80mm", label: "80 mm (มาตรฐานร้านค้า)" },
+                        { id: "58mm", label: "58 mm (พกพา / ประหยัด)" },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => updateField("paperWidth", p.id as any)}
+                          className={`p-2.5 rounded-lg border text-xs font-bold transition-all ${
+                            settings.paperWidth === p.id
+                              ? "border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
+                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={showPromptPayQR}
-                    onChange={(e) => setShowPromptPayQR(e.target.checked)}
-                    className="h-4 w-4 rounded text-blue-600"
-                  />
-                </div>
 
-                {showPromptPayQR && (
                   <div>
-                    <label className="text-xs font-semibold text-slate-700 mb-1 block">หมายเลข PromptPay ID</label>
+                    <label className="text-xs font-semibold text-slate-700 mb-1 block">ข้อความหัวสลิป (Receipt Header)</label>
                     <Input
-                      value={promptPayId}
-                      onChange={(e) => setPromptPayId(e.target.value)}
-                      className="text-xs h-9 font-mono max-w-xs"
+                      value={settings.receiptHeader}
+                      onChange={(e) => updateField("receiptHeader", e.target.value)}
+                      placeholder="เช่น FIXME MOBILE SERVICE & ACCESSORIES"
+                      className="text-xs h-9 font-semibold"
                     />
                   </div>
-                )}
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 mb-1 block">ข้อความท้ายสลิปและเงื่อนไขรับประกัน (Slip Footer)</label>
+                    <textarea
+                      rows={2}
+                      value={settings.receiptFooter}
+                      onChange={(e) => updateField("receiptFooter", e.target.value)}
+                      placeholder="เช่น ขอบคุณที่ใช้บริการ งานซ่อมรับประกัน 90 วัน กรุณาเก็บใบเสร็จเพื่อการรับประกัน"
+                      className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800"
+                    />
+                  </div>
+
+                  <div className="border border-slate-200 p-4 rounded-xl bg-slate-50/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">แสดง PromptPay QR Code ท้ายสลิป & จุดแคชเชียร์</div>
+                        <div className="text-[11px] text-slate-500">สร้าง QR ตามมาตรฐาน EMVCo รองรับการสแกนผ่านแอปธนาคารทุกแห่ง</div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showPromptPayQR}
+                        onChange={(e) => updateField("showPromptPayQR", e.target.checked)}
+                        className="h-4 w-4 rounded text-blue-600 cursor-pointer"
+                      />
+                    </div>
+
+                    {settings.showPromptPayQR && (
+                      <div className="pt-2 border-t border-slate-200 space-y-2">
+                        <label className="text-xs font-semibold text-slate-700 block">
+                          หมายเลขบัญชี PromptPay ผู้รับเงิน (PromptPay Recipient ID) *
+                        </label>
+                        <Input
+                          value={settings.promptPayId}
+                          onChange={(e) => updateField("promptPayId", e.target.value)}
+                          placeholder="เบอร์มือถือ (08X-XXX-XXXX) หรือ Tax ID 13 หลัก"
+                          className="text-xs h-9 font-mono max-w-sm"
+                        />
+                        <p className="text-[11px] text-slate-500">
+                          สามารถใช้เบอร์มือถือร้านค้า (10 หลัก) หรือเลขประจำตัวผู้เสียภาษี 13 หลักของนิติบุคคล
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right PromptPay QR Live Preview (5 cols) */}
+                <div className="lg:col-span-5 bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 shadow-md flex flex-col items-center text-center space-y-3">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-900/60 border border-blue-700 text-blue-300 text-[11px] font-semibold">
+                    <QrCode className="h-3.5 w-3.5 text-blue-400" />
+                    <span>EMVCo Thai QR Live Preview</span>
+                  </div>
+
+                  <div className="h-44 w-44 bg-white rounded-xl p-2 flex items-center justify-center border border-slate-200 shadow-sm relative overflow-hidden">
+                    {qrPreviewUrl ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={qrPreviewUrl} alt="Thai QR PromptPay" className="h-40 w-40 object-contain" />
+                    ) : (
+                      <div className="text-slate-400 text-xs">กำลังสร้าง QR...</div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="font-bold text-sm text-white font-mono">
+                      พร้อมเพย์: {settings.promptPayId || settings.taxId || "0105567012345"}
+                    </div>
+                    <div className="text-xs text-emerald-400 font-mono font-bold">
+                      ยอดทดสอบ: {formatTHB(testQrAmount)} (Satang Precision)
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs w-full max-w-xs pt-1">
+                    <span className="text-[11px] text-slate-400 shrink-0">ทดสอบยอด:</span>
+                    <Input
+                      type="number"
+                      value={testQrAmount}
+                      onChange={(e) => setTestQrAmount(Number(e.target.value))}
+                      className="text-xs h-7 bg-slate-800 text-white border-slate-700 text-right font-mono"
+                    />
+                    <span className="text-[11px] text-slate-400">บาท</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่าใบเสร็จ"}</span>
+                </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Tax Tab */}
-        {activeTab === "tax" && (
+        {/* ================= TAB 3: FINANCIAL, TAX & LOCALIZATION ================= */}
+        {activeTab === "financial" && (
           <Card className="border-slate-200 shadow-2xs">
             <CardHeader className="pb-3 border-b border-slate-100">
               <CardTitle className="text-sm font-bold text-slate-900">
-                ตั้งค่าภาษีมูลค่าเพิ่ม (VAT 7% & ภ.พ.30)
+                การเงิน สกุลเงิน เขตเวลา & ภาษีมูลค่าเพิ่ม (Financial & VAT Settings)
               </CardTitle>
+              <CardDescription className="text-xs text-slate-500">
+                กำหนดสกุลเงิน สัญลักษณ์ สกุลเงินท้องถิ่น เขตเวลาของร้าน และการคำนวณภาษี VAT 7% ตามแบบ ภ.พ.30
+              </CardDescription>
             </CardHeader>
-            <CardContent className="p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <CardContent className="p-5 space-y-5">
+              {/* Currency & Timezone */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-b border-slate-100 pb-4">
                 <div>
-                  <div className="text-xs font-semibold text-slate-900">เปิดใช้งานระบบภาษีมูลค่าเพิ่ม (VAT)</div>
-                  <div className="text-[11px] text-slate-500">จดทะเบียนภาษีมูลค่าเพิ่ม ภ.พ.20 และคำนวณแยกภาษีซื้อ-ภาษีขาย</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={vatEnabled}
-                  onChange={(e) => setVatEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded text-blue-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 mb-1 block">อัตราภาษีมูลค่าเพิ่ม (%)</label>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                    <Coins className="h-3.5 w-3.5 text-blue-600" />
+                    <span>รหัสสกุลเงิน (Currency Code) *</span>
+                  </label>
                   <Input
-                    type="number"
-                    value={vatRate}
-                    onChange={(e) => setVatRate(Number(e.target.value))}
-                    className="text-xs h-9 font-mono max-w-[120px]"
+                    value={settings.currency}
+                    onChange={(e) => updateField("currency", e.target.value.toUpperCase())}
+                    placeholder="THB"
+                    className="text-xs h-9 font-mono"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 mb-1 block">รูปแบบราคาหน้าร้าน</label>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 block">สัญลักษณ์สกุลเงิน (Symbol) *</label>
+                  <Input
+                    value={settings.currencySymbol}
+                    onChange={(e) => updateField("currencySymbol", e.target.value)}
+                    placeholder="฿"
+                    className="text-xs h-9 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>เขตเวลาของร้าน (Timezone) *</span>
+                  </label>
                   <select
-                    value={vatPriceMode}
-                    onChange={(e) => setVatPriceMode(e.target.value as any)}
-                    className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 bg-white"
+                    value={settings.timezone}
+                    onChange={(e) => updateField("timezone", e.target.value)}
+                    className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 bg-white h-9"
                   >
-                    <option value="INCLUDED">ราคารวมภาษีแล้ว (VAT Included)</option>
-                    <option value="EXCLUDED">ราคาไม่รวมภาษี (VAT Excluded)</option>
+                    <option value="Asia/Bangkok">Asia/Bangkok (GMT+7: ประเทศไทย)</option>
+                    <option value="Asia/Singapore">Asia/Singapore (GMT+8: สิงคโปร์)</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo (GMT+9: ญี่ปุ่น)</option>
+                    <option value="UTC">UTC (Universal Time Coordinated)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* VAT Controls */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-900">เปิดใช้งานระบบภาษีมูลค่าเพิ่ม (VAT System)</div>
+                    <div className="text-[11px] text-slate-500">จดทะเบียนภาษีมูลค่าเพิ่ม ภ.พ.20 และคำนวณแยกภาษีซื้อ-ภาษีขายอย่างถูกต้อง</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.vatEnabled}
+                    onChange={(e) => updateField("vatEnabled", e.target.checked)}
+                    className="h-4 w-4 rounded text-blue-600 cursor-pointer"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 mb-1 block">อัตราภาษีมูลค่าเพิ่ม (%)</label>
+                    <Input
+                      type="number"
+                      value={settings.vatRate}
+                      onChange={(e) => updateField("vatRate", Number(e.target.value))}
+                      className="text-xs h-9 font-mono max-w-[120px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 mb-1 block">รูปแบบราคาหน้าร้าน</label>
+                    <select
+                      value={settings.vatPriceMode}
+                      onChange={(e) => updateField("vatPriceMode", e.target.value as any)}
+                      className="w-full text-xs rounded-lg border border-slate-300 p-2 text-slate-800 bg-white h-9"
+                    >
+                      <option value="INCLUDED">ราคารวมภาษีแล้ว (VAT Included)</option>
+                      <option value="EXCLUDED">ราคาไม่รวมภาษี (VAT Excluded)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่าการเงิน & ภาษี"}</span>
+                </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* LINE Tab */}
+        {/* ================= TAB 4: LINE OA INTEGRATION ================= */}
         {activeTab === "line" && (
           <Card className="border-slate-200 shadow-2xs">
             <CardHeader className="pb-3 border-b border-slate-100">
               <CardTitle className="text-sm font-bold text-slate-900">
                 เชื่อมต่อ LINE Official Account (LINE Messaging API)
               </CardTitle>
+              <CardDescription className="text-xs text-slate-500">
+                ตั้งค่าคีย์เชื่อมต่อ LINE สำหรับส่งข้อความแจ้งสถานะงานซ่อม และการแจ้งเตือนสต็อกอะไหล่
+              </CardDescription>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Channel ID */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel ID *</label>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel ID</label>
                   <Input
-                    value={lineChannelId}
-                    onChange={(e) => { setLineChannelId(e.target.value); setLineErrors((prev) => ({ ...prev, channelId: undefined })); }}
+                    value={settings.lineChannelId || ""}
+                    onChange={(e) => updateField("lineChannelId", e.target.value)}
                     placeholder="เช่น 1234567890"
-                    className={`text-xs h-9 font-mono ${lineErrors.channelId ? "border-rose-400 focus:ring-rose-400" : ""}`}
+                    className="text-xs h-9 font-mono"
                   />
-                  {lineErrors.channelId && <p className="text-[11px] text-rose-600 mt-1">{lineErrors.channelId}</p>}
                 </div>
 
-                {/* Channel Secret with show/hide */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel Secret *</label>
+                  <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel Secret</label>
                   <div className="relative">
                     <Input
                       type={showChannelSecret ? "text" : "password"}
-                      value={lineChannelSecret}
-                      onChange={(e) => { setLineChannelSecret(e.target.value); setLineErrors((prev) => ({ ...prev, channelSecret: undefined })); }}
+                      value={settings.lineChannelSecret || ""}
+                      onChange={(e) => updateField("lineChannelSecret", e.target.value)}
                       placeholder="Channel Secret จาก LINE Developers"
-                      className={`text-xs h-9 font-mono pr-9 ${lineErrors.channelSecret ? "border-rose-400 focus:ring-rose-400" : ""}`}
+                      className="text-xs h-9 font-mono pr-9"
                     />
                     <button
                       type="button"
@@ -415,20 +660,18 @@ export default function SettingsPage() {
                       {showChannelSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  {lineErrors.channelSecret && <p className="text-[11px] text-rose-600 mt-1">{lineErrors.channelSecret}</p>}
                 </div>
               </div>
 
-              {/* Channel Access Token with show/hide */}
               <div>
-                <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel Access Token *</label>
+                <label className="text-xs font-semibold text-slate-700 mb-1 block">Channel Access Token</label>
                 <div className="relative">
                   <Input
                     type={showAccessToken ? "text" : "password"}
-                    value={lineChannelAccessToken}
-                    onChange={(e) => { setLineChannelAccessToken(e.target.value); setLineErrors((prev) => ({ ...prev, accessToken: undefined })); }}
+                    value={settings.lineChannelAccessToken || ""}
+                    onChange={(e) => updateField("lineChannelAccessToken", e.target.value)}
                     placeholder="Long-lived Access Token จาก LINE Developers Console"
-                    className={`text-xs h-9 font-mono pr-9 ${lineErrors.accessToken ? "border-rose-400 focus:ring-rose-400" : ""}`}
+                    className="text-xs h-9 font-mono pr-9"
                   />
                   <button
                     type="button"
@@ -439,7 +682,6 @@ export default function SettingsPage() {
                     {showAccessToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                {lineErrors.accessToken && <p className="text-[11px] text-rose-600 mt-1">{lineErrors.accessToken}</p>}
               </div>
 
               <div>
@@ -463,37 +705,40 @@ export default function SettingsPage() {
 
               <div className="border border-slate-200 p-3 rounded-lg bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-700">ส่งแจ้งเตือนลูกค้าอัตโนมัติเมื่อเปิดใบรับซ่อม</span>
+                  <span className="text-xs text-slate-700">ส่งแจ้งเตือนลูกค้าอัตโนมัติเมื่อเปิดใบรับซ่อมหรือซ่อมเสร็จ</span>
                   <input
                     type="checkbox"
-                    checked={lineNotifyRepairs}
-                    onChange={(e) => setLineNotifyRepairs(e.target.checked)}
-                    className="rounded text-blue-600"
+                    checked={settings.lineNotifyRepairs !== false}
+                    onChange={(e) => updateField("lineNotifyRepairs", e.target.checked)}
+                    className="rounded text-blue-600 cursor-pointer"
                   />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-700">แจ้งเตือนแอดมินเมื่อสินค้าอะไหล่ใกล้หมดสต็อก</span>
                   <input
                     type="checkbox"
-                    checked={lineNotifyLowStock}
-                    onChange={(e) => setLineNotifyLowStock(e.target.checked)}
-                    className="rounded text-blue-600"
+                    checked={settings.lineNotifyLowStock !== false}
+                    onChange={(e) => updateField("lineNotifyLowStock", e.target.checked)}
+                    className="rounded text-blue-600 cursor-pointer"
                   />
                 </div>
               </div>
 
-              {/* Save button for LINE tab */}
-              <div className="flex justify-end pt-1">
-                <Button onClick={handleSave} className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs">
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <Button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="gap-2 text-xs h-9 bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                >
                   <Save className="h-3.5 w-3.5" />
-                  บันทึกการตั้งค่า LINE OA
+                  <span>{saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่า LINE OA"}</span>
                 </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Database & Backup Tab */}
+        {/* ================= TAB 5: DATABASE & BACKUP ================= */}
         {activeTab === "backup" && (
           <Card className="border-slate-200 shadow-2xs">
             <CardHeader className="pb-3 border-b border-slate-100">
@@ -502,7 +747,7 @@ export default function SettingsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
                   <div className="text-[11px] text-slate-500">ฐานข้อมูล (Engine)</div>
                   <div className="text-sm font-bold text-slate-900 font-mono mt-0.5">SQLite 3 (dev.db)</div>
@@ -515,8 +760,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <div className="p-3 rounded-xl border border-slate-200 bg-slate-50">
-                  <div className="text-[11px] text-slate-500">ขนาดไฟล์ข้อมูล</div>
-                  <div className="text-sm font-bold text-slate-900 font-mono mt-0.5">~1.24 MB</div>
+                  <div className="text-[11px] text-slate-500">ความปลอดภัยของระบบ</div>
+                  <div className="text-sm font-bold text-blue-600 flex items-center gap-1 mt-0.5">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>Multi-Tenant Isolated</span>
+                  </div>
                 </div>
               </div>
 

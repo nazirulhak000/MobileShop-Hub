@@ -1,15 +1,9 @@
 /** @type {import('next').NextConfig} */
-
-// Baseline security headers for every route. CSP is limited to frame-ancestors
-// (clickjacking protection) so it cannot break scripts/styles.
 const securityHeaders = [
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
-  // camera=(self) keeps same-origin barcode/IMEI scanning possible; no page uses mic or geolocation.
-  { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
 const nextConfig = {
@@ -37,15 +31,14 @@ const nextConfig = {
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
-      // Public tracking links carry a secret code in the URL; never leak it via Referer.
-      { source: "/track/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
-    ];
-  },
-  async redirects() {
-    return [
-      { source: "/sales", destination: "/pos", permanent: true },
-      { source: "/stock", destination: "/inventory", permanent: true },
-      { source: "/repair", destination: "/repairs", permanent: true },
+      {
+        source: "/api/portal/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, proxy-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+          { key: "Expires", value: "0" },
+        ],
+      },
     ];
   },
 };
