@@ -16,20 +16,38 @@ export function buildStoreMetadata(tenant: any, shopSlug: string): Metadata {
     };
   }
 
-  const customTitle = tenant.storefrontConfig?.headline;
-  const title = `${tenant.name} | ${customTitle || "ศูนย์บริการซ่อมมือถือด่วน เช็คสถานะสด 24 ชม."}`;
+  let cfg = tenant.storefrontConfig || {};
+  if (cfg.footerSocialLinks && (!cfg.seoTitle || !cfg.bannerUrl)) {
+    try {
+      const parsed = JSON.parse(cfg.footerSocialLinks);
+      cfg = { ...cfg, ...parsed };
+    } catch {}
+  }
+
+  const title =
+    cfg.seoTitle ||
+    (cfg.headline
+      ? `${tenant.name} | ${cfg.headline}`
+      : `${tenant.name} | ศูนย์บริการซ่อมมือถือด่วน เช็คสถานะสด 24 ชม.`);
   const description =
-    tenant.storefrontConfig?.subheadline ||
+    cfg.seoDescription ||
+    cfg.subheadline ||
     `ศูนย์บริการซ่อมมือถือและจำหน่ายสมาร์ตโฟนครบวงจร ${tenant.name} ตรวจเช็คมาตรฐานแล็บ ติดตามสถานะงานซ่อมออนไลน์`;
 
   const canonicalUrl = `/store/${tenant.slug || shopSlug}`;
-  const logoImage = tenant.logoUrl
-    ? [{ url: tenant.logoUrl, width: 800, height: 600, alt: tenant.name }]
+  const ogImageUrl = cfg.bannerUrl || tenant.logoUrl;
+  const ogImages = ogImageUrl
+    ? [{ url: ogImageUrl, width: 1200, height: 630, alt: tenant.name }]
+    : undefined;
+
+  const keywords = cfg.seoKeywords
+    ? cfg.seoKeywords.split(",").map((k: string) => k.trim()).filter(Boolean)
     : undefined;
 
   return {
     title,
     description,
+    keywords,
     alternates: {
       canonical: canonicalUrl,
     },
@@ -38,7 +56,7 @@ export function buildStoreMetadata(tenant: any, shopSlug: string): Metadata {
       description,
       url: canonicalUrl,
       siteName: tenant.name,
-      images: logoImage,
+      images: ogImages,
       locale: "th_TH",
       type: "website",
     },
@@ -46,7 +64,7 @@ export function buildStoreMetadata(tenant: any, shopSlug: string): Metadata {
       card: "summary_large_image",
       title,
       description,
-      images: tenant.logoUrl ? [tenant.logoUrl] : undefined,
+      images: ogImageUrl ? [ogImageUrl] : undefined,
     },
     robots: {
       index: true,

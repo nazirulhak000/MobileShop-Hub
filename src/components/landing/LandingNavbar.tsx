@@ -90,6 +90,8 @@ interface LandingNavbarProps {
   isSubpage?: boolean;
   /** Storefront color palette */
   themeColor?: StorefrontThemeColor;
+  /** Shop brand logo URL */
+  logoUrl?: string | null;
 }
 
 export function LandingNavbar({
@@ -101,6 +103,7 @@ export function LandingNavbar({
   navigationMenu,
   isSubpage = false,
   themeColor = "emerald",
+  logoUrl,
 }: LandingNavbarProps = {}) {
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const lineUrl = lineId
@@ -260,9 +263,17 @@ export function LandingNavbar({
               href={shopSlug ? `/store/${shopSlug}` : "/landing"}
               className={`flex items-center gap-3 shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} rounded-lg p-1`}
             >
-              <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-xs">
-                <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
-              </div>
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={shopName}
+                  className="h-10 w-10 rounded-xl object-cover border border-slate-200 shadow-xs"
+                />
+              ) : (
+                <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-xs">
+                  <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
+                </div>
+              )}
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-lg text-slate-900 tracking-tight">

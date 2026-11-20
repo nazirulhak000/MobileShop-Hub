@@ -372,6 +372,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         navigationMenu={parsedNavMenu}
         isSubpage={false}
         themeColor={themeColor}
+        logoUrl={tenant.logoUrl}
       />
 
       <main id="main-content">

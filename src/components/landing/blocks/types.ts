@@ -163,6 +163,28 @@ export interface QueryLoopBlockProps {
   data?: Record<string, any>;
 }
 
+export interface ServiceItem {
+  id?: string;
+  title: string;
+  description: string;
+  price?: string;
+  badge?: string;
+  iconName?: string;
+  linkUrl?: string;
+}
+
+export interface ServiceGridBlockProps {
+  id?: string;
+  title?: string;
+  subtitle?: string;
+  badge?: string;
+  columns?: 2 | 3 | 4 | number;
+  services?: ServiceItem[];
+  themeColor?: StorefrontThemeColor;
+  className?: string;
+  data?: Record<string, any>;
+}
+
 export interface DynamicBlockRendererProps {
   block: CustomBlock;
   themeColor?: StorefrontThemeColor;

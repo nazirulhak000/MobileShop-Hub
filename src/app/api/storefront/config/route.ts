@@ -190,6 +190,13 @@ export async function GET(req: NextRequest) {
       sanitizedCustomPages = JSON.stringify(publicPages);
     }
 
+    let parsedSocialLinks: Record<string, any> = {};
+    try {
+      if (config.footerSocialLinks) {
+        parsedSocialLinks = JSON.parse(config.footerSocialLinks);
+      }
+    } catch {}
+
     // Return sanitized public storefront config
     const sanitizedConfig = {
       themeColor: config.themeColor,
@@ -222,6 +229,11 @@ export async function GET(req: NextRequest) {
       customBeforeAfterCases: config.customBeforeAfterCases,
       customPricingRates: config.customPricingRates,
       customFaqs: config.customFaqs,
+      seoTitle: parsedSocialLinks.seoTitle || "",
+      seoDescription: parsedSocialLinks.seoDescription || "",
+      seoKeywords: parsedSocialLinks.seoKeywords || "",
+      bannerUrl: parsedSocialLinks.bannerUrl || "",
+      logoUrl: tenant.logoUrl || "",
       updatedAt: config.updatedAt,
     };
 
@@ -274,27 +286,25 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Round 17: Multi-Tab Concurrency & Stale Config Conflict Detection (Optimistic Locking)
-    if (body.updatedAt) {
-      const existingConfig = await db.storefrontConfig.findUnique({
-        where: { tenantId },
-        select: { updatedAt: true },
-      });
+    // Retrieve existing config for concurrency check and audit trail beforeJson
+    const existingConfig = await db.storefrontConfig.findUnique({
+      where: { tenantId },
+    });
 
-      if (existingConfig) {
-        const clientUpdatedAt = new Date(body.updatedAt).getTime();
-        const serverUpdatedAt = new Date(existingConfig.updatedAt).getTime();
-        if (serverUpdatedAt - clientUpdatedAt > 1000) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "ข้อมูลการตั้งค่าถูกแก้ไขโดยผู้อื่นหรือในแท็บอื่นแล้ว กรุณารีเฟรชหน้าเพื่อโหลดข้อมูลล่าสุดก่อนแก้ไข (HTTP 409 Conflict)",
-              code: "STALE_WRITE_CONFLICT",
-              serverUpdatedAt: existingConfig.updatedAt.toISOString(),
-            },
-            { status: 409 }
-          );
-        }
+    // Round 17: Multi-Tab Concurrency & Stale Config Conflict Detection (Optimistic Locking)
+    if (body.updatedAt && existingConfig) {
+      const clientUpdatedAt = new Date(body.updatedAt).getTime();
+      const serverUpdatedAt = new Date(existingConfig.updatedAt).getTime();
+      if (serverUpdatedAt - clientUpdatedAt > 1000) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "ข้อมูลการตั้งค่าถูกแก้ไขโดยผู้อื่นหรือในแท็บอื่นแล้ว กรุณารีเฟรชหน้าเพื่อโหลดข้อมูลล่าสุดก่อนแก้ไข (HTTP 409 Conflict)",
+            code: "STALE_WRITE_CONFLICT",
+            serverUpdatedAt: existingConfig.updatedAt.toISOString(),
+          },
+          { status: 409 }
+        );
       }
     }
 
@@ -430,6 +440,50 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    // 5.1 SEO and bannerUrl packed into footerSocialLinks
+    let footerSocialMap: Record<string, any> = {};
+    if (updateData.footerSocialLinks) {
+      try {
+        footerSocialMap = JSON.parse(updateData.footerSocialLinks);
+      } catch {
+        footerSocialMap = {};
+      }
+    } else if (existingConfig?.footerSocialLinks) {
+      try {
+        footerSocialMap = JSON.parse(existingConfig.footerSocialLinks);
+      } catch {
+        footerSocialMap = {};
+      }
+    }
+
+    let hasSeoChange = false;
+    if (body.seoTitle !== undefined) {
+      footerSocialMap.seoTitle = body.seoTitle ? String(body.seoTitle).trim().slice(0, 200) : "";
+      hasSeoChange = true;
+    }
+    if (body.seoDescription !== undefined) {
+      footerSocialMap.seoDescription = body.seoDescription ? String(body.seoDescription).trim().slice(0, 500) : "";
+      hasSeoChange = true;
+    }
+    if (body.seoKeywords !== undefined) {
+      footerSocialMap.seoKeywords = body.seoKeywords ? String(body.seoKeywords).trim().slice(0, 300) : "";
+      hasSeoChange = true;
+    }
+    if (body.bannerUrl !== undefined) {
+      const banner = body.bannerUrl ? String(body.bannerUrl).trim() : "";
+      if (banner && !isValidUrl(banner)) {
+        return NextResponse.json(
+          { success: false, error: "รูปแบบ bannerUrl ไม่ถูกต้อง" },
+          { status: 400 }
+        );
+      }
+      footerSocialMap.bannerUrl = banner;
+      hasSeoChange = true;
+    }
+    if (hasSeoChange || updateData.footerSocialLinks !== undefined) {
+      updateData.footerSocialLinks = JSON.stringify(footerSocialMap);
+    }
+
     // Atomically upsert config for authorized tenant
     const config = await db.storefrontConfig.upsert({
       where: { tenantId },
@@ -508,6 +562,27 @@ export async function PUT(req: NextRequest) {
       console.warn("createRevision error:", revErr);
     }
 
+    // Capture AuditLog entry for Storefront Config Update
+    const userAgent = req.headers.get("user-agent") || "unknown";
+    try {
+      await db.auditLog.create({
+        data: {
+          tenantId,
+          userId: actor.id,
+          module: "SETTINGS",
+          action: "STOREFRONT_CONFIG_UPDATE",
+          targetId: config.id,
+          details: `แก้ไขการตั้งค่าหน้าร้าน (Storefront Builder) โดย ${actor.name} (${actor.role}) [IP: ${ip}] [UA: ${userAgent.slice(0, 150)}]`,
+          beforeJson: existingConfig ? JSON.stringify(existingConfig) : null,
+          afterJson: JSON.stringify(config),
+          severity: "INFO",
+          ipAddress: ip,
+        },
+      });
+    } catch (auditErr) {
+      console.warn("auditLog error in storefront config PUT:", auditErr);
+    }
+
     return NextResponse.json({
       success: true,
       config,
@@ -562,6 +637,10 @@ export async function POST(req: NextRequest) {
 
       const restored = rollbackResult.config as Record<string, any>;
 
+      const currentConfigBeforeRollback = await db.storefrontConfig.findUnique({
+        where: { tenantId },
+      });
+
       // Remove relational / primary keys before upsert
       const { id, tenantId: _, createdAt, updatedAt, ...cleanRestored } = restored;
 
@@ -587,6 +666,28 @@ export async function POST(req: NextRequest) {
           revalidatePath(`/store/${tenant.slug}`, "layout");
           revalidatePath(`/store/${tenant.slug}/[pageSlug]`, "page");
         } catch {}
+      }
+
+      // Record AuditLog for rollback
+      const rollIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anonymous";
+      const rollUa = req.headers.get("user-agent") || "unknown";
+      try {
+        await db.auditLog.create({
+          data: {
+            tenantId,
+            userId: actor.id,
+            module: "SETTINGS",
+            action: "STOREFRONT_CONFIG_ROLLBACK",
+            targetId: updatedConfig.id,
+            details: `กู้คืนการตั้งค่าหน้าร้านเป็นเวอร์ชัน ${revisionId} โดย ${actor.name} (${actor.role}) [IP: ${rollIp}] [UA: ${rollUa.slice(0, 150)}]`,
+            beforeJson: currentConfigBeforeRollback ? JSON.stringify(currentConfigBeforeRollback) : null,
+            afterJson: JSON.stringify(updatedConfig),
+            severity: "WARNING",
+            ipAddress: rollIp,
+          },
+        });
+      } catch (auditErr) {
+        console.warn("auditLog error in storefront config rollback:", auditErr);
       }
 
       return NextResponse.json({

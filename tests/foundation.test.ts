@@ -3670,7 +3670,6 @@ test("Round 23: Branches & Staff Users Management Audit - 5-Digit Code (00000 HQ
     branchId: foreignBranch,
     branchIds: [foreignBranch],
   };
-
   // 1. 5-Digit Branch Code Validation & Headquarter Creation
   assert.equal(validateThaiBranchId("00000").valid, true);
   assert.equal(validateThaiBranchId("00001").valid, true);
@@ -4122,4 +4121,230 @@ test("Round 24: Master Data & General Store Settings Audit - PromptPay EMVCo Sat
     const finalStoreA = await deleteMasterItem("test-a", admin.id, "symptoms", newSymptom!.id);
     assert.ok(!finalStoreA.symptoms.some((s) => s.id === newSymptom!.id), "Deleted symptom must be removed from Tenant A");
   }
+});
+
+test("Round 25: Storefront Builder & Audit Logs Audit - Multi-Tenant Isolation, SEO Meta, Gutenberg Custom Blocks & Interactive Diff Trail", async () => {
+  const React = require("react");
+  const { renderToString } = require("react-dom/server");
+  const { buildStoreMetadata } = require("../src/lib/storefrontMetadata");
+  const {
+    serializeToGutenberg,
+    parseGutenbergContent,
+  } = require("../src/lib/wordpress/gutenbergConverter");
+  const {
+    safeParseCustomSections,
+  } = require("../src/lib/storefrontTheme");
+  const { DynamicBlockRenderer } = require("../src/components/landing/blocks/DynamicBlockRenderer");
+  const { ServiceGridBlock } = require("../src/components/landing/blocks/ServiceGridBlock");
+  const { createAuditLog } = require("../src/lib/auditLog");
+
+  // 1. AuditLog Creation & Multi-Tenant Isolation
+  await staffStorage.run(admin, async () => {
+    // Clean up existing audit logs for test-a and test-b
+    await db.auditLog.deleteMany({ where: { tenantId: { in: ["test-a", "test-b"] } } });
+
+    // Create Tenant A Audit Log
+    const logA1 = await createAuditLog({
+      tenantId: "test-a",
+      userId: admin.id,
+      module: "STOREFRONT",
+      action: "UPDATE",
+      targetId: "config-test-a",
+      details: "Updated SEO meta title and logo [UA: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)]",
+      ipAddress: "203.144.144.1",
+      beforeJson: JSON.stringify({ seoTitle: "Old Shop Title", themeColor: "blue" }),
+      afterJson: JSON.stringify({ seoTitle: "New SEO Title", themeColor: "emerald" }),
+    });
+
+    assert.equal(logA1.tenantId, "test-a");
+    assert.equal(logA1.module, "STOREFRONT");
+    assert.equal(logA1.action, "UPDATE");
+    assert.equal(logA1.ipAddress, "203.144.144.1");
+    assert.ok(logA1.beforeJson?.includes("Old Shop Title"));
+    assert.ok(logA1.afterJson?.includes("New SEO Title"));
+
+    // Create second log in Tenant A for action filtering
+    await createAuditLog({
+      tenantId: "test-a",
+      userId: admin.id,
+      module: "STOREFRONT",
+      action: "REVISION_ROLLBACK",
+      targetId: "rev-101",
+      details: "Restored storefront revision 101",
+      ipAddress: "127.0.0.1",
+    });
+  });
+
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", role: "ADMIN" } });
+  const staffB: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  await staffStorage.run(staffB, async () => {
+    // Create Tenant B Audit Log
+    const logB1 = await createAuditLog({
+      tenantId: "test-b",
+      userId: staffB.id,
+      module: "SETTINGS",
+      action: "UPDATE",
+      targetId: "settings-test-b",
+      details: "Changed branch settings [UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64)]",
+      ipAddress: "110.168.10.20",
+    });
+
+    assert.equal(logB1.tenantId, "test-b");
+
+      // Tenant B query scoped to Tenant B CANNOT see Tenant A's audit logs
+      const bLogs = await prisma.auditLog.findMany({
+        where: { tenantId: "test-b" },
+      });
+      assert.equal(bLogs.length, 1);
+      assert.equal(bLogs[0].id, logB1.id);
+
+      // Explicit attempt by Tenant B to query Tenant A's log by ID returns null under fail-closed isolation
+      const crossLog = await prisma.auditLog.findFirst({
+        where: { tenantId: "test-b", module: "STOREFRONT" },
+      });
+      assert.equal(crossLog, null, "Tenant A STOREFRONT audit log must be completely invisible to Tenant B");
+    });
+
+  // Tenant A querying with action filter
+  await staffStorage.run(admin, async () => {
+    const updateLogs = await prisma.auditLog.findMany({
+      where: { tenantId: "test-a", action: "UPDATE" },
+    });
+    assert.equal(updateLogs.length, 1);
+    assert.equal(updateLogs[0].action, "UPDATE");
+
+    const allLogs = await prisma.auditLog.findMany({
+      where: { tenantId: "test-a" },
+    });
+    assert.equal(allLogs.length, 2);
+  });
+
+  // 2. Storefront SEO & OpenGraph Metadata Resolution
+  const mockTenantConfig = {
+    name: "TechLab Repairs",
+    slug: "techlab",
+    logoUrl: "https://r2.fixme.com/logos/techlab.png",
+    storefrontConfig: {
+      headline: "ศูนย์บริการซ่อมมือถือด่วน",
+      subheadline: "ตรวจเช็คฟรี 10 จุด อะไหล่แท้มาตรฐานสากล",
+      footerSocialLinks: JSON.stringify({
+        seoTitle: "TechLab ซ่อมไอโฟนเปลี่ยนแบตเตอรี่แท้",
+        seoDescription: "บริการตรวจเช็คและซ่อมมือถือมาตรฐานศูนย์ อะไหล่แท้ รับประกันสูงสุด 1 ปี",
+        seoKeywords: "ซ่อมไอโฟน, ซ่อมมือถือ, เปลี่ยนจอ",
+        bannerUrl: "https://r2.fixme.com/banners/og-cover.jpg",
+      }),
+    },
+  };
+
+  const metadata = buildStoreMetadata(mockTenantConfig as any);
+  assert.equal(metadata.title, "TechLab ซ่อมไอโฟนเปลี่ยนแบตเตอรี่แท้");
+  assert.equal(metadata.description, "บริการตรวจเช็คและซ่อมมือถือมาตรฐานศูนย์ อะไหล่แท้ รับประกันสูงสุด 1 ปี");
+  assert.deepEqual(metadata.keywords, ["ซ่อมไอโฟน", "ซ่อมมือถือ", "เปลี่ยนจอ"]);
+  assert.equal(metadata.openGraph?.images?.[0]?.url, "https://r2.fixme.com/banners/og-cover.jpg");
+  assert.equal(metadata.twitter?.images?.[0], "https://r2.fixme.com/banners/og-cover.jpg");
+
+  // Fallback metadata when SEO fields are blank
+  const blankTenantConfig = {
+    name: "Default Shop",
+    slug: "defaultshop",
+    storefrontConfig: {
+      headline: "พาดหัวร้าน",
+    },
+  };
+  const fallbackMeta = buildStoreMetadata(blankTenantConfig as any);
+  assert.ok(fallbackMeta.title.includes("Default Shop"));
+  assert.ok(fallbackMeta.description.includes("ศูนย์บริการซ่อมมือถือและจำหน่ายสมาร์ตโฟนครบวงจร"));
+
+  // 3. Gutenberg Grammar Converter: contact_form, query_loop, service_grid
+  const blocksToSerialize = [
+    {
+      id: "block-contact-1",
+      type: "contact_form",
+      title: "ปรึกษาอาการฟรี",
+      subtitle: "วิศวกรติดต่อกลับภายใน 15 นาที",
+      badge: "⚡ ปรึกษาด่วน",
+      buttonText: "ส่งข้อมูลนัดหมาย",
+      branches: ["สาขาพระราม 9", "สาขาสยาม"],
+      visible: true,
+    },
+    {
+      id: "block-query-1",
+      type: "query_loop",
+      title: "บริการยอดนิยม",
+      category: "บริการซ่อม",
+      perPage: 6,
+      columns: 3,
+      layout: "grid",
+      visible: true,
+    },
+    {
+      id: "block-service-1",
+      type: "service_grid",
+      title: "บริการมาตรฐานแล็บ",
+      subtitle: "เครื่องมือวัดทางวิศวกรรม",
+      columns: 3,
+      visible: true,
+    },
+  ];
+
+  const serializedHtml = serializeToGutenberg(blocksToSerialize);
+  assert.ok(serializedHtml.includes("<!-- wp:fixme/contact-form"));
+  assert.ok(serializedHtml.includes("<!-- wp:fixme/query-loop"));
+  assert.ok(serializedHtml.includes("<!-- wp:fixme/service-grid"));
+
+  const parsedBlocks = parseGutenbergContent(serializedHtml);
+  assert.equal(parsedBlocks.length, 3);
+  assert.equal(parsedBlocks[0].type, "contact_form");
+  assert.equal(parsedBlocks[0].buttonText, "ส่งข้อมูลนัดหมาย");
+  assert.deepEqual(parsedBlocks[0].branches, ["สาขาพระราม 9", "สาขาสยาม"]);
+
+  assert.equal(parsedBlocks[1].type, "query_loop");
+  assert.equal(parsedBlocks[1].category, "บริการซ่อม");
+  assert.equal(parsedBlocks[1].columns, 3);
+
+  assert.equal(parsedBlocks[2].type, "service_grid");
+  assert.equal(parsedBlocks[2].title, "บริการมาตรฐานแล็บ");
+
+  // 4. ServiceGridBlock & DynamicBlockRenderer
+  const renderedServiceGrid = renderToString(
+    React.createElement(ServiceGridBlock, {
+      title: "งานซ่อมมาตรฐานวิศวกรรม",
+      themeColor: "emerald",
+      columns: 3,
+    })
+  );
+  assert.ok(renderedServiceGrid.includes("งานซ่อมมาตรฐานวิศวกรรม"));
+  assert.ok(renderedServiceGrid.includes("เปลี่ยนกระจกจอ"));
+  assert.ok(renderedServiceGrid.includes("ซ่อมเมนบอร์ด"));
+
+  // Render via DynamicBlockRenderer
+  const renderedViaRenderer = renderToString(
+    React.createElement(DynamicBlockRenderer, {
+      block: {
+        id: "sg-1",
+        type: "service_grid",
+        title: "แล็บไมโครอิเล็กทรอนิกส์",
+        badge: "เกรดโรงงาน",
+      },
+      themeColor: "purple",
+    })
+  );
+  assert.ok(renderedViaRenderer.includes("แล็บไมโครอิเล็กทรอนิกส์"));
+  assert.ok(renderedViaRenderer.includes("เกรดโรงงาน"));
+
+  // 5. safeParseCustomSections validation
+  const safeSections = safeParseCustomSections(JSON.stringify(blocksToSerialize));
+  assert.equal(safeSections.length, 3);
+  assert.equal(safeSections[0].type, "contact_form");
+  assert.equal(safeSections[1].type, "query_loop");
+  assert.equal(safeSections[2].type, "service_grid");
 });

@@ -28,6 +28,14 @@ const TYPE_TO_WP_NAME: Record<string, string> = {
   "html-embed": "fixme/html-embed",
   business_hours: "fixme/business-hours",
   "business-hours": "fixme/business-hours",
+  contact_form: "fixme/contact-form",
+  "contact-form": "fixme/contact-form",
+  query_loop: "fixme/query-loop",
+  "query-loop": "fixme/query-loop",
+  service_grid: "fixme/service-grid",
+  "service-grid": "fixme/service-grid",
+  services_grid: "fixme/service-grid",
+  "services-grid": "fixme/service-grid",
 };
 
 const WP_NAME_TO_TYPE: Record<string, string> = {
@@ -38,6 +46,9 @@ const WP_NAME_TO_TYPE: Record<string, string> = {
   "fixme/cta": "cta",
   "fixme/html-embed": "html_embed",
   "fixme/business-hours": "business_hours",
+  "fixme/contact-form": "contact_form",
+  "fixme/query-loop": "query_loop",
+  "fixme/service-grid": "service_grid",
   // Standard WP Core fallbacks
   "core/paragraph": "rich_text",
   paragraph: "rich_text",
@@ -47,6 +58,8 @@ const WP_NAME_TO_TYPE: Record<string, string> = {
   html: "html_embed",
   "core/image": "photo_gallery",
   image: "photo_gallery",
+  "core/query": "query_loop",
+  "core/post-template": "query_loop",
 };
 
 /**

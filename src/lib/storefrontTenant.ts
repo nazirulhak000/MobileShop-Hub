@@ -63,7 +63,18 @@ export async function resolveTenantBySlug(rawSlug: string | null | undefined) {
     },
   });
 
-  if (tenant) return tenant;
+  if (tenant) {
+    if (tenant.storefrontConfig?.footerSocialLinks) {
+      try {
+        const meta = JSON.parse(tenant.storefrontConfig.footerSocialLinks);
+        if (meta.seoTitle) (tenant.storefrontConfig as any).seoTitle = meta.seoTitle;
+        if (meta.seoDescription) (tenant.storefrontConfig as any).seoDescription = meta.seoDescription;
+        if (meta.seoKeywords) (tenant.storefrontConfig as any).seoKeywords = meta.seoKeywords;
+        if (meta.bannerUrl) (tenant.storefrontConfig as any).bannerUrl = meta.bannerUrl;
+      } catch {}
+    }
+    return tenant;
+  }
 
   // Fallback case-insensitive check with LOWER(TRIM(slug)) for SQLite collation compatibility
   try {
@@ -72,7 +83,7 @@ export async function resolveTenantBySlug(rawSlug: string | null | undefined) {
     `;
 
     if (rawMatches && rawMatches.length > 0 && rawMatches[0]?.id) {
-      return await prisma.tenant.findUnique({
+      const match = await prisma.tenant.findUnique({
         where: { id: rawMatches[0].id },
         include: {
           storefrontConfig: true,
@@ -81,6 +92,16 @@ export async function resolveTenantBySlug(rawSlug: string | null | undefined) {
           },
         },
       });
+      if (match?.storefrontConfig?.footerSocialLinks) {
+        try {
+          const meta = JSON.parse(match.storefrontConfig.footerSocialLinks);
+          if (meta.seoTitle) (match.storefrontConfig as any).seoTitle = meta.seoTitle;
+          if (meta.seoDescription) (match.storefrontConfig as any).seoDescription = meta.seoDescription;
+          if (meta.seoKeywords) (match.storefrontConfig as any).seoKeywords = meta.seoKeywords;
+          if (meta.bannerUrl) (match.storefrontConfig as any).bannerUrl = meta.bannerUrl;
+        } catch {}
+      }
+      return match;
     }
   } catch (err) {
     console.error("Error in fallback resolveTenantBySlug query:", err);

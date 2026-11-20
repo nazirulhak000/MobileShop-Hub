@@ -52,6 +52,10 @@ import {
   FilePlus,
   CornerDownRight,
   ChevronRight,
+  Upload,
+  Wrench,
+  Repeat,
+  MessageSquare,
 } from "lucide-react";
 
 import { AnnouncementBar } from "@/components/landing/AnnouncementBar";
@@ -107,6 +111,7 @@ import {
 
 type ActiveTab =
   | "theme"
+  | "seo"
   | "blocks"
   | "pages"
   | "navigation"
@@ -294,6 +299,56 @@ const BLOCK_TEMPLATES: BlockTemplate[] = [
       visible: true,
     },
   },
+  {
+    type: "contact_form",
+    title: "ฟอร์มติดต่อ & ปรึกษาอาการ (Contact Form)",
+    subtitle: "ฟอร์มรับเรื่องนัดหมายซ่อม ส่งตรงเข้าระบบพร้อมระบบกันบอท Honeypot",
+    icon: MessageSquare,
+    desc: "ให้ลูกค้ากรอกชื่อ เบอร์โทร อาการเสีย และสาขาที่สะดวก เพื่อให้ช่างติดต่อกลับประเมินราคา",
+    sample: {
+      type: "contact_form",
+      title: "ส่งคำขอบริการหรือปรึกษาอาการฟรี",
+      subtitle: "กรอกรายละเอียดอาการเครื่องเสีย ทีมวิศวกรผู้เชี่ยวชาญจะติดต่อกลับเพื่อให้คำปรึกษาและประเมินราคาภายใน 15 นาที",
+      badge: "⚡ นัดหมายคิวซ่อมออนไลน์",
+      buttonText: "ส่งข้อมูลปรึกษาช่างทันที",
+      branches: ["สาขาสำนักงานใหญ่ (พระราม 9)", "สาขาสยามสแควร์", "สาขาอารีย์", "บริการ Delivery"],
+      visible: true,
+    },
+  },
+  {
+    type: "query_loop",
+    title: "วนลูปเนื้อหา & บทความ (Query Loop)",
+    subtitle: "ดึงรายการบทความ บริการ หรือหมวดหมู่มาแสดงผลแบบอัตโนมัติ",
+    icon: Repeat,
+    desc: "คล้าย Gutenberg Core Query Loop สำหรับแสดงบทความหรือบริการแนะนำตามหมวดหมู่",
+    sample: {
+      type: "query_loop",
+      title: "บริการและบทความแนะนำ",
+      subtitle: "ค้นพบบทความ คู่มือการดูแลรักษา และบริการซ่อมยอดนิยมจากศูนย์บริการ",
+      category: "บริการซ่อม",
+      tag: "",
+      perPage: 6,
+      columns: 3,
+      layout: "grid",
+      showExcerpt: true,
+      visible: true,
+    },
+  },
+  {
+    type: "service_grid",
+    title: "กริดบริการซ่อมมาตรฐานแล็บ (Service Grid)",
+    subtitle: "แสดงการ์ดรายการบริการซ่อมมาตรฐานแล็บ พร้อมราคาเริ่มต้นและป้ายกำกับ",
+    icon: Wrench,
+    desc: "การ์ดบริการซ่อม หน้าจอ แบตเตอรี่ เมนบอร์ด ฝาหลัง เลเซอร์ ผ่อนชำระ พร้อมป้ายสถานะ",
+    sample: {
+      type: "service_grid",
+      title: "บริการงานซ่อมมาตรฐานแล็บ & อะไหล่แท้",
+      subtitle: "ตรวจเช็คสภาพเครื่อง 10 จุดฟรี ประเมินราคาจริงก่อนซ่อม พร้อมรับประกันงานซ่อมยาวนาน",
+      badge: "🛠️ บริการครบวงจร",
+      columns: 3,
+      visible: true,
+    },
+  },
 ];
 
 export default function StorefrontCustomizerPage() {
@@ -304,6 +359,11 @@ export default function StorefrontCustomizerPage() {
   const [initialShopName, setInitialShopName] = useState<string>("MobileShop");
 
   const [shopSlug, setShopSlug] = useState<string>("mobileshop");
+  const [logoUrl, setLogoUrl] = useState<string>("");
+  const [bannerUrl, setBannerUrl] = useState<string>("");
+  const [isUploadingLogo, setIsUploadingLogo] = useState<boolean>(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState<boolean>(false);
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("theme");
@@ -417,6 +477,8 @@ export default function StorefrontCustomizerPage() {
             };
             setConfig(loadedConfig);
             setInitialConfig(loadedConfig);
+            if (raw.logoUrl) setLogoUrl(raw.logoUrl);
+            if (raw.bannerUrl) setBannerUrl(raw.bannerUrl);
 
             if (data.tenant) {
               if (data.tenant.id) setTenantId(data.tenant.id);
@@ -696,6 +758,17 @@ export default function StorefrontCustomizerPage() {
       }
     });
 
+    // 11. SEO validation
+    if (config.seoTitle && config.seoTitle.length > 120) {
+      errs.seoTitle = "SEO Meta Title ต้องมีความยาวไม่เกิน 120 ตัวอักษร";
+    }
+    if (config.seoDescription && config.seoDescription.length > 300) {
+      errs.seoDescription = "SEO Meta Description ต้องมีความยาวไม่เกิน 300 ตัวอักษร";
+    }
+    if (config.seoKeywords && config.seoKeywords.length > 200) {
+      errs.seoKeywords = "SEO Meta Keywords ต้องมีความยาวไม่เกิน 200 ตัวอักษร";
+    }
+
     return errs;
   }, [shopName, config, casesList]);
 
@@ -707,6 +780,11 @@ export default function StorefrontCustomizerPage() {
           validationErrors.headline ||
           validationErrors.subheadline ||
           validationErrors.badge
+      ),
+      seo: Boolean(
+        validationErrors.seoTitle ||
+          validationErrors.seoDescription ||
+          validationErrors.seoKeywords
       ),
       blocks: false,
       pages: false,
@@ -723,6 +801,63 @@ export default function StorefrontCustomizerPage() {
   }, [validationErrors]);
 
   const hasErrors = Object.keys(validationErrors).length > 0;
+
+  // File upload handler for Storefront Logo & Banner
+  const handleFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    type: "logo" | "banner"
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setToast({ message: "ขนาดไฟล์ต้องไม่เกิน 5 MB", type: "error" });
+      return;
+    }
+
+    if (type === "logo") setIsUploadingLogo(true);
+    else setIsUploadingBanner(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/storefront/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.url) {
+        if (type === "logo") {
+          setLogoUrl(data.url);
+          setConfig((prev) => ({ ...prev, logoUrl: data.url }));
+        } else {
+          setBannerUrl(data.url);
+          setConfig((prev) => ({ ...prev, bannerUrl: data.url }));
+        }
+        setToast({
+          message: `อัปโหลด${type === "logo" ? "โลโก้" : "แบนเนอร์"}เรียบร้อยแล้ว`,
+          type: "success",
+        });
+      } else {
+        setToast({
+          message: data.error || "เกิดข้อผิดพลาดในการอัปโหลดไฟล์",
+          type: "error",
+        });
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      setToast({
+        message: "เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์",
+        type: "error",
+      });
+    } finally {
+      if (type === "logo") setIsUploadingLogo(false);
+      else setIsUploadingBanner(false);
+      e.target.value = "";
+    }
+  };
 
   // Active page resolution
   const activeSubPage = useMemo(() => {
@@ -741,6 +876,7 @@ export default function StorefrontCustomizerPage() {
       });
 
       if (tabErrors.theme) setActiveTab("theme");
+      else if (tabErrors.seo) setActiveTab("seo");
       else if (tabErrors.announcement) setActiveTab("announcement");
       else if (tabErrors.contact) setActiveTab("contact");
       else if (tabErrors.cases) setActiveTab("cases");
@@ -759,6 +895,11 @@ export default function StorefrontCustomizerPage() {
         customPages: JSON.stringify(customPagesList),
         navigationMenu: JSON.stringify(navMenuList),
         customBeforeAfterCases: JSON.stringify(casesList),
+        logoUrl: logoUrl || config.logoUrl || "",
+        bannerUrl: bannerUrl || config.bannerUrl || "",
+        seoTitle: config.seoTitle || "",
+        seoDescription: config.seoDescription || "",
+        seoKeywords: config.seoKeywords || "",
       };
 
       const res = await fetch("/api/storefront/config", {
@@ -789,6 +930,8 @@ export default function StorefrontCustomizerPage() {
           };
           setConfig(freshConfig);
           setInitialConfig(freshConfig);
+          if (data.config.logoUrl) setLogoUrl(data.config.logoUrl);
+          if (data.config.bannerUrl) setBannerUrl(data.config.bannerUrl);
         }
         if (data.tenant?.name) {
           setShopName(data.tenant.name);
@@ -1785,9 +1928,10 @@ export default function StorefrontCustomizerPage() {
         {/* LEFT COLUMN: Controls & Settings Tabs */}
         <aside className="w-full lg:w-[480px] xl:w-[510px] bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-0 z-20 shadow-xs">
           {/* Tabs Navigation Header */}
-          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/80 p-1 gap-0.5 shrink-0">
+          <div className="grid grid-cols-4 sm:grid-cols-8 border-b border-slate-200 bg-slate-50/80 p-1 gap-0.5 shrink-0">
             {[
               { id: "theme", label: "ธีม & ฟอนต์", icon: Palette, hasErr: tabErrors.theme },
+              { id: "seo", label: "SEO & โลโก้", icon: Globe, hasErr: tabErrors.seo },
               { id: "blocks", label: "บล็อก & ลำดับ", icon: Layers, hasErr: tabErrors.blocks },
               { id: "pages", label: "หน้าเพจ", icon: FileText, hasErr: tabErrors.pages },
               { id: "navigation", label: "เมนูนำทาง", icon: Compass, hasErr: tabErrors.navigation },
@@ -2047,6 +2191,249 @@ export default function StorefrontCustomizerPage() {
                     className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all leading-relaxed"
                     placeholder="คำบรรยายสั้นๆ เกี่ยวกับมาตรฐานและบริการของร้าน"
                   />
+                </div>
+              </div>
+            )}
+
+            {/* TAB: SEO & Brand Assets */}
+            {activeTab === "seo" && (
+              <div className="space-y-6 animate-fade-in">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-emerald-600" />
+                    <span>SEO & รูปภาพแบรนด์ (SEO & Brand Assets)</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    ตั้งค่ารูปโลโก้ แบนเนอร์โซเชียล (OG Image) และ Meta Tags สำหรับ Google & โซเชียลมีเดีย
+                  </p>
+                </div>
+
+                {/* 1. Logo Upload & URL */}
+                <div className="space-y-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block">
+                        โลโก้ร้านค้า (Storefront Logo)
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        แสดงบนแถบนำทาง (Navbar) รองรับ PNG, JPG, WEBP, SVG
+                      </p>
+                    </div>
+                    {logoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLogoUrl("");
+                          setConfig((prev) => ({ ...prev, logoUrl: "" }));
+                        }}
+                        className="text-[11px] text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        ลบโลโก้
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs relative">
+                      {logoUrl ? (
+                        <img
+                          src={logoUrl}
+                          alt="Store Logo"
+                          className="w-full h-full object-contain p-1"
+                        />
+                      ) : (
+                        <Image className="h-6 w-6 text-slate-300" />
+                      )}
+                      {isUploadingLogo && (
+                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                          <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-2">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:border-emerald-500 rounded-xl text-xs font-semibold text-slate-700 hover:text-emerald-700 cursor-pointer shadow-xs transition-colors">
+                        <Upload className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>{isUploadingLogo ? "กำลังอัปโหลด..." : "อัปโหลดโลโก้"}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                          className="hidden"
+                          disabled={isUploadingLogo}
+                          onChange={(e) => handleFileUpload(e, "logo")}
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        value={logoUrl}
+                        onChange={(e) => {
+                          setLogoUrl(e.target.value);
+                          setConfig((prev) => ({ ...prev, logoUrl: e.target.value }));
+                        }}
+                        placeholder="หรือวาง URL โลโก้ https://..."
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Banner / OG Image Upload & URL */}
+                <div className="space-y-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block">
+                        ภาพแบนเนอร์ / ภาพแชร์โซเชียล (OG Image & Banner)
+                      </label>
+                      <p className="text-[11px] text-slate-500">
+                        ภาพหน้าปกเมื่อแชร์ลิงก์บน Facebook, LINE, Twitter (ขนาดแนะนำ 1200x630px)
+                      </p>
+                    </div>
+                    {bannerUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBannerUrl("");
+                          setConfig((prev) => ({ ...prev, bannerUrl: "" }));
+                        }}
+                        className="text-[11px] text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1 font-medium"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        ลบแบนเนอร์
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="w-full h-32 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shadow-xs relative">
+                      {bannerUrl ? (
+                        <img
+                          src={bannerUrl}
+                          alt="Banner Preview"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-slate-300 gap-1">
+                          <Image className="h-8 w-8" />
+                          <span className="text-[11px] text-slate-400">ยังไม่ได้ตั้งภาพแบนเนอร์</span>
+                        </div>
+                      )}
+                      {isUploadingBanner && (
+                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:border-emerald-500 rounded-xl text-xs font-semibold text-slate-700 hover:text-emerald-700 cursor-pointer shadow-xs transition-colors shrink-0">
+                        <Upload className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>{isUploadingBanner ? "กำลังอัปโหลด..." : "อัปโหลดภาพ"}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          disabled={isUploadingBanner}
+                          onChange={(e) => handleFileUpload(e, "banner")}
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        value={bannerUrl}
+                        onChange={(e) => {
+                          setBannerUrl(e.target.value);
+                          setConfig((prev) => ({ ...prev, bannerUrl: e.target.value }));
+                        }}
+                        placeholder="หรือวาง URL ภาพแบนเนอร์ https://..."
+                        className="flex-1 text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. SEO Meta Fields */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Meta Tags สำหรับการค้นหา (Search Engine Tags)
+                  </h3>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-700">
+                        SEO Meta Title (ชื่อหัวข้อเว็บ)
+                      </label>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {(config.seoTitle || "").length}/120 (แนะนำ 50-60)
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={config.seoTitle || ""}
+                      onChange={(e) => setConfig({ ...config, seoTitle: e.target.value })}
+                      placeholder={`${shopName} | ศูนย์บริการซ่อมมือถือมาตรฐานแล็บ`}
+                      className="w-full text-xs h-9 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-700">
+                        SEO Meta Description (คำอธิบายค้นหา)
+                      </label>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {(config.seoDescription || "").length}/300 (แนะนำ 120-160)
+                      </span>
+                    </div>
+                    <textarea
+                      rows={3}
+                      maxLength={300}
+                      value={config.seoDescription || ""}
+                      onChange={(e) => setConfig({ ...config, seoDescription: e.target.value })}
+                      placeholder="ศูนย์บริการตรวจเช็คซ่อมสมาร์ตโฟน เปลี่ยนหน้าจอแท้ แบตเตอรี่มาตรฐาน มอก. ตรวจเช็คฟรี 10 จุด..."
+                      className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-700">
+                      SEO Keywords (คำสำคัญ คั่นด้วยจุลภาค)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={200}
+                      value={config.seoKeywords || ""}
+                      onChange={(e) => setConfig({ ...config, seoKeywords: e.target.value })}
+                      placeholder="ซ่อมมือถือ, เปลี่ยนหน้าจอ, เปลี่ยนแบตเตอรี่, ซ่อมไอโฟน, ตรวจเช็คฟรี"
+                      className="w-full text-xs h-9 px-3 rounded-xl border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Google Search SERP Preview Simulator */}
+                <div className="space-y-2 p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 pb-2 border-b border-slate-100">
+                    <Search className="h-3.5 w-3.5 text-blue-600" />
+                    <span>ตัวอย่างแสดงผลบน Google Search (SERP Preview)</span>
+                  </div>
+                  <div className="space-y-1 pt-1 font-sans">
+                    <div className="flex items-center gap-2 text-[12px] text-slate-600">
+                      <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
+                        {logoUrl ? (
+                          <img src={logoUrl} alt="" className="w-full h-full object-contain" />
+                        ) : (
+                          <Globe className="h-2.5 w-2.5 text-slate-400" />
+                        )}
+                      </div>
+                      <span className="truncate">{storeOrigin || "https://example.com"}/store/{shopSlug}</span>
+                    </div>
+                    <div className="text-blue-700 text-sm font-medium hover:underline cursor-pointer truncate">
+                      {config.seoTitle || `${shopName} | ศูนย์ซ่อมมือถือและอุปกรณ์อิเล็กทรอนิกส์ครบวงจร`}
+                    </div>
+                    <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                      {config.seoDescription || config.subheadline || "ศูนย์บริการซ่อมมาตรฐานช่างมืออาชีพ ตรวจเช็คเครื่องฟรี 10 จุด อะไหล่แท้รับประกันสูงสุด 1 ปี ติดตามสถานะงานซ่อมสด"}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -2927,6 +3314,7 @@ export default function StorefrontCustomizerPage() {
                   <LandingNavbar
                     shopName={shopName}
                     shopSlug={shopSlug}
+                    logoUrl={logoUrl || config.logoUrl}
                     phone={config.phone}
                     lineId={config.lineId}
                     hiddenSections={hiddenSections}
@@ -3148,6 +3536,7 @@ export default function StorefrontCustomizerPage() {
                     <LandingNavbar
                       shopName={shopName}
                       shopSlug={shopSlug}
+                      logoUrl={logoUrl || config.logoUrl}
                       phone={config.phone}
                       lineId={config.lineId}
                       hiddenSections={hiddenSections}
@@ -3347,6 +3736,7 @@ export default function StorefrontCustomizerPage() {
                     <LandingNavbar
                       shopName={shopName}
                       shopSlug={shopSlug}
+                      logoUrl={logoUrl || config.logoUrl}
                       phone={config.phone}
                       lineId={config.lineId}
                       hiddenSections={hiddenSections}
@@ -4306,6 +4696,174 @@ export default function StorefrontCustomizerPage() {
                       className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-mono"
                       placeholder="วันจันทร์ - วันศุกร์ | 09:00 - 19:30 | เปิด&#10;วันเสาร์ - วันอาทิตย์ | 10:00 - 18:30 | เปิด"
                     />
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual: Contact Form Block */}
+              {(editingBlock.type.includes("contact_form") || editingBlock.type.includes("contact-form")) && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block">
+                      ข้อความบนปุ่มส่งข้อมูล (Submit Button Text)
+                    </label>
+                    <input
+                      type="text"
+                      value={editingBlock.buttonText || ""}
+                      onChange={(e) =>
+                        setEditingBlock({
+                          ...editingBlock,
+                          buttonText: e.target.value,
+                        })
+                      }
+                      placeholder="ส่งข้อมูลปรึกษาช่างทันที"
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-700 block">
+                      รายชื่อสาขาให้เลือก (คั่นด้วยจุลภาค , หรือขึ้นบรรทัดใหม่)
+                    </label>
+                    <input
+                      type="text"
+                      value={
+                        Array.isArray(editingBlock.branches)
+                          ? editingBlock.branches.join(", ")
+                          : editingBlock.branches || ""
+                      }
+                      onChange={(e) => {
+                        const list = e.target.value
+                          .split(/[,;\n]/)
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        setEditingBlock({ ...editingBlock, branches: list });
+                      }}
+                      placeholder="สาขาสำนักงานใหญ่, สาขาสยาม, บริการ Delivery"
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual: Query Loop Block */}
+              {(editingBlock.type.includes("query_loop") || editingBlock.type.includes("query-loop")) && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        กรองหมวดหมู่ (Category Filter)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.category || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            category: e.target.value,
+                          })
+                        }
+                        placeholder="เช่น บริการซ่อม หรือ บทความ"
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        กรองป้ายแท็ก (Tag Filter)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingBlock.tag || ""}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            tag: e.target.value,
+                          })
+                        }
+                        placeholder="เช่น หน้าจอ, แบตเตอรี่"
+                        className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        จำนวนแสดง (Items)
+                      </label>
+                      <select
+                        value={editingBlock.perPage || 6}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            perPage: Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      >
+                        <option value={3}>3 รายการ</option>
+                        <option value={6}>6 รายการ</option>
+                        <option value={9}>9 รายการ</option>
+                        <option value={12}>12 รายการ</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        คอลัมน์ (Columns)
+                      </label>
+                      <select
+                        value={editingBlock.columns || 3}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            columns: Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      >
+                        <option value={2}>2 คอลัมน์</option>
+                        <option value={3}>3 คอลัมน์</option>
+                        <option value={4}>4 คอลัมน์</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        รูปแบบ (Layout)
+                      </label>
+                      <select
+                        value={editingBlock.layout || "grid"}
+                        onChange={(e) =>
+                          setEditingBlock({
+                            ...editingBlock,
+                            layout: e.target.value as any,
+                          })
+                        }
+                        className="w-full text-xs h-8 px-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                      >
+                        <option value="grid">Grid (ตาราง)</option>
+                        <option value="list">List (รายการยาว)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Contextual: Service Grid Block */}
+              {(editingBlock.type.includes("service_grid") || editingBlock.type.includes("service-grid")) && (
+                <div className="space-y-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block">
+                      จำนวนคอลัมน์ (Columns)
+                    </label>
+                    <select
+                      value={editingBlock.columns || 3}
+                      onChange={(e) =>
+                        setEditingBlock({ ...editingBlock, columns: Number(e.target.value) })
+                      }
+                      className="w-full text-xs h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
+                    >
+                      <option value={2}>2 คอลัมน์ (การ์ดขนาดใหญ่)</option>
+                      <option value={3}>3 คอลัมน์ (มาตรฐาน 6 บริการหลัก)</option>
+                      <option value={4}>4 คอลัมน์ (กะทัดรัด)</option>
+                    </select>
                   </div>
                 </div>
               )}

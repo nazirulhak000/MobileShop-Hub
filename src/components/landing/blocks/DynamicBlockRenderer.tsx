@@ -14,6 +14,7 @@ import { HtmlEmbedBlock } from "./HtmlEmbedBlock";
 import { BusinessHoursBlock } from "./BusinessHoursBlock";
 import { ContactFormBlock } from "./ContactFormBlock";
 import { QueryLoopBlock } from "./QueryLoopBlock";
+import { ServiceGridBlock } from "./ServiceGridBlock";
 
 /**
  * Normalizes block type string to a standard discriminator
@@ -32,6 +33,8 @@ function normalizeBlockType(typeStr: string | undefined): string {
     return "contact-form";
   if (cleaned.includes("query") || cleaned.includes("loop"))
     return "query-loop";
+  if (cleaned.includes("service") || cleaned.includes("grid"))
+    return "service-grid";
   if (cleaned.includes("html") || cleaned.includes("widget") || cleaned.includes("embed") || cleaned.includes("map"))
     return "html-embed";
   if (cleaned.includes("hour") || cleaned.includes("schedule") || cleaned.includes("time"))
@@ -273,6 +276,21 @@ export function DynamicBlockRenderer({
             className={blockClassName}
             shopSlug={effectiveShopSlug}
             customPages={mergedData.customPages}
+            data={block.data || block.metadata}
+          />
+        );
+
+      case "service-grid":
+        return (
+          <ServiceGridBlock
+            id={block.id}
+            title={mergedData.title}
+            subtitle={mergedData.subtitle}
+            badge={mergedData.badge}
+            columns={mergedData.columns}
+            services={mergedData.services}
+            themeColor={themeColor}
+            className={blockClassName}
             data={block.data || block.metadata}
           />
         );
