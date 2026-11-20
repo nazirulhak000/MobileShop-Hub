@@ -146,7 +146,7 @@ export function ThermalSlipModal({
             {/* Store Header */}
             <div className="text-center pb-2 border-b border-dashed border-black">
               <h2 className="text-sm font-bold tracking-tight">
-                {job.branch?.name || "MobileShop-Hub Service Center"}
+                {job.branch?.name || "FixMe Service Center"}
               </h2>
               {job.branch?.address && (
                 <p className="text-[10px] text-gray-700 mt-0.5">
@@ -240,18 +240,38 @@ export function ThermalSlipModal({
                 {job.issueDescription}
               </div>
 
-              {Object.keys(preCheckParsed).length > 0 && (
+              {Object.keys(preCheckParsed).filter((k) => k !== "damageLocations" && k !== "damageNotes").length > 0 && (
                 <div className="pt-1">
                   <div className="text-[9.5px] text-gray-500 font-bold mb-0.5">
                     สภาพเครื่องเบื้องต้น (Pre-check):
                   </div>
                   <div className="text-[9px] text-gray-700 grid grid-cols-2 gap-x-1">
-                    {Object.entries(preCheckParsed).slice(0, 8).map(([k, v]) => (
-                      <div key={k} className="truncate">
-                        • {k}: <span className="font-semibold">{v}</span>
-                      </div>
-                    ))}
+                    {Object.entries(preCheckParsed)
+                      .filter(([k]) => k !== "damageLocations" && k !== "damageNotes")
+                      .slice(0, 8)
+                      .map(([k, v]) => (
+                        <div key={k} className="truncate">
+                          • {k}: <span className="font-semibold">{Array.isArray(v) ? v.join(", ") : String(v)}</span>
+                        </div>
+                      ))}
                   </div>
+                </div>
+              )}
+
+              {/* Physical Damage & Notes */}
+              {((preCheckParsed.damageLocations && (Array.isArray(preCheckParsed.damageLocations) ? preCheckParsed.damageLocations.length > 0 : Boolean(preCheckParsed.damageLocations))) || preCheckParsed.damageNotes) && (
+                <div className="pt-1 text-[9.5px] border-t border-dotted border-gray-300 space-y-0.5">
+                  <div className="text-gray-600 font-bold">จุดตำหนิ / สภาพบอดี้ภายนอก:</div>
+                  {preCheckParsed.damageLocations && (
+                    <div className="text-[9px] text-red-600 font-medium">
+                      • {Array.isArray(preCheckParsed.damageLocations) ? preCheckParsed.damageLocations.join(", ") : String(preCheckParsed.damageLocations)}
+                    </div>
+                  )}
+                  {preCheckParsed.damageNotes && (
+                    <div className="text-[9px] text-gray-700 italic">
+                      หมายเหตุ: {String(preCheckParsed.damageNotes)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -297,7 +317,7 @@ export function ThermalSlipModal({
               )}
 
               <div className="pt-1 text-[8px] text-gray-400">
-                MobileShop-Hub OS • ขอบคุณที่ใช้บริการ
+                FixMe OS • ขอบคุณที่ใช้บริการ
               </div>
             </div>
           </div>

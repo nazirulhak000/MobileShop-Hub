@@ -166,11 +166,26 @@ export async function generateNextTrackingCode(tx?: any): Promise<string> {
   const yyyymm = bangkokYYYYMM();
   const prefix = `REP-${yyyymm}-`;
 
-  const counter = await client.sequenceCounter.upsert({
-    where: { id: `REP-${yyyymm}` },
-    update: { current: { increment: 1 } },
-    create: { id: `REP-${yyyymm}`, current: 1 },
-  });
+  // Atomic sequence counter with collision-resistance check against existing jobs
+  let trackingCode = "";
+  let attempts = 0;
+  while (attempts < 15) {
+    attempts++;
+    const counter = await client.sequenceCounter.upsert({
+      where: { id: `REP-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `REP-${yyyymm}`, current: 1 },
+    });
 
-  return `${prefix}${String(counter.current).padStart(4, "0")}`;
+    trackingCode = `${prefix}${String(counter.current).padStart(4, "0")}`;
+    const exists = await client.repairJob.findFirst({
+      where: { trackingCode },
+      select: { id: true },
+    });
+    if (!exists) {
+      break;
+    }
+  }
+
+  return trackingCode;
 }

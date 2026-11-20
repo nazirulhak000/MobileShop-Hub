@@ -61,14 +61,28 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "กรุณาเลือกสาขารับเครื่อง" }, { status: 400 });
     }
 
+    let assignedTechnicianId: string | null = technicianId || null;
+    if (actor.role === "TECHNICIAN" && !assignedTechnicianId) {
+      assignedTechnicianId = actor.id;
+    }
+    if (assignedTechnicianId) {
+      const validTech = await prisma.user.findFirst({
+        where: { id: assignedTechnicianId, tenantId: actor.tenantId },
+        select: { id: true },
+      });
+      if (!validTech) {
+        throw new AccessError(400, "ไม่พบข้อมูลช่างเทคนิคที่ระบุในร้าน");
+      }
+    }
+
     // Warranty/RMA claims: copy the device lock from the original job server-side,
-    // so the secret never has to travel through the list API to the browser.
+    // strictly tenant-scoped so secrets never leak across tenants or travel to the browser.
     let finalPasscode: string | null = passcode || null;
     let finalPatternLock: string | null = patternLock || null;
     if (lockFromJobId && !finalPasscode && !finalPatternLock) {
       if (typeof lockFromJobId !== "string") throw new AccessError(400, "ข้อมูลงานซ่อมเดิมไม่ถูกต้อง");
-      const source = await prisma.repairJob.findUnique({
-        where: { id: lockFromJobId },
+      const source = await prisma.repairJob.findFirst({
+        where: { id: lockFromJobId, tenantId: actor.tenantId },
         select: { passcode: true, patternLock: true },
       });
       if (!source) throw new AccessError(404, "ไม่พบงานซ่อมเดิม");
@@ -88,15 +102,25 @@ async function handlePOST(request: NextRequest) {
           throw new AccessError(400, "กรุณาระบุชื่อและเบอร์โทรศัพท์ลูกค้า");
         }
 
+        const rawPhone = customerPhone.trim();
+        const cleanPhone = rawPhone.replace(/[\s()-]/g, "");
+
         let existingCustomer = await tx.customer.findFirst({
-          where: { phone: customerPhone.trim() },
+          where: {
+            tenantId: actor.tenantId,
+            OR: [
+              { phone: rawPhone },
+              ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+            ],
+          },
         });
 
         if (!existingCustomer) {
           existingCustomer = await tx.customer.create({
             data: {
+              tenantId: actor.tenantId,
               name: customerName.trim(),
-              phone: customerPhone.trim(),
+              phone: cleanPhone || rawPhone,
               lineId: customerLineId ? customerLineId.trim() : null,
               address: customerAddress ? customerAddress.trim() : null,
               nationalId: customerNationalId ? customerNationalId.trim() : null,
@@ -111,10 +135,11 @@ async function handlePOST(request: NextRequest) {
 
       const job = await tx.repairJob.create({
         data: {
+          tenantId: actor.tenantId,
           trackingCode,
           branchId,
           customerId: finalCustomerId,
-          technicianId: technicianId || null,
+          technicianId: assignedTechnicianId,
           deviceBrand,
           deviceModel,
           deviceColor: deviceColor || null,
@@ -175,4 +200,4 @@ async function handlePOST(request: NextRequest) {
 
 export const GET = withStaff(handleGET, ["ADMIN","MANAGER","CASHIER","TECHNICIAN"]);
 
-export const POST = withStaff(handlePOST, ["ADMIN","MANAGER","CASHIER"]);
+export const POST = withStaff(handlePOST, ["ADMIN","MANAGER","CASHIER","TECHNICIAN"]);
