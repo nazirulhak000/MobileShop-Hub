@@ -527,7 +527,7 @@ export default function AuditLogsPage() {
 
   // Client-side text search over loaded rows
   const filteredLogs = useMemo(() => {
-    let result = logs;
+    const result = logs;
     const q = searchQuery.trim().toLowerCase();
     if (!q) return result;
     return result.filter(
