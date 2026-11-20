@@ -20,7 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
-import { formatTHB, formatDateThai } from "@/lib/utils";
+import { formatTHB, formatDateThai, validateThaiNationalId } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
 
 export default function PawnContractsPage() {
@@ -46,7 +46,9 @@ export default function PawnContractsPage() {
 
   const fetchContracts = async () => {
     try {
-      const res = await fetch("/api/pawn");
+      const branchParam = currentBranch?.code || currentBranch?.id || "";
+      const url = branchParam ? `/api/pawn?branch=${encodeURIComponent(branchParam)}` : "/api/pawn";
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
         setContracts(json.data);
@@ -60,7 +62,7 @@ export default function PawnContractsPage() {
 
   useEffect(() => {
     fetchContracts();
-  }, []);
+  }, [currentBranch?.code, currentBranch?.id]);
 
   // Busy flag disables every action/create button while a request is in flight.
   const [busy, setBusy] = useState(false);
@@ -107,28 +109,29 @@ export default function PawnContractsPage() {
     if (busy) return;
     setFormError("");
     if (!custName.trim() || !custPhone.trim()) return setFormError("กรุณากรอกชื่อและเบอร์โทรศัพท์ลูกค้า");
-    if (!/^\d{13}$/.test(nationalId.replace(/[\s-]/g, ""))) return setFormError("กรุณากรอกเลขบัตรประชาชน 13 หลักให้ถูกต้อง");
+    const cleanNationalId = nationalId.replace(/[^0-9]/g, "");
+    if (cleanNationalId) {
+      const idCheck = validateThaiNationalId(cleanNationalId);
+      if (!idCheck.valid) return setFormError(idCheck.message || "กรุณากรอกเลขบัตรประชาชน 13 หลักให้ถูกต้อง");
+    }
     if (!imei.trim()) return setFormError("กรุณากรอกหมายเลข IMEI");
     if (!Number.isFinite(loanAmount) || loanAmount <= 0) return setFormError("วงเงินจำนำต้องมากกว่า 0");
-    if (!Number.isFinite(interestRate) || interestRate < 0 || interestRate > 5) return setFormError("อัตราดอกเบี้ยต้องอยู่ระหว่าง 0-5% ต่อเดือน");
+    if (!Number.isFinite(interestRate) || interestRate < 0 || interestRate > 10) return setFormError("อัตราดอกเบี้ยต้องอยู่ระหว่าง 0-10% ต่อเดือน");
     if (!Number.isInteger(durationMonths) || durationMonths < 1 || durationMonths > 12) return setFormError("ระยะเวลาสัญญาต้องอยู่ระหว่าง 1-12 เดือน");
 
     setBusy(true);
     try {
-      // Created through /api/trade-in so the device IMEI is registered as PAWNED;
-      // that is what lets a later forfeit move it into sellable stock.
-      const res = await fetch("/api/trade-in", {
+      const res = await fetch("/api/pawn", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "PAWN",
-          branchCode: currentBranch.id || currentBranch.code,
-          customerName: custName,
-          customerPhone: custPhone,
-          nationalId,
+          branchId: currentBranch.id,
+          customerName: custName.trim(),
+          customerPhone: custPhone.trim(),
+          nationalId: cleanNationalId,
           deviceBrand: brand,
           deviceModel: model,
-          imei,
+          imei: imei.trim(),
           agreedPrice: loanAmount,
           interestRateMonthly: interestRate,
           durationMonths,

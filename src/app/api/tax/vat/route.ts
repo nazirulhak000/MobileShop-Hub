@@ -25,7 +25,12 @@ export const GET = withStaff(async (request: NextRequest) => {
 
   const { start, end } = bangkokMonthRange(month);
   const branchFilter = branchId ? { branchId } : { branchId: { in: actor.branchIds } };
-  const where = { ...branchFilter, status: "COMPLETED", createdAt: { gte: start, lt: end } };
+  const where = {
+    tenantId: actor.tenantId,
+    ...branchFilter,
+    status: "COMPLETED",
+    createdAt: { gte: start, lt: end },
+  };
   const [agg, voidCount, docs] = await Promise.all([
     prisma.sale.aggregate({ where, _sum: { netAmount: true, vatAmount: true, discount: true }, _count: { _all: true } }),
     prisma.sale.count({ where: { ...where, status: "VOID" } }),

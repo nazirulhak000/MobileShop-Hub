@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogContent, DialogFooter } from "@/components/ui/Dialog";
-import { formatTHB } from "@/lib/utils";
+import { formatTHB, bahtText, validateThaiTaxId, validateThaiBranchId } from "@/lib/utils";
 
 // --- Types ---
 interface B2BInvoice {
@@ -38,15 +38,19 @@ interface B2BInvoice {
   invoiceNo: string;
   companyName: string;
   taxId: string;
+  branchId: string;
   address: string;
   poNumber: string;
   issueDate: string;
   dueDate: string;
-  status: "DRAFT" | "SENT" | "PAID" | "OVERDUE";
-  items: Array<{ name: string; qty: number; unitPrice: number; total: number }>;
+  status: "DRAFT" | "SENT" | "PAID" | "OVERDUE" | "VOID";
+  items: Array<{ name: string; qty: number; unitPrice: number; total: number; isVatExempt?: boolean }>;
+  taxableSubtotal?: number;
+  nonVatSubtotal?: number;
   subtotal: number;
   vatAmount: number;
   grandTotal: number;
+  bahtText?: string;
 }
 
 interface TaxInvoice {
@@ -86,109 +90,13 @@ const bangkokToday = () =>
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-// Thai Baht Text Generator for authentic invoices
-function bahtText(amount: number): string {
-  if (isNaN(amount) || amount === 0) return "ศูนย์บาทถ้วน";
-  const numStr = amount.toFixed(2);
-  const [bahtStr, satangStr] = numStr.split(".");
-  const thaiNums = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
-  const units = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน"];
-
-  function convertGroup(digits: string): string {
-    let result = "";
-    const len = digits.length;
-    for (let i = 0; i < len; i++) {
-      const digit = parseInt(digits[i]);
-      const pos = len - i - 1;
-      if (digit !== 0) {
-        if (pos === 0 && digit === 1 && len > 1) {
-          result += "เอ็ด";
-        } else if (pos === 1 && digit === 2) {
-          result += "ยี่สิบ";
-        } else if (pos === 1 && digit === 1) {
-          result += "สิบ";
-        } else {
-          result += thaiNums[digit] + units[pos];
-        }
-      }
-    }
-    return result;
-  }
-
-  let text = "";
-  if (parseInt(bahtStr) > 0) {
-    text += convertGroup(bahtStr) + "บาท";
-  }
-  const satang = parseInt(satangStr);
-  if (satang === 0) {
-    text += "ถ้วน";
-  } else {
-    text += convertGroup(satangStr) + "สตางค์";
-  }
-  return text;
-}
-
 export default function InvoicesPage() {
   const { currentBranch } = useApp();
   const [activeTab, setActiveTab] = useState<"b2b" | "pos">("b2b");
 
-  // --- B2B Invoices State (matching user's screenshot) ---
-  const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([
-    {
-      id: "INV-B2B-202611-001",
-      invoiceNo: "B2B-202611-0001",
-      companyName: "บริษัท สยามเทคโนโลยี ซิสเต็มส์ จำกัด",
-      taxId: "0105559012345",
-      address: "159 อาคารเสริมมิตรทาวเวอร์ ชั้น 18 ถนนสุขุมวิท 21 แขวงคลองเตยเหนือ เขตวัฒนา กรุงเทพฯ 10110",
-      poNumber: "PO-STS-2026-902",
-      issueDate: "2026-11-01",
-      dueDate: "2026-11-30",
-      status: "SENT",
-      items: [
-        { name: "iPhone 14 Pro 256GB (เครื่องล็อตองค์กร พร้อมประกันศูนย์)", qty: 5, unitPrice: 23900, total: 119500 },
-        { name: "หัวชาร์จเร็ว Anker 30W Nano II PD Fast Charger", qty: 5, unitPrice: 690, total: 3450 },
-      ],
-      subtotal: 122950,
-      vatAmount: 8606.5,
-      grandTotal: 131556.5,
-    },
-    {
-      id: "INV-B2B-202610-002",
-      invoiceNo: "B2B-202610-0042",
-      companyName: "บริษัท นิวเจนเนอเรชั่น มีเดีย จำกัด",
-      taxId: "0105561098765",
-      address: "88 ถนนรัชดาภิเษก แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ 10310",
-      poNumber: "PO-NGM-441",
-      issueDate: "2026-10-15",
-      dueDate: "2026-10-31",
-      status: "PAID",
-      items: [
-        { name: "เปลี่ยนหน้าจอแท้ iPhone 14 Pro Max 3 เครื่อง (งานเคลมองค์กร)", qty: 3, unitPrice: 7900, total: 23700 },
-        { name: "เปลี่ยนแบตเตอรี่แท้ iPhone 13 4 เครื่อง", qty: 4, unitPrice: 1500, total: 6000 },
-      ],
-      subtotal: 29700,
-      vatAmount: 2079,
-      grandTotal: 31779,
-    },
-    {
-      id: "INV-B2B-202610-003",
-      invoiceNo: "B2B-202610-0038",
-      companyName: "บริษัท โลจิสติกส์ พลัส จำกัด (มหาชน)",
-      taxId: "0107560001234",
-      address: "123 อาคารซีดับเบิ้ลยู ทาวเวอร์ แขวงห้วยขวาง เขตห้วยขวาง กรุงเทพฯ",
-      poNumber: "PO-LP-8890",
-      issueDate: "2026-10-01",
-      dueDate: "2026-10-25",
-      status: "OVERDUE",
-      items: [
-        { name: "Samsung Galaxy A54 5G สำหรับพนักงานขนส่ง", qty: 10, unitPrice: 8500, total: 85000 },
-      ],
-      subtotal: 85000,
-      vatAmount: 5950,
-      grandTotal: 90950,
-    },
-  ]);
-
+  // --- B2B Invoices State ---
+  const [b2bInvoices, setB2bInvoices] = useState<B2BInvoice[]>([]);
+  const [b2bLoading, setB2bLoading] = useState(false);
   const [b2bFilter, setB2bFilter] = useState("ALL");
   const [b2bSearch, setB2bSearch] = useState("");
 
@@ -209,11 +117,42 @@ export default function InvoicesPage() {
   // New B2B Form State
   const [newCompany, setNewCompany] = useState("");
   const [newTaxId, setNewTaxId] = useState("");
+  const [newBranchId, setNewBranchId] = useState("00000");
   const [newAddress, setNewAddress] = useState("");
   const [newPo, setNewPo] = useState("");
+  const [newDueDate, setNewDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split("T")[0];
+  });
   const [newItemName, setNewItemName] = useState("");
   const [newItemQty, setNewItemQty] = useState(1);
   const [newItemPrice, setNewItemPrice] = useState(0);
+  const [newItemIsVatExempt, setNewItemIsVatExempt] = useState(false);
+  const [b2bFormError, setB2bFormError] = useState("");
+  const [b2bBusy, setB2bBusy] = useState(false);
+
+  const loadB2BInvoices = useCallback(async () => {
+    setB2bLoading(true);
+    try {
+      const params = new URLSearchParams({ take: "100" });
+      if (currentBranch?.code) params.set("branch", currentBranch.code);
+      if (b2bSearch) params.set("search", b2bSearch.trim());
+      const res = await fetch(`/api/invoices?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setB2bInvoices(json.data);
+      }
+    } catch (err) {
+      console.error("loadB2BInvoices error", err);
+    } finally {
+      setB2bLoading(false);
+    }
+  }, [currentBranch?.code, b2bSearch]);
+
+  useEffect(() => {
+    loadB2BInvoices();
+  }, [loadB2BInvoices]);
 
   // Load POS sales invoices from backend
   const loadPosInvoices = useCallback(async () => {
@@ -289,46 +228,91 @@ export default function InvoicesPage() {
     .reduce((sum, i) => sum + i.grandTotal, 0);
 
   // Handle Mark as Paid
-  const handleMarkAsPaid = (id: string) => {
-    setB2bInvoices((prev) =>
-      prev.map((inv) => (inv.id === id ? { ...inv, status: "PAID" } : inv))
-    );
+  const handleMarkAsPaid = async (id: string) => {
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: "PAID" }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setB2bInvoices((prev) =>
+          prev.map((inv) => (inv.id === id ? { ...inv, status: "PAID" } : inv))
+        );
+      } else {
+        alert(json?.error || "ไม่สามารถอัปเดตสถานะได้");
+      }
+    } catch {
+      alert("เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย");
+    }
   };
 
   // Handle Create B2B Invoice
-  const handleCreateB2B = () => {
+  const handleCreateB2B = async () => {
+    setB2bFormError("");
     if (!newCompany.trim() || !newItemName.trim() || newItemPrice <= 0) {
-      alert("กรุณากรอกชื่อบริษัท รายการ และราคาให้ครบถ้วน");
+      setB2bFormError("กรุณากรอกชื่อบริษัท รายการ และราคาให้ครบถ้วน");
       return;
     }
-    const itemTotal = newItemQty * newItemPrice;
-    const vat = itemTotal * 0.07;
-    const grand = itemTotal + vat;
-    const nextNum = b2bInvoices.length + 1;
-    const newInvoice: B2BInvoice = {
-      id: `INV-B2B-202611-00${nextNum}`,
-      invoiceNo: `B2B-202611-000${nextNum}`,
-      companyName: newCompany.trim(),
-      taxId: newTaxId.trim() || "0105562000000",
-      address: newAddress.trim() || "กรุงเทพมหานคร",
-      poNumber: newPo.trim() || `PO-${Date.now().toString().slice(-4)}`,
-      issueDate: bangkokToday(),
-      dueDate: new Date(Date.now() + 30 * 86_400_000).toISOString().split("T")[0],
-      status: "SENT",
-      items: [{ name: newItemName.trim(), qty: newItemQty, unitPrice: newItemPrice, total: itemTotal }],
-      subtotal: itemTotal,
-      vatAmount: vat,
-      grandTotal: grand,
-    };
-    setB2bInvoices([newInvoice, ...b2bInvoices]);
-    setNewB2BModalOpen(false);
-    setNewCompany("");
-    setNewTaxId("");
-    setNewAddress("");
-    setNewPo("");
-    setNewItemName("");
-    setNewItemQty(1);
-    setNewItemPrice(0);
+    const cleanTaxId = newTaxId.replace(/[^0-9]/g, "");
+    const taxCheck = validateThaiTaxId(cleanTaxId);
+    if (!taxCheck.valid) {
+      setB2bFormError(taxCheck.message || "เลขประจำตัวผู้เสียภาษีอากร 13 หลักไม่ถูกต้อง");
+      return;
+    }
+    const branchCheck = validateThaiBranchId(newBranchId);
+    if (!branchCheck.valid) {
+      setB2bFormError(branchCheck.message || "รหัสสาขาต้องเป็นตัวเลข 5 หลัก (เช่น 00000 สำหรับสำนักงานใหญ่)");
+      return;
+    }
+
+    setB2bBusy(true);
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: newCompany.trim(),
+          taxId: cleanTaxId,
+          branchId: newBranchId.trim(),
+          address: newAddress.trim() || "กรุงเทพมหานคร",
+          poNumber: newPo.trim() || undefined,
+          dueDate: newDueDate || undefined,
+          branchCode: currentBranch?.code || "HQ",
+          items: [
+            {
+              name: newItemName.trim(),
+              qty: newItemQty,
+              unitPrice: newItemPrice,
+              isVatExempt: newItemIsVatExempt,
+            },
+          ],
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setNewB2BModalOpen(false);
+        setNewCompany("");
+        setNewTaxId("");
+        setNewBranchId("00000");
+        setNewAddress("");
+        setNewPo("");
+        setNewItemName("");
+        setNewItemQty(1);
+        setNewItemPrice(0);
+        setNewItemIsVatExempt(false);
+        setB2bFormError("");
+        loadB2BInvoices();
+      } else {
+        setB2bFormError(json?.error || "ไม่สามารถสร้างใบแจ้งหนี้ได้");
+      }
+    } catch {
+      setB2bFormError("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
+    } finally {
+      setB2bBusy(false);
+    }
   };
 
   return (
@@ -832,7 +816,14 @@ export default function InvoicesPage() {
                     เลขประจำตัวผู้เสียภาษี:{" "}
                     <strong>{selectedB2B?.taxId || "0105561098765"}</strong>
                   </div>
-                  <div className="text-slate-600">สาขา: สำนักงานใหญ่</div>
+                  <div className="text-slate-600">
+                    สาขา:{" "}
+                    <strong>
+                      {selectedB2B?.branchId === "00000" || !selectedB2B?.branchId
+                        ? "สำนักงานใหญ่ (00000)"
+                        : `สาขาที่ ${selectedB2B.branchId}`}
+                    </strong>
+                  </div>
                   <div className="text-slate-600">
                     เงื่อนไขการชำระ: เครดิตเทอม 30 วัน (โอนเข้าบัญชีบริษัท)
                   </div>
@@ -924,12 +915,21 @@ export default function InvoicesPage() {
 
                 {/* Calculation breakdown */}
                 <div className="w-full md:w-80 space-y-1.5 font-mono text-xs">
+                  {selectedB2B && (selectedB2B.nonVatSubtotal || 0) > 0 && (
+                    <div className="flex justify-between text-slate-600">
+                      <span>มูลค่ายกเว้นภาษี (Non-VAT):</span>
+                      <span className="font-semibold tabular-nums text-slate-700">
+                        {formatTHB(selectedB2B.nonVatSubtotal || 0)}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between text-slate-600">
-                    <span>มูลค่าก่อนภาษี (Subtotal):</span>
+                    <span>มูลค่าก่อนภาษี (Taxable Base):</span>
                     <span className="font-semibold tabular-nums">
                       {formatTHB(
                         selectedB2B
-                          ? selectedB2B.subtotal
+                          ? (selectedB2B.taxableSubtotal ?? selectedB2B.subtotal)
                           : selectedPOS
                           ? round2(selectedPOS.netAmount - selectedPOS.vatAmount)
                           : 0
@@ -1035,9 +1035,16 @@ export default function InvoicesPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-bold text-slate-700 mb-1 block">
-                เลขประจำตัวผู้เสียภาษี (13 หลัก)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-slate-700">
+                  เลขประจำตัวผู้เสียภาษี (13 หลัก) *
+                </label>
+                {newTaxId && (
+                  <span className={`text-[10px] font-bold ${validateThaiTaxId(newTaxId.replace(/[^0-9]/g, "")).valid ? "text-emerald-600" : "text-rose-600"}`}>
+                    {validateThaiTaxId(newTaxId.replace(/[^0-9]/g, "")).valid ? "✓ ถูกต้อง" : "✕ ไม่ถูกต้อง"}
+                  </span>
+                )}
+              </div>
               <Input
                 placeholder="0105562000000"
                 value={newTaxId}
@@ -1045,6 +1052,20 @@ export default function InvoicesPage() {
                 className="font-mono text-sm"
               />
             </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 mb-1 block">
+                รหัสสาขา (00000 = สำนักงานใหญ่) *
+              </label>
+              <Input
+                placeholder="00000"
+                value={newBranchId}
+                onChange={(e) => setNewBranchId(e.target.value)}
+                className="font-mono text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-700 mb-1 block">
                 เลขที่ PO ลูกค้า
@@ -1056,11 +1077,22 @@ export default function InvoicesPage() {
                 className="font-mono text-sm"
               />
             </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 mb-1 block">
+                วันครบกำหนดชำระ (Due Date)
+              </label>
+              <Input
+                type="date"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="text-sm"
+              />
+            </div>
           </div>
 
           <div>
             <label className="text-xs font-bold text-slate-700 mb-1 block">
-              ที่อยู่ตามใบกำกับภาษี
+              ที่อยู่ตามใบกำกับภาษี *
             </label>
             <Input
               placeholder="เลขที่ ถนน แขวง เขต จังหวัด รหัสไปรษณีย์"
@@ -1095,7 +1127,7 @@ export default function InvoicesPage() {
             </div>
             <div>
               <label className="text-xs font-bold text-slate-700 mb-1 block">
-                ราคา/หน่วย (ก่อน VAT 7%)
+                ราคา/หน่วย
               </label>
               <Input
                 type="number"
@@ -1105,12 +1137,59 @@ export default function InvoicesPage() {
               />
             </div>
           </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="exemptVat"
+              checked={newItemIsVatExempt}
+              onChange={(e) => setNewItemIsVatExempt(e.target.checked)}
+              className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+            />
+            <label htmlFor="exemptVat" className="text-xs font-medium text-slate-700 cursor-pointer">
+              สินค้ายกเว้นภาษีมูลค่าเพิ่ม (Non-VAT / Tax-exempt)
+            </label>
+          </div>
+
+          {/* Live Calculation Preview */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs font-mono">
+            <div className="flex justify-between text-slate-500">
+              <span>{newItemIsVatExempt ? "มูลค่ายกเว้นภาษี (Non-VAT):" : "มูลค่าก่อนภาษี (Taxable Base):"}</span>
+              <span className="font-bold text-slate-800">
+                {formatTHB(newItemQty * newItemPrice)}
+              </span>
+            </div>
+            <div className="flex justify-between text-slate-500">
+              <span>ภาษีมูลค่าเพิ่ม 7% (VAT):</span>
+              <span className="font-bold text-teal-700">
+                {formatTHB(newItemIsVatExempt ? 0 : round2(newItemQty * newItemPrice * 0.07))}
+              </span>
+            </div>
+            <div className="flex justify-between text-slate-900 font-bold pt-1 border-t border-slate-200">
+              <span>ยอดรวมทั้งสิ้น (Grand Total):</span>
+              <span className="text-teal-800 text-sm">
+                {formatTHB(
+                  newItemIsVatExempt
+                    ? newItemQty * newItemPrice
+                    : round2(newItemQty * newItemPrice + round2(newItemQty * newItemPrice * 0.07))
+                )}
+              </span>
+            </div>
+          </div>
+
+          {b2bFormError && (
+            <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>{b2bFormError}</span>
+            </div>
+          )}
         </DialogContent>
 
         <DialogFooter className="flex justify-between">
           <Button
             variant="outline"
             size="sm"
+            disabled={b2bBusy}
             onClick={() => setNewB2BModalOpen(false)}
             className="cursor-pointer"
           >
@@ -1118,10 +1197,11 @@ export default function InvoicesPage() {
           </Button>
           <Button
             size="sm"
+            disabled={b2bBusy}
             onClick={handleCreateB2B}
             className="bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer"
           >
-            ออกใบแจ้งหนี้ B2B
+            {b2bBusy ? "กำลังบันทึก..." : "ออกใบแจ้งหนี้ B2B"}
           </Button>
         </DialogFooter>
       </Dialog>

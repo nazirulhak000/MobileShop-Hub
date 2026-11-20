@@ -20,7 +20,7 @@ async function handlePATCH(
 
     const result = await prisma.$transaction(async (tx) => {
       const contract = await tx.tradeInContract.findFirst({
-        where: { id },
+        where: { id, tenantId: actor.tenantId },
         include: { deviceImeis: true },
       });
       if (!contract) throw new AccessError(404, "ไม่พบข้อมูลสัญญา");
@@ -29,7 +29,7 @@ async function handlePATCH(
       }
 
       // Conditional status change guards against concurrent double actions.
-      const guard = { id, type: "PAWN", status: "ACTIVE" };
+      const guard = { id, tenantId: actor.tenantId, type: "PAWN", status: "ACTIVE" };
       let message = "";
       let details: Record<string, unknown> = { contractNo: contract.contractNo };
 
@@ -37,7 +37,7 @@ async function handlePATCH(
         const changed = await tx.tradeInContract.updateMany({ where: guard, data: { status: "REDEEMED" } });
         if (changed.count !== 1) throw new AccessError(409, "สัญญานี้ถูกดำเนินการไปแล้ว");
         const returned = await tx.deviceIMEI.updateMany({
-          where: { tradeInContractId: id, status: "PAWNED" },
+          where: { tenantId: actor.tenantId, tradeInContractId: id, status: "PAWNED" },
           data: { status: "RETURNED" },
         });
         details = { ...details, imeisReturned: returned.count };
@@ -49,7 +49,7 @@ async function handlePATCH(
         for (const im of contract.deviceImeis) {
           // Only a device still held as collateral moves into sellable stock.
           const r = await tx.deviceIMEI.updateMany({
-            where: { id: im.id, status: "PAWNED" },
+            where: { id: im.id, tenantId: actor.tenantId, status: "PAWNED" },
             data: { status: "IN_STOCK" },
           });
           if (r.count !== 1) continue;
@@ -57,7 +57,7 @@ async function handlePATCH(
           await tx.stockItem.upsert({
             where: { productId_branchId: { productId: im.productId, branchId: im.branchId } },
             update: { quantity: { increment: 1 } },
-            create: { productId: im.productId, branchId: im.branchId, quantity: 1 },
+            create: { tenantId: actor.tenantId, productId: im.productId, branchId: im.branchId, quantity: 1 },
           });
         }
         if (moved === 0) {
@@ -89,7 +89,7 @@ async function handlePATCH(
         },
       });
 
-      const updated = await tx.tradeInContract.findFirst({ where: { id } });
+      const updated = await tx.tradeInContract.findFirst({ where: { id, tenantId: actor.tenantId } });
       return { message, updated };
     });
 
