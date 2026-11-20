@@ -6,4 +6,6 @@ export * from "./RichTextBlock";
 export * from "./CtaBlock";
 export * from "./HtmlEmbedBlock";
 export * from "./BusinessHoursBlock";
+export * from "./ContactFormBlock";
+export * from "./QueryLoopBlock";
 export * from "./DynamicBlockRenderer";

@@ -12,6 +12,8 @@ import { RichTextBlock } from "./RichTextBlock";
 import { CtaBlock } from "./CtaBlock";
 import { HtmlEmbedBlock } from "./HtmlEmbedBlock";
 import { BusinessHoursBlock } from "./BusinessHoursBlock";
+import { ContactFormBlock } from "./ContactFormBlock";
+import { QueryLoopBlock } from "./QueryLoopBlock";
 
 /**
  * Normalizes block type string to a standard discriminator
@@ -26,6 +28,10 @@ function normalizeBlockType(typeStr: string | undefined): string {
     return "rich-text";
   if (cleaned.includes("cta")) return "cta";
   if (cleaned.includes("shortcode")) return "shortcode";
+  if (cleaned.includes("contact") || cleaned.includes("form") || cleaned.includes("lead"))
+    return "contact-form";
+  if (cleaned.includes("query") || cleaned.includes("loop"))
+    return "query-loop";
   if (cleaned.includes("html") || cleaned.includes("widget") || cleaned.includes("embed") || cleaned.includes("map"))
     return "html-embed";
   if (cleaned.includes("hour") || cleaned.includes("schedule") || cleaned.includes("time"))
@@ -235,6 +241,41 @@ export function DynamicBlockRenderer({
           />
         );
       }
+
+      case "contact-form":
+        return (
+          <ContactFormBlock
+            id={block.id}
+            title={mergedData.title}
+            subtitle={mergedData.subtitle}
+            badge={mergedData.badge}
+            buttonText={mergedData.buttonText}
+            branches={mergedData.branches}
+            themeColor={themeColor}
+            className={blockClassName}
+            data={block.data || block.metadata}
+          />
+        );
+
+      case "query-loop":
+        return (
+          <QueryLoopBlock
+            id={block.id}
+            title={mergedData.title}
+            subtitle={mergedData.subtitle}
+            category={mergedData.category}
+            tag={mergedData.tag}
+            perPage={mergedData.perPage}
+            columns={mergedData.columns}
+            layout={mergedData.layout}
+            showExcerpt={mergedData.showExcerpt}
+            themeColor={themeColor}
+            className={blockClassName}
+            shopSlug={effectiveShopSlug}
+            customPages={mergedData.customPages}
+            data={block.data || block.metadata}
+          />
+        );
 
       default:
         if (process.env.NODE_ENV === "development") {

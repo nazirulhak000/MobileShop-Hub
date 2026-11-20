@@ -132,6 +132,37 @@ export interface BusinessHoursBlockProps {
   data?: Record<string, any>;
 }
 
+export interface ContactFormBlockProps {
+  id?: string;
+  title?: string;
+  subtitle?: string;
+  badge?: string;
+  successMessage?: string;
+  buttonText?: string;
+  branches?: string[];
+  themeColor?: StorefrontThemeColor;
+  className?: string;
+  data?: Record<string, any>;
+  onSubmitSuccess?: (data: any) => void;
+}
+
+export interface QueryLoopBlockProps {
+  id?: string;
+  title?: string;
+  subtitle?: string;
+  category?: string;
+  tag?: string;
+  perPage?: number;
+  columns?: 2 | 3 | 4 | number;
+  layout?: "grid" | "list";
+  showExcerpt?: boolean;
+  themeColor?: StorefrontThemeColor;
+  className?: string;
+  shopSlug?: string;
+  customPages?: any[];
+  data?: Record<string, any>;
+}
+
 export interface DynamicBlockRendererProps {
   block: CustomBlock;
   themeColor?: StorefrontThemeColor;

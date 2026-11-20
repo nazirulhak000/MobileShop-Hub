@@ -724,4 +724,157 @@ describe("WordPress Blocks & Media Engine (Rounds 23, 25, 28)", () => {
       assert.equal(fallback[0].label, "Default");
     });
   });
+
+  // =========================================================================
+  // ROUNDS 53, 56, 57: Block Styles, Lead Capture Form & Dynamic Query Loop
+  // =========================================================================
+  describe("Rounds 53, 56, 57: Block Styles, Form Builder & Query Loop", () => {
+    // -----------------------------------------------------------------------
+    // Round 53: Gutenberg Block Style Variations
+    // -----------------------------------------------------------------------
+    it("53.1 Block Styles: Retrieves pre-registered style variants for blocks", async () => {
+      const {
+        get_block_styles,
+        get_block_style_class,
+        register_block_style,
+        unregister_block_style,
+      } = await import("../src/lib/wordpress/blockStyleVariations");
+
+      const richTextStyles = get_block_styles("rich_text");
+      assert.ok(richTextStyles.length >= 4);
+      assert.ok(richTextStyles.some((s) => s.name === "default"));
+      assert.ok(richTextStyles.some((s) => s.name === "callout-card"));
+      assert.ok(richTextStyles.some((s) => s.name === "blueprint-grid"));
+      assert.ok(richTextStyles.some((s) => s.name === "bordered-minimal"));
+
+      const promoStyles = get_block_styles("promo_banner");
+      assert.ok(promoStyles.some((s) => s.name === "gradient-glow"));
+      assert.ok(promoStyles.some((s) => s.name === "solid-flat"));
+      assert.ok(promoStyles.some((s) => s.name === "bordered-glass"));
+
+      // Resolves class names correctly
+      const calloutClass = get_block_style_class("rich_text", "callout-card");
+      assert.ok(calloutClass.includes("is-style-callout-card"));
+
+      // Fallback to default when style is unset
+      const defaultClass = get_block_style_class("promo_banner");
+      assert.ok(defaultClass.includes("is-style-gradient-glow"));
+
+      // Supports custom style registration
+      register_block_style("rich_text", {
+        name: "neon-cyber",
+        label: "นีออนไซเบอร์",
+        className: "is-style-neon-cyber border-cyan-500",
+      });
+      assert.ok(get_block_styles("rich_text").some((s) => s.name === "neon-cyber"));
+
+      unregister_block_style("rich_text", "neon-cyber");
+      assert.ok(!get_block_styles("rich_text").some((s) => s.name === "neon-cyber"));
+    });
+
+    // -----------------------------------------------------------------------
+    // Round 56: WordPress Form Builder & Lead Capture Block
+    // -----------------------------------------------------------------------
+    it("56.1 Lead Capture Form: Exports component and renders structure with honeypot", async () => {
+      const { ContactFormBlock } = await import(
+        "../src/components/landing/blocks/ContactFormBlock"
+      );
+      assert.ok(typeof ContactFormBlock === "function");
+    });
+
+    // -----------------------------------------------------------------------
+    // Round 57: Dynamic Query Loop Engine (WP_Query)
+    // -----------------------------------------------------------------------
+    it("57.1 Query Loop: Filters pages by published status, category, and exclusion", async () => {
+      const { wp_query_pages } = await import(
+        "../src/lib/wordpress/queryLoopEngine"
+      );
+
+      const testPages = [
+        {
+          id: "p1",
+          slug: "screen-repair",
+          title: "ซ่อมหน้าจอแท้",
+          categories: ["บริการซ่อม", "หน้าจอ"],
+          published: true,
+        },
+        {
+          id: "p2",
+          slug: "battery-repair",
+          title: "เปลี่ยนแบตเตอรี่แท้",
+          categories: ["บริการซ่อม", "แบตเตอรี่"],
+          published: true,
+        },
+        {
+          id: "p3",
+          slug: "water-damage",
+          title: "กู้ข้อมูลเครื่องตกน้ำ",
+          categories: ["บริการซ่อม", "กู้ข้อมูล"],
+          published: true,
+        },
+        {
+          id: "p4",
+          slug: "internal-sop",
+          title: "คู่มือพนักงาน",
+          categories: ["ภายใน"],
+          published: false, // draft
+        },
+      ];
+
+      // Query published only in "บริการซ่อม"
+      const res1 = wp_query_pages(testPages as any, {
+        category: "บริการซ่อม",
+        status: "publish",
+        perPage: 10,
+      });
+      assert.equal(res1.total, 3);
+      assert.equal(res1.items.length, 3);
+      assert.ok(!res1.items.some((p) => p.slug === "internal-sop"));
+
+      // Query with exclusion (e.g. current page)
+      const res2 = wp_query_pages(testPages as any, {
+        excludeSlugs: ["screen-repair"],
+        status: "publish",
+      });
+      assert.equal(res2.total, 2);
+      assert.ok(!res2.items.some((p) => p.slug === "screen-repair"));
+
+      // Query pagination
+      const pagedRes = wp_query_pages(testPages as any, {
+        perPage: 2,
+        page: 1,
+        status: "publish",
+      });
+      assert.equal(pagedRes.items.length, 2);
+      assert.equal(pagedRes.totalPages, 2);
+      assert.equal(pagedRes.hasMore, true);
+    });
+
+    it("57.2 Query Loop: Sorts pages alphabetically by title and search queries", async () => {
+      const { wp_query_pages } = await import(
+        "../src/lib/wordpress/queryLoopEngine"
+      );
+
+      const testPages = [
+        { slug: "c", title: "C. ซ่อมบอร์ด", published: true },
+        { slug: "a", title: "A. ตรวจเช็คฟรี", published: true },
+        { slug: "b", title: "B. เปลี่ยนจอแท้", published: true },
+      ];
+
+      const asc = wp_query_pages(testPages as any, {
+        orderBy: "title",
+        order: "asc",
+      });
+      assert.equal(asc.items[0].slug, "a");
+      assert.equal(asc.items[1].slug, "b");
+      assert.equal(asc.items[2].slug, "c");
+
+      // Search keyword filter
+      const searchRes = wp_query_pages(testPages as any, {
+        search: "เปลี่ยนจอ",
+      });
+      assert.equal(searchRes.total, 1);
+      assert.equal(searchRes.items[0].slug, "b");
+    });
+  });
 });

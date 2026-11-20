@@ -161,7 +161,7 @@ async function handlePATCH(
       if (technicianId) {
         if (typeof technicianId !== "string") throw new AccessError(400, "ข้อมูลช่างไม่ถูกต้อง");
         const assignee = await prisma.user.findFirst({
-          where: { id: technicianId, isActive: true },
+          where: { id: technicianId, tenantId: actor.tenantId, isActive: true },
           select: { id: true, role: true },
         });
         if (!assignee || !ASSIGNABLE_ROLES.includes(assignee.role)) {

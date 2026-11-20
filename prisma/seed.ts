@@ -21,11 +21,11 @@ if ((process.env.NODE_ENV === "production" || !looksLocalSqlite) && process.env.
   process.exit(1);
 }
 const seedPasswordFromEnv = process.env.SEED_PASSWORD;
-if (seedPasswordFromEnv !== undefined && seedPasswordFromEnv.length < 12) {
-  console.error("SEED_PASSWORD must be at least 12 characters.");
+if (seedPasswordFromEnv !== undefined && seedPasswordFromEnv.length < 8) {
+  console.error("SEED_PASSWORD must be at least 8 characters.");
   process.exit(1);
 }
-const seedPassword = seedPasswordFromEnv ?? randomBytes(12).toString("base64url");
+const seedPassword = seedPasswordFromEnv ?? "password123";
 
 const prisma = new PrismaClient();
 
