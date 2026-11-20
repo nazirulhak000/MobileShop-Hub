@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import Link from "next/link";
 import {
   UserCheck,
   ShieldCheck,
@@ -9,7 +8,6 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
-  UserX,
   Phone,
   RefreshCw,
   Sparkles,
@@ -17,13 +15,15 @@ import {
   Unlink,
   Check,
   Clock,
-  ShieldAlert,
-  ArrowRight,
   UserCheck2,
+  Share2,
+  Copy,
+  LogOut,
+  Ban,
+  Activity,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { cn, formatDateThai } from "@/lib/utils";
 
@@ -33,6 +33,8 @@ interface Account {
   displayName: string;
   status?: string;
   createdAt: string;
+  lastLoginAt?: string | null;
+  activeSessionsCount?: number;
 }
 
 interface LinkRecord {
@@ -51,10 +53,20 @@ interface CustomerRecord {
   nationalId?: string | null;
 }
 
+interface RepairJobRecord {
+  id: string;
+  customerId: string;
+  trackingCode: string;
+  deviceBrand: string;
+  deviceModel: string;
+  status: string;
+}
+
 interface Data {
   accounts: Account[];
   links: LinkRecord[];
   customers: CustomerRecord[];
+  repairJobs?: RepairJobRecord[];
 }
 
 const PRESET_EVIDENCES = [
@@ -67,14 +79,26 @@ const PRESET_EVIDENCES = [
 export default function CustomerAccessPage() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterTab, setFilterTab] = useState<"PENDING" | "LINKED" | "ALL">("PENDING");
+  const [filterTab, setFilterTab] = useState<"PENDING" | "LINKED" | "SUSPENDED" | "ALL">("PENDING");
 
   // Approval Modal State
   const [approvalModalAccount, setApprovalModalAccount] = useState<Account | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [evidenceNote, setEvidenceNote] = useState<string>("");
+
+  // 1-Click Tracking Link Modal State
+  const [trackingModalData, setTrackingModalData] = useState<{
+    accountName: string;
+    trackingCode: string;
+    device: string;
+    token: string;
+    fullUrl: string;
+  } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedMessage, setCopiedMessage] = useState(false);
 
   async function load() {
     setBusy(true);
@@ -97,6 +121,7 @@ export default function CustomerAccessPage() {
   async function mutate(body: unknown, method: string) {
     setBusy(true);
     setError("");
+    setSuccessMsg("");
     try {
       const response = await fetch("/api/customer-access", {
         method,
@@ -109,8 +134,10 @@ export default function CustomerAccessPage() {
       setSelectedCustomerId("");
       setEvidenceNote("");
       await load();
+      return result;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "ทำรายการไม่สำเร็จ");
+      throw failure;
     } finally {
       setBusy(false);
     }
@@ -154,17 +181,114 @@ export default function CustomerAccessPage() {
         evidence: evidenceNote.trim(),
       },
       "POST"
-    );
+    ).then(() => {
+      setSuccessMsg("อนุมัติและเชื่อมต่อบัญชีลูกค้ากับ CRM เรียบร้อยแล้ว");
+    });
+  };
+
+  // Generate 1-Click Tracking Link
+  const handleGenerateTrackingLink = async (account: Account, repairJobId: string, jobInfo: RepairJobRecord) => {
+    try {
+      const result = await mutate(
+        {
+          action: "GENERATE_TRACKING_LINK",
+          repairJobId,
+        },
+        "POST"
+      );
+
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const fullUrl = `${origin}/track/${result.token}`;
+
+      setTrackingModalData({
+        accountName: account.displayName,
+        trackingCode: jobInfo.trackingCode,
+        device: `${jobInfo.deviceBrand} ${jobInfo.deviceModel}`,
+        token: result.token,
+        fullUrl,
+      });
+      setCopiedLink(false);
+      setCopiedMessage(false);
+    } catch {
+      // Error is set by mutate
+    }
+  };
+
+  // Revoke active sessions (Kick Out)
+  const handleRevokeSessions = async (account: Account) => {
+    if (
+      !confirm(
+        `เพิกถอนเซสชันทั้งหมดของ ${account.displayName}? ลูกค้าจะต้องยืนยันตัวตนใหม่เพื่อเข้าใช้งาน`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await mutate(
+        {
+          action: "REVOKE_PORTAL_SESSIONS",
+          accountId: account.id,
+        },
+        "POST"
+      );
+      setSuccessMsg(`เพิกถอน ${res.revokedCount} เซสชันของ ${account.displayName} เรียบร้อยแล้ว`);
+    } catch {
+      // Error handled in mutate
+    }
+  };
+
+  // Toggle Suspend Status
+  const handleToggleStatus = async (account: Account) => {
+    const isSuspended = account.status === "SUSPENDED";
+    const nextStatus = isSuspended ? "ACTIVE" : "SUSPENDED";
+    const promptMsg = isSuspended
+      ? `ปลดระงับบัญชีของ ${account.displayName}? ลูกค้าจะสามารถเข้าใช้งานพอร์ทัลได้อีกครั้ง`
+      : `ระงับการเข้าถึงของ ${account.displayName}? ระบบจะตัดการเชื่อมต่อและเพิกถอนเซสชันทั้งหมดทันที`;
+
+    if (!confirm(promptMsg)) return;
+
+    try {
+      await mutate(
+        {
+          action: "TOGGLE_STATUS",
+          accountId: account.id,
+          status: nextStatus,
+        },
+        "POST"
+      );
+      setSuccessMsg(
+        isSuspended
+          ? `เปิดใช้งานบัญชี ${account.displayName} เรียบร้อยแล้ว`
+          : `ระงับบัญชี ${account.displayName} เรียบร้อยแล้ว`
+      );
+    } catch {
+      // Error handled in mutate
+    }
   };
 
   const accounts = data?.accounts || [];
   const links = data?.links || [];
   const customers = data?.customers || [];
+  const repairJobs = data?.repairJobs || [];
 
-  const pendingAccounts = accounts.filter((a) => !links.some((l) => l.accountId === a.id));
-  const linkedAccounts = accounts.filter((a) => links.some((l) => l.accountId === a.id));
+  const pendingAccounts = accounts.filter(
+    (a) => a.status !== "SUSPENDED" && !links.some((l) => l.accountId === a.id)
+  );
+  const linkedAccounts = accounts.filter(
+    (a) => a.status !== "SUSPENDED" && links.some((l) => l.accountId === a.id)
+  );
+  const suspendedAccounts = accounts.filter((a) => a.status === "SUSPENDED");
 
-  const filteredAccounts = (filterTab === "PENDING" ? pendingAccounts : filterTab === "LINKED" ? linkedAccounts : accounts).filter((account) => {
+  const filteredAccounts = (
+    filterTab === "PENDING"
+      ? pendingAccounts
+      : filterTab === "LINKED"
+      ? linkedAccounts
+      : filterTab === "SUSPENDED"
+      ? suspendedAccounts
+      : accounts
+  ).filter((account) => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     return account.displayName.toLowerCase().includes(q) || account.phone.includes(q);
@@ -178,14 +302,14 @@ export default function CustomerAccessPage() {
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-teal-50 text-teal-800 border border-teal-200">
               <ShieldCheck className="h-3.5 w-3.5 text-teal-600" />
-              การจัดการสิทธิ์เข้าถึงข้อมูลประวัติ (KYC & Account Linking)
+              การจัดการสิทธิ์เข้าถึงพอร์ทัลลูกค้า & Support Control
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 mt-2">
-            เชื่อมบัญชีลูกค้ากับประวัติ CRM เดิม
+            ควบคุมสิทธิ์บัญชีลูกค้า (Customer Access Control)
           </h1>
           <p className="text-sm text-slate-500 mt-1 max-w-3xl leading-relaxed">
-            ระบบตรวจสอบสิทธิ์ความเป็นเจ้าของก่อนอนุญาตให้เข้าดูประวัติงานซ่อมและใบเสร็จย้อนหลัง ป้องกันข้อมูลรั่วไหลเมื่อมีการเปลี่ยนมือเจ้าของเบอร์โทรศัพท์
+            ตรวจสอบสถานะการเข้าใช้งาน เวลาล็อกอินล่าสุด เพิกถอนสิทธิ์ หรือสร้าง 1-Click Tracking Link ให้บริการช่วยเหลือลูกค้าได้ทันที
           </p>
         </div>
 
@@ -207,8 +331,23 @@ export default function CustomerAccessPage() {
         </div>
       )}
 
+      {successMsg && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+          <button
+            onClick={() => setSuccessMsg("")}
+            className="text-xs text-emerald-700 hover:underline cursor-pointer"
+          >
+            ปิด
+          </button>
+        </div>
+      )}
+
       {/* 2. Overview Stats & Tabs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card
           onClick={() => setFilterTab("PENDING")}
           className={`cursor-pointer transition-all border rounded-2xl ${
@@ -219,7 +358,7 @@ export default function CustomerAccessPage() {
         >
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-amber-700">รอดำเนินการตรวจสอบ (Pending)</p>
+              <p className="text-xs font-semibold text-amber-700">รอดำเนินการ (Pending)</p>
               <p className="text-2xl font-black text-amber-900 mt-1 font-mono">
                 {pendingAccounts.length} <span className="text-xs font-normal text-slate-500">บัญชี</span>
               </p>
@@ -240,13 +379,34 @@ export default function CustomerAccessPage() {
         >
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-emerald-700">เชื่อมต่อสำเร็จแล้ว (Active)</p>
+              <p className="text-xs font-semibold text-emerald-700">เชื่อมต่อสำเร็จ (Active)</p>
               <p className="text-2xl font-black text-emerald-900 mt-1 font-mono">
                 {linkedAccounts.length} <span className="text-xs font-normal text-slate-500">บัญชี</span>
               </p>
             </div>
             <div className="h-10 w-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
               <CheckCircle2 className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card
+          onClick={() => setFilterTab("SUSPENDED")}
+          className={`cursor-pointer transition-all border rounded-2xl ${
+            filterTab === "SUSPENDED"
+              ? "border-rose-400 bg-rose-50/40 shadow-xs"
+              : "border-slate-200/90 bg-white hover:border-slate-300"
+          }`}
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-rose-700">ระงับการเข้าถึง (Suspended)</p>
+              <p className="text-2xl font-black text-rose-900 mt-1 font-mono">
+                {suspendedAccounts.length} <span className="text-xs font-normal text-slate-500">บัญชี</span>
+              </p>
+            </div>
+            <div className="h-10 w-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+              <Ban className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
@@ -261,7 +421,7 @@ export default function CustomerAccessPage() {
         >
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-slate-500">บัญชีออนไลน์ทั้งหมด</p>
+              <p className="text-xs font-semibold text-slate-500">บัญชีทั้งหมด</p>
               <p className="text-2xl font-black text-slate-900 mt-1 font-mono">
                 {accounts.length} <span className="text-xs font-normal text-slate-500">บัญชี</span>
               </p>
@@ -273,7 +433,7 @@ export default function CustomerAccessPage() {
         </Card>
       </div>
 
-      {/* 3. Search Bar */}
+      {/* 3. Search Bar & Filters */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs">
         <div className="relative w-full sm:w-80">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -286,11 +446,11 @@ export default function CustomerAccessPage() {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          {["PENDING", "LINKED", "ALL"].map((tab) => (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(["PENDING", "LINKED", "SUSPENDED", "ALL"] as const).map((tab) => (
             <button
               key={tab}
-              onClick={() => setFilterTab(tab as any)}
+              onClick={() => setFilterTab(tab)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 filterTab === tab
                   ? "bg-slate-900 text-white shadow-xs"
@@ -301,13 +461,15 @@ export default function CustomerAccessPage() {
                 ? `รอดำเนินการ (${pendingAccounts.length})`
                 : tab === "LINKED"
                 ? `เชื่อมต่อแล้ว (${linkedAccounts.length})`
+                : tab === "SUSPENDED"
+                ? `ระงับสิทธิ์ (${suspendedAccounts.length})`
                 : `ทั้งหมด (${accounts.length})`}
             </button>
           ))}
         </div>
       </div>
 
-      {/* 4. Accounts Queue List */}
+      {/* 4. Accounts List */}
       <div className="space-y-4">
         {filteredAccounts.map((account) => {
           const link = links.find((l) => l.accountId === account.id);
@@ -319,24 +481,55 @@ export default function CustomerAccessPage() {
             ? customers.find((c) => c.phone.replace(/[\s-]/g, "") === cleanPhone)
             : null;
 
+          // Find repair jobs related to this customer for 1-click tracking link
+          const relatedJobs = repairJobs.filter((job) => {
+            if (customer && job.customerId === customer.id) return true;
+            if (suggestedCustomer && job.customerId === suggestedCustomer.id) return true;
+            return false;
+          });
+
+          const isSuspended = account.status === "SUSPENDED";
+          const hasActiveSessions = (account.activeSessionsCount || 0) > 0;
+
           return (
             <Card
               key={account.id}
               className={`border transition-all bg-white rounded-2xl shadow-2xs hover:shadow-xs ${
-                link ? "border-slate-200/90" : "border-amber-200/80"
+                isSuspended
+                  ? "border-rose-200/80 bg-rose-50/20"
+                  : link
+                  ? "border-slate-200/90"
+                  : "border-amber-200/80"
               }`}
             >
               <CardContent className="p-5">
+                {/* Header row */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div className="flex items-center gap-3.5">
                     <div
-                      className={`h-11 w-11 rounded-2xl flex items-center justify-center font-bold text-base shrink-0 border ${
-                        link
+                      className={`relative h-11 w-11 rounded-2xl flex items-center justify-center font-bold text-base shrink-0 border ${
+                        isSuspended
+                          ? "bg-rose-50 text-rose-700 border-rose-200"
+                          : link
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : "bg-amber-50 text-amber-700 border-amber-200"
                       }`}
                     >
-                      {link ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
+                      {isSuspended ? (
+                        <Ban className="h-5 w-5" />
+                      ) : link ? (
+                        <CheckCircle2 className="h-5 w-5" />
+                      ) : (
+                        <Clock className="h-5 w-5" />
+                      )}
+
+                      {/* Online Pulse Indicator */}
+                      {hasActiveSessions && !isSuspended && (
+                        <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white"></span>
+                        </span>
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -350,26 +543,51 @@ export default function CustomerAccessPage() {
                           ID: {account.id.slice(-6)}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        ลงทะเบียนออนไลน์เมื่อ: {formatDateThai(account.createdAt)}
+                      <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 flex-wrap">
+                        <span>ลงทะเบียน: {formatDateThai(account.createdAt)}</span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Activity className="h-3 w-3 text-slate-400" />
+                          <span>
+                            เข้าสู่ระบบล่าสุด:{" "}
+                            {account.lastLoginAt ? (
+                              <strong className="text-slate-700">{formatDateThai(account.lastLoginAt)}</strong>
+                            ) : (
+                              <span className="text-slate-400">ยังไม่เคยล็อกอิน</span>
+                            )}
+                          </span>
+                        </span>
+                        {hasActiveSessions && (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[11px]">
+                            {account.activeSessionsCount} เซสชันออนไลน์
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {link ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 self-start md:self-center">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>สถานะ: ACTIVE (เชื่อมต่อแล้ว)</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 self-start md:self-center">
-                      <Clock className="h-3.5 w-3.5 text-amber-600" />
-                      <span>สถานะ: PENDING (รออนุมัติ)</span>
-                    </span>
-                  )}
+                  {/* Status Badge */}
+                  <div className="self-start md:self-center">
+                    {isSuspended ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
+                        <Ban className="h-3.5 w-3.5 text-rose-600" />
+                        <span>สถานะ: SUSPENDED (ระงับสิทธิ์)</span>
+                      </span>
+                    ) : link ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>สถานะ: ACTIVE (เชื่อมต่อแล้ว)</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                        <Clock className="h-3.5 w-3.5 text-amber-600" />
+                        <span>สถานะ: PENDING (รออนุมัติ)</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {/* Body Content */}
+                {/* Middle details row */}
                 {link ? (
                   <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/50 border border-emerald-100 p-4 rounded-xl">
                     <div className="space-y-1">
@@ -385,23 +603,25 @@ export default function CustomerAccessPage() {
                       )}
                     </div>
 
-                    <Button
-                      disabled={busy}
-                      variant="outline"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `ถอนการเชื่อมสิทธิ์ของ ${account.displayName}? (ระบบจะเพิกถอน Session การล็อกอินของลูกค้ารายนี้ทันทีเพื่อความปลอดภัย)`
-                          )
-                        ) {
-                          void mutate({ accountId: account.id }, "DELETE");
-                        }
-                      }}
-                      className="text-xs font-bold text-rose-700 hover:bg-rose-50 border-rose-200 h-9 px-3.5 rounded-xl gap-1.5 cursor-pointer shrink-0"
-                    >
-                      <Unlink className="h-3.5 w-3.5" />
-                      <span>ถอนสิทธิ์การเชื่อมโยง</span>
-                    </Button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button
+                        disabled={busy}
+                        variant="outline"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `ถอนการเชื่อมสิทธิ์ของ ${account.displayName}? (ระบบจะเพิกถอน Session การล็อกอินของลูกค้ารายนี้ทันทีเพื่อความปลอดภัย)`
+                            )
+                          ) {
+                            void mutate({ accountId: account.id }, "DELETE");
+                          }
+                        }}
+                        className="text-xs font-bold text-rose-700 hover:bg-rose-50 border-rose-200 h-9 px-3 rounded-xl gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <Unlink className="h-3.5 w-3.5" />
+                        <span>ถอนสิทธิ์ CRM</span>
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50/40 border border-amber-100 p-4 rounded-xl">
@@ -430,6 +650,63 @@ export default function CustomerAccessPage() {
                     </Button>
                   </div>
                 )}
+
+                {/* Bottom Staff Control Bar */}
+                <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* 1-Click Tracking Link Action */}
+                    {relatedJobs.length > 0 ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-semibold text-slate-500">งานซ่อม:</span>
+                        {relatedJobs.slice(0, 2).map((job) => (
+                          <Button
+                            key={job.id}
+                            disabled={busy}
+                            variant="outline"
+                            onClick={() => handleGenerateTrackingLink(account, job.id, job)}
+                            className="h-8 px-2.5 text-xs font-semibold text-teal-800 hover:bg-teal-50 border-teal-200 rounded-lg gap-1.5 cursor-pointer"
+                          >
+                            <Link2 className="h-3.5 w-3.5 text-teal-600" />
+                            <span>1-Click Link ({job.trackingCode})</span>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">ไม่มีงานซ่อมค้าง</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {/* Revoke Active Sessions */}
+                    {hasActiveSessions && (
+                      <Button
+                        disabled={busy}
+                        variant="outline"
+                        onClick={() => handleRevokeSessions(account)}
+                        className="h-8 px-2.5 text-xs font-semibold text-amber-800 hover:bg-amber-50 border-amber-200 rounded-lg gap-1.5 cursor-pointer"
+                        title="บังคับให้ออกจากระบบทันที"
+                      >
+                        <LogOut className="h-3.5 w-3.5 text-amber-600" />
+                        <span>เพิกถอนเซสชัน (Kick Out)</span>
+                      </Button>
+                    )}
+
+                    {/* Suspend / Activate Toggle */}
+                    <Button
+                      disabled={busy}
+                      variant="outline"
+                      onClick={() => handleToggleStatus(account)}
+                      className={`h-8 px-2.5 text-xs font-semibold rounded-lg gap-1.5 cursor-pointer ${
+                        isSuspended
+                          ? "text-emerald-800 hover:bg-emerald-50 border-emerald-200"
+                          : "text-rose-800 hover:bg-rose-50 border-rose-200"
+                      }`}
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                      <span>{isSuspended ? "ปลดระงับการเข้าถึง" : "ระงับสิทธิ์"}</span>
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           );
@@ -533,6 +810,84 @@ export default function CustomerAccessPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 6. 1-Click Tracking Link Support Modal */}
+      <Dialog open={!!trackingModalData} onOpenChange={(open) => !open && setTrackingModalData(null)}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900 text-lg">
+              <Link2 className="h-5 w-5 text-teal-600" />
+              <span>สร้าง 1-Click Tracking Link สำเร็จ</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              สำหรับส่งให้ลูกค้า: {trackingModalData?.accountName} ({trackingModalData?.device})
+            </DialogDescription>
+          </DialogHeader>
+
+          {trackingModalData && (
+            <div className="space-y-4 py-2">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span className="font-semibold">ลิงก์ติดตามงานซ่อมฉุกเฉิน (Direct Link)</span>
+                  <span className="font-mono text-teal-800 font-bold">{trackingModalData.trackingCode}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={trackingModalData.fullUrl}
+                    className="w-full text-xs font-mono bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 select-all"
+                  />
+                  <Button
+                    onClick={() => {
+                      navigator.clipboard.writeText(trackingModalData.fullUrl);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2500);
+                    }}
+                    className="h-9 px-3 gap-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold shrink-0 cursor-pointer"
+                  >
+                    {copiedLink ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedLink ? "คัดลอกแล้ว" : "คัดลอก"}</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Ready-to-send SMS / LINE Template */}
+              <div className="p-3.5 rounded-xl bg-teal-50/50 border border-teal-100 space-y-2">
+                <span className="text-xs font-bold text-teal-900">ข้อความพร้อมส่งให้ลูกค้า (LINE / SMS):</span>
+                <p className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-teal-200/60 leading-relaxed font-sans">
+                  สวัสดีครับ คุณ{trackingModalData.accountName} ทางร้านได้อัปเดตสถานะงานซ่อม {trackingModalData.device} (รหัส {trackingModalData.trackingCode}) ท่านสามารถกดเปิดดูความคืบหน้าได้ทันทีที่: {trackingModalData.fullUrl}
+                </p>
+                <Button
+                  onClick={() => {
+                    const message = `สวัสดีครับ คุณ${trackingModalData.accountName} ทางร้านได้อัปเดตสถานะงานซ่อม ${trackingModalData.device} (รหัส ${trackingModalData.trackingCode}) ท่านสามารถกดเปิดดูความคืบหน้าได้ทันทีที่: ${trackingModalData.fullUrl}`;
+                    navigator.clipboard.writeText(message);
+                    setCopiedMessage(true);
+                    setTimeout(() => setCopiedMessage(false), 2500);
+                  }}
+                  variant="outline"
+                  className="h-8 px-3 text-xs font-semibold text-teal-800 border-teal-200 hover:bg-teal-100/60 rounded-lg gap-1.5 cursor-pointer"
+                >
+                  {copiedMessage ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Share2 className="h-3.5 w-3.5" />}
+                  <span>{copiedMessage ? "คัดลอกข้อความแล้ว" : "คัดลอกข้อความพร้อมส่ง"}</span>
+                </Button>
+              </div>
+
+              <div className="text-[11px] text-slate-400">
+                * ลิงก์นี้สามารถเปิดดูสถานะงานซ่อมได้โดยตรงเป็นเวลา 90 วัน โดยไม่ต้องเข้าสู่ระบบ
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  onClick={() => setTrackingModalData(null)}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs"
+                >
+                  เรียบร้อย
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

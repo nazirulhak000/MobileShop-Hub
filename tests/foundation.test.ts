@@ -4,7 +4,7 @@ import { db } from "../src/lib/db";
 import { prisma } from "../src/lib/prisma";
 import { staffStorage, StaffPrincipal } from "../src/lib/staff-context";
 import { mutateBooking } from "../src/lib/bookings";
-import { requestOtp, verifyOtp, devOtpEnabled } from "../src/lib/customer-auth";
+import { requestOtp, verifyOtp, verifyCustomerWithTicketProof, devOtpEnabled } from "../src/lib/customer-auth";
 import { calculateVAT } from "../src/lib/tax";
 import { bangkokYYYYMM } from "../src/lib/staff-http";
 import { generateNextTrackingCode, getRepairJobs, getRepairJobById } from "../src/lib/repairs";
@@ -2551,4 +2551,153 @@ test("Round 16: Product Inventory, Serialized IMEI Lifecycle, Accessories & Warr
       assert.equal(tenantAClaimsInB.length, 0);
     });
   });
+});
+
+test("Round 17: Customer Access & Portal Auth - Hybrid Dual-Channel Auth, Ticket Proof, Fail-Closed Security & Staff Control", async () => {
+  // 1. Fail-closed: non-existent customer in tenant throws 404
+  await assert.rejects(
+    verifyCustomerWithTicketProof("test-a", "0890009988", "1234", "Unknown User"),
+    (err: any) => err.status === 404 && err.message.includes("ไม่พบข้อมูลลูกค้า")
+  );
+
+  // 2. Setup verified customer & repair job in Tenant A
+  const testPhone = "0897654321";
+  const customerA = await db.customer.create({
+    data: {
+      tenantId: "test-a",
+      name: "คุณสมศักดิ์ ทดสอบ",
+      phone: testPhone,
+    },
+  });
+
+  const jobA = await db.repairJob.create({
+    data: {
+      tenantId: "test-a",
+      branchId: ownBranch,
+      customerId: customerA.id,
+      trackingCode: "REP-202611-7788",
+      serialIMEI: "354812098877665",
+      deviceBrand: "Apple",
+      deviceModel: "iPhone 15 Pro",
+      issueDescription: "จอแตก เปลี่ยนจอแท้",
+      status: "REPAIRING",
+    },
+  });
+
+  // 3. Ticket Proof Failure: incorrect proof throws 401
+  await assert.rejects(
+    verifyCustomerWithTicketProof("test-a", testPhone, "0000", "คุณสมศักดิ์"),
+    (err: any) => err.status === 401 && err.message.includes("ไม่ตรงกับข้อมูลในระบบ")
+  );
+
+  // 4. Ticket Proof Success: last 4 digits of trackingCode
+  const accountByTracking = await verifyCustomerWithTicketProof("test-a", testPhone, "7788", "คุณสมศักดิ์");
+  assert.ok(accountByTracking.id);
+  assert.equal(accountByTracking.status, "ACTIVE");
+
+  // Verify link was created with VERIFIED_TICKET_PROOF
+  const linkByTracking = await db.customerAccountLink.findUnique({
+    where: { accountId: accountByTracking.id },
+  });
+  assert.ok(linkByTracking);
+  assert.equal(linkByTracking.customerId, customerA.id);
+  assert.equal(linkByTracking.evidence, "VERIFIED_TICKET_PROOF");
+
+  // 5. Ticket Proof Success: last 4 digits of IMEI with whitespace & hyphens
+  const accountByIMEI = await verifyCustomerWithTicketProof("test-a", testPhone, " 76-65 ", "คุณสมศักดิ์");
+  assert.equal(accountByIMEI.id, accountByTracking.id);
+
+  // 6. Ticket Proof Success: full tracking code with case insensitivity
+  const accountByFullCode = await verifyCustomerWithTicketProof("test-a", testPhone, "rep-202611-7788", "คุณสมศักดิ์");
+  assert.equal(accountByFullCode.id, accountByTracking.id);
+
+  // 7. Multi-Tenant Isolation: Tenant B cannot authenticate using Tenant A's customer proof
+  await assert.rejects(
+    verifyCustomerWithTicketProof("test-b", testPhone, "7788", "Attacker"),
+    (err: any) => err.status === 404
+  );
+
+  // 8. Security: Suspended account fails verification with 403
+  await db.customerAccount.update({
+    where: { id: accountByTracking.id },
+    data: { status: "SUSPENDED" },
+  });
+
+  await assert.rejects(
+    verifyCustomerWithTicketProof("test-a", testPhone, "7788", "คุณสมศักดิ์"),
+    (err: any) => err.status === 403 && err.message.includes("ระงับ")
+  );
+
+  // Restore active status
+  await db.customerAccount.update({
+    where: { id: accountByTracking.id },
+    data: { status: "ACTIVE" },
+  });
+
+  // 9. Session Management & Revocation
+  const sessionToken = "test_customer_session_token_1234567890abcdef";
+  const { createHash } = await import("node:crypto");
+  const hashedToken = createHash("sha256").update(sessionToken).digest("hex");
+  const expiresAt = new Date(Date.now() + 7 * 86_400_000);
+
+  const createdSession = await db.customerSession.create({
+    data: {
+      tenantId: "test-a",
+      accountId: accountByTracking.id,
+      tokenHash: hashedToken,
+      expiresAt,
+    },
+  });
+  assert.ok(createdSession.id);
+  assert.equal(createdSession.revokedAt, null);
+
+  // Revoke active sessions (Kick Out)
+  const revokeResult = await db.customerSession.updateMany({
+    where: { tenantId: "test-a", accountId: accountByTracking.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  assert.ok(revokeResult.count >= 1);
+
+  const checkRevoked = await db.customerSession.findUnique({
+    where: { id: createdSession.id },
+  });
+  assert.ok(checkRevoked?.revokedAt !== null);
+
+  // 10. Staff 1-Click Tracking Link generation
+  const publicToken = "public_tracking_link_token_sample_hex_string_1234";
+  const hashedPublicToken = createHash("sha256").update(publicToken).digest("hex");
+  const publicExpiresAt = new Date(Date.now() + 90 * 86_400_000);
+
+  const trackingToken = await db.publicTrackingToken.create({
+    data: {
+      tenantId: "test-a",
+      repairJobId: jobA.id,
+      tokenHash: hashedPublicToken,
+      expiresAt: publicExpiresAt,
+    },
+  });
+  assert.ok(trackingToken.id);
+  assert.equal(trackingToken.revokedAt, null);
+
+  // Re-issuing invalidates prior token
+  const now = new Date();
+  await db.$transaction([
+    db.publicTrackingToken.updateMany({
+      where: { tenantId: "test-a", repairJobId: jobA.id, revokedAt: null },
+      data: { revokedAt: now },
+    }),
+    db.publicTrackingToken.create({
+      data: {
+        tenantId: "test-a",
+        repairJobId: jobA.id,
+        tokenHash: createHash("sha256").update("second_token").digest("hex"),
+        expiresAt: publicExpiresAt,
+      },
+    }),
+  ]);
+
+  const priorToken = await db.publicTrackingToken.findUnique({
+    where: { id: trackingToken.id },
+  });
+  assert.ok(priorToken?.revokedAt !== null);
 });
