@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import confetti from "canvas-confetti";
 import {
   ClipboardCheck,
@@ -13,52 +13,84 @@ import {
   ArrowRight,
   TrendingDown,
   TrendingUp,
+  History,
+  Printer,
+  FileSpreadsheet,
+  Check,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { formatTHB } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
+import { formatTHB, formatDateThai } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
 
 export default function StockCountSessionPage() {
-  const { currentBranch } = useApp();
+  const { currentBranch, branches } = useApp();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  // Physical counts entered this session. A product is "counted" only once it has
-  // an entry here (scanned or typed); uncounted products are never adjusted.
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [barcodeInput, setBarcodeInput] = useState("");
   const [applied, setApplied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [sessionCode, setSessionCode] = useState<string | null>(null);
   const [category, setCategory] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "DIFF_ONLY" | "SURPLUS" | "DEFICIT">("ALL");
 
-  const loadProducts = async (): Promise<boolean> => {
-    if (!currentBranch.code) return false;
-    const res = await fetch(`/api/inventory?branch=${encodeURIComponent(currentBranch.code)}`);
+  // History Drawer State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySessions, setHistorySessions] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [viewSessionDetail, setViewSessionDetail] = useState<any | null>(null);
+
+  const loadProducts = useCallback(async (): Promise<boolean> => {
+    if (!currentBranch.code && !currentBranch.id) return false;
+    const bIdent = currentBranch.code || currentBranch.id;
+    const res = await fetch(`/api/inventory?branch=${encodeURIComponent(bIdent)}`);
     const json = await res.json();
     if (res.ok && json.success) {
       setProducts(json.products || []);
       return true;
     }
     return false;
-  };
+  }, [currentBranch.code, currentBranch.id]);
 
-  const fetchStock = async () => {
-    if (!currentBranch.code) return;
+  const fetchStock = useCallback(async () => {
+    if (!currentBranch.code && !currentBranch.id) return;
     try {
-      // Counting starts from zero; system stock is shown separately for comparison.
       if (await loadProducts()) setCounts({});
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentBranch.code, currentBranch.id, loadProducts]);
 
   useEffect(() => {
     fetchStock();
-  }, [currentBranch.code]);
+  }, [fetchStock]);
+
+  const loadHistorySessions = async () => {
+    setHistoryLoading(true);
+    try {
+      const bIdent = currentBranch.code || currentBranch.id;
+      const res = await fetch(`/api/stock-count?branch=${encodeURIComponent(bIdent)}`);
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setHistorySessions(json.sessions || []);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleOpenHistory = () => {
+    setShowHistoryModal(true);
+    loadHistorySessions();
+  };
 
   const handleScanBarcode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,12 +99,13 @@ export default function StockCountSessionPage() {
     const trimmed = barcodeInput.trim();
     const found = products.find(
       (p) =>
-        p.code.toLowerCase() === trimmed.toLowerCase() ||
+        p.code?.toLowerCase() === trimmed.toLowerCase() ||
         p.imeis?.some((i: any) => i.imei === trimmed)
     );
 
     if (found) {
       setApplied(false);
+      setSessionCode(null);
       setCounts((prev) => ({
         ...prev,
         [found.id]: (prev[found.id] || 0) + 1,
@@ -89,83 +122,99 @@ export default function StockCountSessionPage() {
       setCounts({});
       setApplied(false);
       setApplyError(null);
+      setSessionCode(null);
     }
   };
 
   const handleApplyReconciliation = async () => {
     if (submitting) return;
-    if (!confirm("ยืนยันการปรับยอดสต็อกของรายการที่ตรวจนับแล้วให้ตรงตามผลการตรวจนับจริง?")) return;
 
-    const toApply = filtered.filter(
-      (p) => counts[p.id] !== undefined && counts[p.id] !== p.currentStock
-    );
-    const reason = `ปรับยอดตรวจนับจริง (รอบ ${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Bangkok" })})`;
-    const failures: { name: string; error: string }[] = [];
+    const countedItems = products.filter((p) => counts[p.id] !== undefined);
+    const discrepantItems = countedItems.filter((p) => counts[p.id] !== p.currentStock);
+
+    if (discrepantItems.length === 0) {
+      alert("ยอดที่ตรวจนับตรงกับระบบทุกรายการ ไม่มีความจำเป็นต้องปรับปรุงสต็อก");
+      return;
+    }
+
+    if (
+      !confirm(
+        `ยืนยันการปรับปรุงยอดสต็อกตามผลตรวจนับจริง จำนวน ${discrepantItems.length} รายการ ที่พบผลต่าง?`
+      )
+    ) {
+      return;
+    }
+
+    const branchIdent = currentBranch.code || currentBranch.id;
+    const reason = `ปรับยอดตรวจนับจริง ประจำสาขา ${currentBranch.name || branchIdent}`;
 
     setSubmitting(true);
     setApplyError(null);
+
     try {
-      for (const p of toApply) {
-        try {
-          const res = await fetch("/api/inventory/adjust", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              productId: p.id,
-              branchCode: currentBranch.code,
-              type: "SET",
-              quantity: counts[p.id],
-              reason,
-            }),
-          });
-          const json = await res.json().catch(() => null);
-          if (!res.ok || !json?.success) {
-            failures.push({ name: p.name, error: json?.error || `HTTP ${res.status}` });
-          }
-        } catch {
-          failures.push({ name: p.name, error: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้" });
-        }
+      const res = await fetch("/api/stock-count", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          branchCode: branchIdent,
+          counts: countedItems.map((p) => ({
+            productId: p.id,
+            countedQty: counts[p.id],
+            expectedQty: p.currentStock,
+          })),
+          note: reason,
+          autoAdjust: true,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setApplyError(json.error || "เกิดข้อผิดพลาดในการบันทึกผลตรวจนับ");
+        return;
       }
 
-      if (failures.length === 0) {
-        confetti({ particleCount: 100, spread: 70 });
-        setApplied(true);
-        await fetchStock();
-      } else {
-        const ok = toApply.length - failures.length;
-        setApplyError(
-          `ปรับยอดสำเร็จ ${ok} รายการ, ล้มเหลว ${failures.length} รายการ: ` +
-            failures.map((f) => `${f.name} (${f.error})`).join(", ")
-        );
-        // Refresh system stock so successful rows no longer show a variance,
-        // but keep the entered counts so failed rows can be retried.
-        try {
-          await loadProducts();
-        } catch {
-          /* keep previous list */
-        }
-      }
+      confetti({ particleCount: 100, spread: 70 });
+      setApplied(true);
+      setSessionCode(json.session?.sessionCode || null);
+      await fetchStock();
+    } catch {
+      setApplyError("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อบันทึกผลการตรวจนับได้");
     } finally {
       setSubmitting(false);
     }
   };
 
   const filtered = products.filter((p) => {
-    if (category === "ALL") return true;
-    return p.category === category;
+    if (category !== "ALL" && p.category !== category) return false;
+
+    if (statusFilter !== "ALL") {
+      const isCounted = counts[p.id] !== undefined;
+      const counted = isCounted ? counts[p.id] : 0;
+      const diff = isCounted ? counted - p.currentStock : 0;
+
+      if (statusFilter === "DIFF_ONLY" && diff === 0) return false;
+      if (statusFilter === "SURPLUS" && diff <= 0) return false;
+      if (statusFilter === "DEFICIT" && diff >= 0) return false;
+    }
+
+    return true;
   });
 
   // Variance calculations
   let totalVarianceQty = 0;
   let totalCostImpact = 0;
   let discrepantCount = 0;
+  let surplusCount = 0;
+  let deficitCount = 0;
 
   // Only products that were actually counted contribute to variance.
-  filtered.forEach((p) => {
+  products.forEach((p) => {
     if (counts[p.id] === undefined) return;
     const diff = counts[p.id] - p.currentStock;
     if (diff !== 0) {
       discrepantCount++;
+      if (diff > 0) surplusCount++;
+      if (diff < 0) deficitCount++;
       totalVarianceQty += diff;
       totalCostImpact += diff * (p.costPrice ?? 0);
     }
@@ -181,19 +230,32 @@ export default function StockCountSessionPage() {
             <span>ตรวจนับสต็อกจริง & รายงานผลต่าง (Physical Stock Count)</span>
           </h1>
           <p className="text-sm text-slate-500">
-            สแกนบาร์โค้ดนับสินค้าจริง เทียบกับยอดในระบบ และปรับปรุงผลต่างยอดคงคลังอัตโนมัติ
+            สแกนบาร์โค้ดนับสินค้าจริง เทียบกับยอดในระบบ และปรับปรุงผลต่างยอดคงคลังอัตโนมัติพร้อมบันทึก Audit Log
           </p>
         </div>
-        <Button
-          onClick={handleApplyReconciliation}
-          disabled={discrepantCount === 0 || applied || submitting}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs shadow-sm font-semibold"
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          <span>
-            {submitting ? "กำลังบันทึก..." : `บันทึกปรับยอดสต็อกตามจริง (${discrepantCount} รายการ)`}
-          </span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenHistory}
+            className="text-xs h-9 gap-1.5 border-slate-300 text-slate-700"
+          >
+            <History className="w-3.5 h-3.5 text-blue-600" />
+            <span>ประวัติการตรวจนับ</span>
+          </Button>
+          <Button
+            onClick={handleApplyReconciliation}
+            disabled={discrepantCount === 0 || applied || submitting}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 text-xs h-9 shadow-sm font-semibold"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>
+              {submitting
+                ? "กำลังบันทึก..."
+                : `บันทึกปรับยอดตามจริง (${discrepantCount} รายการ)`}
+            </span>
+          </Button>
+        </div>
       </div>
 
       {applyError && (
@@ -202,20 +264,36 @@ export default function StockCountSessionPage() {
           <span>{applyError}</span>
         </div>
       )}
+
       {applied && !applyError && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span>ปรับยอดสต็อกตามผลตรวจนับเรียบร้อยแล้ว</span>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>
+              ปรับยอดสต็อกตามผลตรวจนับเรียบร้อยแล้ว {sessionCode && `(รหัสรอบนับ: ${sessionCode})`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.print()}
+            className="h-7 text-xs bg-white text-emerald-800 border-emerald-300 gap-1"
+          >
+            <Printer className="w-3 h-3" />
+            <span>พิมพ์รายงานสรุป</span>
+          </Button>
         </div>
       )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        <Card className="bg-white border-slate-200">
+        <Card className="bg-white border-slate-200 shadow-xs">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-medium text-slate-500">จำนวนสินค้าที่ตรวจนับ</div>
-              <div className="text-2xl font-bold text-slate-900 mt-0.5">{filtered.length}</div>
+              <div className="text-xs font-medium text-slate-500">จำนวนที่นับแล้ว</div>
+              <div className="text-2xl font-bold text-slate-900 mt-0.5">
+                {Object.keys(counts).length} / {products.length}
+              </div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
               <ClipboardCheck className="w-5 h-5" />
@@ -223,11 +301,18 @@ export default function StockCountSessionPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-white border-slate-200">
+        <Card className="bg-white border-slate-200 shadow-xs">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-medium text-slate-500">รายการที่ยอดไม่ตรง (Diff)</div>
-              <div className="text-2xl font-bold text-amber-600 mt-0.5">{discrepantCount}</div>
+              <div className="text-xs font-medium text-slate-500">ยอดไม่ตรง (Diff)</div>
+              <div className="text-2xl font-bold text-amber-600 mt-0.5 flex items-center gap-2">
+                <span>{discrepantCount}</span>
+                {discrepantCount > 0 && (
+                  <span className="text-[11px] font-normal text-slate-400">
+                    (+{surplusCount} / -{deficitCount})
+                  </span>
+                )}
+              </div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5" />
@@ -235,11 +320,19 @@ export default function StockCountSessionPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-white border-slate-200">
+        <Card className="bg-white border-slate-200 shadow-xs">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <div className="text-xs font-medium text-slate-500">ผลต่างจำนวนรวม (Net Qty)</div>
-              <div className={`text-2xl font-bold mt-0.5 ${totalVarianceQty < 0 ? "text-rose-600" : "text-emerald-700"}`}>
+              <div
+                className={`text-2xl font-bold mt-0.5 ${
+                  totalVarianceQty < 0
+                    ? "text-rose-600"
+                    : totalVarianceQty > 0
+                    ? "text-emerald-700"
+                    : "text-slate-700"
+                }`}
+              >
                 {totalVarianceQty > 0 ? `+${totalVarianceQty}` : totalVarianceQty}
               </div>
             </div>
@@ -249,16 +342,28 @@ export default function StockCountSessionPage() {
           </CardContent>
         </Card>
 
-        <Card className="bg-white border-slate-200">
+        <Card className="bg-white border-slate-200 shadow-xs">
           <CardContent className="p-4 flex items-center justify-between">
             <div>
               <div className="text-xs font-medium text-slate-500">ผลกระทบมูลค่าต้นทุน</div>
-              <div className={`text-2xl font-bold mt-0.5 font-mono ${totalCostImpact < 0 ? "text-rose-600" : "text-emerald-700"}`}>
+              <div
+                className={`text-2xl font-bold mt-0.5 font-mono ${
+                  totalCostImpact < 0
+                    ? "text-rose-600"
+                    : totalCostImpact > 0
+                    ? "text-emerald-700"
+                    : "text-slate-700"
+                }`}
+              >
                 {formatTHB(totalCostImpact)}
               </div>
             </div>
             <div className="h-9 w-9 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-              <TrendingDown className="w-5 h-5" />
+              {totalCostImpact < 0 ? (
+                <TrendingDown className="w-5 h-5" />
+              ) : (
+                <TrendingUp className="w-5 h-5" />
+              )}
             </div>
           </CardContent>
         </Card>
@@ -271,13 +376,13 @@ export default function StockCountSessionPage() {
             <div className="relative flex-1">
               <Barcode className="absolute left-3 top-2.5 h-4 w-4 text-blue-600" />
               <Input
-                placeholder="สแกนบาร์โค้ดสินค้า หรือพิมพ์รหัสสินค้า/IMEI แล้วกด Enter..."
+                placeholder="สแกนบาร์โค้ดสินค้า หรือพิมพ์รหัสสินค้า/IMEI แล้วกด Enter เพื่อนับ +1..."
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 className="pl-9 text-xs h-9 bg-white border-blue-200 font-mono"
               />
             </div>
-            <Button type="submit" className="text-xs bg-blue-600 text-white font-semibold gap-1">
+            <Button type="submit" className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold gap-1">
               <span>นับ +1</span>
             </Button>
           </form>
@@ -285,24 +390,51 @@ export default function StockCountSessionPage() {
       </Card>
 
       {/* Filter and Reset Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
-          {[
-            { id: "ALL", label: "ทั้งหมด" },
-            { id: "ACCESSORY", label: "อุปกรณ์เสริม" },
-            { id: "SPARE_PART", label: "อะไหล่ซ่อม" },
-            { id: "DEVICE", label: "ตัวเครื่องมือถือ" },
-          ].map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setCategory(cat.id)}
-              className={`px-3 py-1 rounded-md transition-all ${
-                category === cat.id ? "bg-white text-blue-700 shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              {cat.label}
-            </button>
-          ))}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Category Filter */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+            {[
+              { id: "ALL", label: "ทุกหมวด" },
+              { id: "ACCESSORY", label: "อุปกรณ์เสริม" },
+              { id: "SPARE_PART", label: "อะไหล่ซ่อม" },
+              { id: "DEVICE", label: "ตัวเครื่องมือถือ" },
+            ].map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setCategory(cat.id)}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  category === cat.id
+                    ? "bg-white text-blue-700 shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Variance Status Filter */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+            {[
+              { id: "ALL", label: "รายการทั้งหมด" },
+              { id: "DIFF_ONLY", label: "เฉพาะที่ยอดไม่ตรง" },
+              { id: "SURPLUS", label: "ส่วนเกิน (+)" },
+              { id: "DEFICIT", label: "ขาดหาย (-)" },
+            ].map((st) => (
+              <button
+                key={st.id}
+                onClick={() => setStatusFilter(st.id as any)}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  statusFilter === st.id
+                    ? "bg-white text-amber-700 shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <Button
@@ -319,7 +451,7 @@ export default function StockCountSessionPage() {
       </div>
 
       {/* Table */}
-      <Card className="border-slate-200 overflow-hidden">
+      <Card className="border-slate-200 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-700">
             <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase">
@@ -338,6 +470,12 @@ export default function StockCountSessionPage() {
                 <tr>
                   <td colSpan={7} className="text-center py-12 text-slate-400">
                     กำลังโหลดสินค้า...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-12 text-slate-400">
+                    ไม่พบรายการสินค้าที่ตรงกับเงื่อนไขการกรอง
                   </td>
                 </tr>
               ) : (
@@ -377,30 +515,32 @@ export default function StockCountSessionPage() {
                           onChange={(e) => {
                             const raw = e.target.value;
                             setApplied(false);
+                            setSessionCode(null);
                             setCounts((prev) => {
                               const next = { ...prev };
                               const n = Number(raw);
-                              // Empty input = not counted; otherwise clamp to a non-negative integer.
                               if (raw === "" || !Number.isFinite(n)) delete next[item.id];
                               else next[item.id] = Math.max(0, Math.floor(n));
                               return next;
                             });
                           }}
-                          className="w-20 text-center font-bold text-xs p-1 rounded border border-slate-300 font-mono bg-white"
+                          className="w-20 text-center font-bold text-xs p-1 rounded border border-slate-300 font-mono bg-white focus:border-blue-500 focus:outline-hidden"
                         />
                       </td>
 
                       <td className="py-3 px-4 text-center whitespace-nowrap font-mono font-bold">
                         <span
                           className={`inline-block px-2 py-0.5 rounded text-[11px] ${
-                            diff === 0
-                              ? "bg-slate-100 text-slate-500"
+                            !isCounted
+                              ? "bg-slate-50 text-slate-400"
+                              : diff === 0
+                              ? "bg-slate-100 text-slate-600"
                               : diff < 0
                               ? "bg-rose-100 text-rose-800"
                               : "bg-emerald-100 text-emerald-800"
                           }`}
                         >
-                          {isCounted ? (diff > 0 ? `+${diff}` : diff) : "-"}
+                          {!isCounted ? "-" : diff > 0 ? `+${diff} (เกิน)` : diff < 0 ? `${diff} (ขาด)` : "ตรง (0)"}
                         </span>
                       </td>
 
@@ -409,8 +549,18 @@ export default function StockCountSessionPage() {
                       </td>
 
                       <td className="py-3 px-4 text-right whitespace-nowrap font-mono font-bold">
-                        <span className={impact < 0 ? "text-rose-600" : impact > 0 ? "text-emerald-700" : "text-slate-400"}>
-                          {formatTHB(impact)}
+                        <span
+                          className={
+                            !isCounted
+                              ? "text-slate-300"
+                              : impact < 0
+                              ? "text-rose-600"
+                              : impact > 0
+                              ? "text-emerald-700"
+                              : "text-slate-400"
+                          }
+                        >
+                          {isCounted ? formatTHB(impact) : "-"}
                         </span>
                       </td>
                     </tr>
@@ -421,6 +571,67 @@ export default function StockCountSessionPage() {
           </table>
         </div>
       </Card>
+
+      {/* History Modal */}
+      {showHistoryModal && (
+        <Dialog open={showHistoryModal} onOpenChange={() => setShowHistoryModal(false)}>
+          <DialogContent className="max-w-2xl p-0">
+            <DialogHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
+              <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-600" />
+                <span>ประวัติรอบการตรวจนับสต็อกจริง (Stock Count Sessions)</span>
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="p-4 max-h-[460px] overflow-y-auto space-y-3">
+              {historyLoading ? (
+                <div className="py-8 text-center text-xs text-slate-400">กำลังโหลดประวัติ...</div>
+              ) : historySessions.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">ยังไม่มีบันทึกรอบการตรวจนับสต็อก</div>
+              ) : (
+                historySessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2 hover:bg-slate-100/70 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-mono font-bold text-blue-700 text-sm">{s.sessionCode}</div>
+                      <div className="text-[11px] text-slate-400">{formatDateThai(s.createdAt)}</div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <div>
+                        สาขา: <span className="font-semibold text-slate-800">{s.branchName}</span>
+                      </div>
+                      <div>
+                        ผู้นับ: <span className="font-semibold text-slate-800">{s.countedBy}</span>
+                      </div>
+                      <div>
+                        รายการที่นับ: <span className="font-semibold text-slate-800">{s.itemsCounted} ชิ้น</span>
+                      </div>
+                      <div>
+                        รายการที่ยอดต่าง:{" "}
+                        <span className="font-bold text-amber-600">{s.discrepancyCount}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-[11px]">
+                      <div className="flex items-center gap-3">
+                        <span className="text-emerald-700 font-semibold">เกิน: +{s.totalSurplusQty}</span>
+                        <span className="text-rose-600 font-semibold">ขาด: -{s.totalDeficitQty}</span>
+                      </div>
+                      <div className="font-mono font-bold">
+                        ผลกระทบมูลค่า:{" "}
+                        <span className={s.totalCostImpact < 0 ? "text-rose-600" : "text-emerald-700"}>
+                          {formatTHB(s.totalCostImpact)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

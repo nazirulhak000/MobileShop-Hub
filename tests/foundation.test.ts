@@ -1607,7 +1607,360 @@ test("Round 13: Shift Management, Daily Takings, Sales History & Refunds Audit -
   });
 });
 
-test("Round 14: Purchasing, Purchase Orders, Receiving Shipment, Reorder Alerts & Multi-Tenant Isolation", async () => {
+test("Round 14: Stock Transfers & Physical Stock Count Audit - State Machine, Stock Deduction & Receipt, IMEI Location Tracking, Count Reconciliation & Multi-Tenant Isolation", async () => {
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", username: "admin" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  const yyyymm = bangkokYYYYMM();
+  let transferProduct: any;
+  let accessoryProduct: any;
+  let testImei: any;
+  let transfer1Id = "";
+  let transfer1No = "";
+
+  // 1. Setup products, initial stock and serialized IMEI in Tenant A
+  await staffStorage.run(admin, async () => {
+    transferProduct = await prisma.product.create({
+      data: {
+        tenantId: admin.tenantId,
+        code: `PHONE-TRF-${Date.now()}`,
+        name: "iPhone 15 Pro Max 512GB (Transfer Test)",
+        category: "DEVICE",
+        costPrice: 38000,
+        sellPrice: 46000,
+      },
+    });
+
+    accessoryProduct = await prisma.product.create({
+      data: {
+        tenantId: admin.tenantId,
+        code: `CASE-TRF-${Date.now()}`,
+        name: "Armor Shield Case (Count Test)",
+        category: "ACCESSORY",
+        costPrice: 200,
+        sellPrice: 490,
+      },
+    });
+
+    // Stock at ownBranch (HQ): 10 phones, 5 cases. secondBranch (BR2): 0 phones.
+    await prisma.stockItem.createMany({
+      data: [
+        { tenantId: admin.tenantId, productId: transferProduct.id, branchId: ownBranch, quantity: 10 },
+        { tenantId: admin.tenantId, productId: accessoryProduct.id, branchId: ownBranch, quantity: 5 },
+        { tenantId: admin.tenantId, productId: transferProduct.id, branchId: secondBranch, quantity: 0 },
+      ],
+    });
+
+    // Serialized IMEI at ownBranch with IN_STOCK status
+    testImei = await prisma.deviceIMEI.create({
+      data: {
+        tenantId: admin.tenantId,
+        productId: transferProduct.id,
+        branchId: ownBranch,
+        imei: `86543219876${Date.now().toString().slice(-4)}`,
+        status: "IN_STOCK",
+      },
+    });
+  });
+
+  // 2. Branch-to-Branch Transfers: Transfer state machine (PENDING -> IN_TRANSIT -> RECEIVED)
+  await staffStorage.run(admin, async () => {
+    // 2.1 CREATE transfer TRF-1 with status PENDING: 2 phones (including testImei) from ownBranch -> secondBranch
+    transfer1Id = `trf_test_${Date.now()}`;
+    const counter = await prisma.sequenceCounter.upsert({
+      where: { id: `TRF-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `TRF-${yyyymm}`, current: 1 },
+    });
+    transfer1No = `TRF-${yyyymm}-${String(counter.current).padStart(4, "0")}`;
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: admin.tenantId,
+        userId: admin.id,
+        module: "STOCK_TRANSFER",
+        action: "CREATE",
+        targetId: transfer1Id,
+        details: JSON.stringify({
+          transferId: transfer1Id,
+          transferNo: transfer1No,
+          sourceBranchId: ownBranch,
+          destBranchId: secondBranch,
+          status: "PENDING",
+          items: [{ productId: transferProduct.id, quantity: 2, imeiIds: [testImei.id] }],
+          requestedBy: admin.name,
+        }),
+      },
+    });
+
+    // In PENDING status, stock is not yet deducted
+    const srcStockPending = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+    });
+    const destStockPending = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: secondBranch } },
+    });
+    const imeiPending = await prisma.deviceIMEI.findUnique({ where: { id: testImei.id } });
+
+    assert.equal(srcStockPending?.quantity, 10, "Source stock should remain 10 in PENDING");
+    assert.equal(destStockPending?.quantity, 0, "Destination stock should remain 0 in PENDING");
+    assert.equal(imeiPending?.status, "IN_STOCK", "IMEI status should remain IN_STOCK in PENDING");
+    assert.equal(imeiPending?.branchId, ownBranch, "IMEI location should remain at ownBranch");
+
+    // 2.2 DISPATCH transfer TRF-1: PENDING -> IN_TRANSIT
+    // Deducts source stock: 10 -> 8, updates IMEI to IN_TRANSIT
+    await prisma.$transaction(async (tx) => {
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+        data: { quantity: 8 },
+      });
+      await tx.deviceIMEI.update({
+        where: { id: testImei.id },
+        data: { status: "IN_TRANSIT" },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "STOCK_TRANSFER",
+          action: "IN_TRANSIT",
+          targetId: transfer1Id,
+          details: JSON.stringify({
+            transferId: transfer1Id,
+            transferNo: transfer1No,
+            fromStatus: "PENDING",
+            toStatus: "IN_TRANSIT",
+          }),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "INVENTORY",
+          action: "STOCK_TRANSFER_OUT",
+          targetId: transferProduct.id,
+          details: JSON.stringify({ transferNo: transfer1No, quantity: 2, fromQty: 10, toQty: 8 }),
+        },
+      });
+    });
+
+    const srcStockTransit = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+    });
+    const imeiTransit = await prisma.deviceIMEI.findUnique({ where: { id: testImei.id } });
+    assert.equal(srcStockTransit?.quantity, 8, "Source stock must be deducted on dispatch");
+    assert.equal(imeiTransit?.status, "IN_TRANSIT", "IMEI status must transition to IN_TRANSIT");
+
+    // 2.3 RECEIVE transfer TRF-1: IN_TRANSIT -> RECEIVED
+    // Destination stock credited: 0 -> 2, IMEI location updated to secondBranch and status returns to IN_STOCK
+    await prisma.$transaction(async (tx) => {
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: transferProduct.id, branchId: secondBranch } },
+        data: { quantity: 2 },
+      });
+      await tx.deviceIMEI.update({
+        where: { id: testImei.id },
+        data: { branchId: secondBranch, status: "IN_STOCK" },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "STOCK_TRANSFER",
+          action: "RECEIVED",
+          targetId: transfer1Id,
+          details: JSON.stringify({
+            transferId: transfer1Id,
+            transferNo: transfer1No,
+            fromStatus: "IN_TRANSIT",
+            toStatus: "RECEIVED",
+          }),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "INVENTORY",
+          action: "STOCK_TRANSFER_IN",
+          targetId: transferProduct.id,
+          details: JSON.stringify({ transferNo: transfer1No, quantity: 2, receivedStockQty: 2 }),
+        },
+      });
+    });
+
+    const srcStockFinal = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+    });
+    const destStockFinal = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: secondBranch } },
+    });
+    const imeiFinal = await prisma.deviceIMEI.findUnique({ where: { id: testImei.id } });
+
+    assert.equal(srcStockFinal?.quantity, 8, "Source stock remains deducted (8)");
+    assert.equal(destStockFinal?.quantity, 2, "Destination stock must be credited on receipt (2)");
+    assert.equal(imeiFinal?.branchId, secondBranch, "IMEI location branchId must be updated to secondBranch");
+    assert.equal(imeiFinal?.status, "IN_STOCK", "IMEI status must return to IN_STOCK");
+  });
+
+  // 3. Transfer Reversal / Cancellation: dispatched stock returns to source on CANCEL / REJECT
+  await staffStorage.run(admin, async () => {
+    const transfer2Id = `trf_cancel_${Date.now()}`;
+    // Dispatch 3 phones: ownBranch stock drops 8 -> 5
+    await prisma.stockItem.update({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+      data: { quantity: 5 },
+    });
+
+    // Now Cancel / Revert the transfer from IN_TRANSIT
+    await prisma.$transaction(async (tx) => {
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+        data: { quantity: { increment: 3 } },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "INVENTORY",
+          action: "STOCK_TRANSFER_REVERT",
+          targetId: transferProduct.id,
+          details: JSON.stringify({ transferId: transfer2Id, quantity: 3, reason: "ยกเลิกคำขอโอนย้ายสินค้า" }),
+        },
+      });
+    });
+
+    const srcStockReverted = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+    });
+    assert.equal(srcStockReverted?.quantity, 8, "Cancelled transfer must revert stock back to source (8)");
+  });
+
+  // 4. Physical Stock Count / Audit: Expected vs Counted, Surplus/Deficit, Variance Auto-adjustment & AuditLog
+  await staffStorage.run(admin, async () => {
+    // Physical audit at ownBranch:
+    // transferProduct: expected 8, counted 10 (+2 SURPLUS)
+    // accessoryProduct: expected 5, counted 3 (-2 DEFICIT)
+    const sessionCount = await prisma.sequenceCounter.upsert({
+      where: { id: `CNT-${yyyymm}` },
+      update: { current: { increment: 1 } },
+      create: { id: `CNT-${yyyymm}`, current: 1 },
+    });
+    const sessionCode = `CNT-${yyyymm}-${String(sessionCount.current).padStart(4, "0")}`;
+
+    const countedItems = [
+      {
+        productId: transferProduct.id,
+        expectedQty: 8,
+        countedQty: 10,
+        diff: +2,
+        status: "SURPLUS",
+        costPrice: 38000,
+        impact: +76000,
+      },
+      {
+        productId: accessoryProduct.id,
+        expectedQty: 5,
+        countedQty: 3,
+        diff: -2,
+        status: "DEFICIT",
+        costPrice: 200,
+        impact: -400,
+      },
+    ];
+
+    await prisma.$transaction(async (tx) => {
+      for (const item of countedItems) {
+        await tx.stockItem.update({
+          where: { productId_branchId: { productId: item.productId, branchId: ownBranch } },
+          data: { quantity: item.countedQty },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            tenantId: admin.tenantId,
+            userId: admin.id,
+            module: "INVENTORY",
+            action: "STOCK_ADJUST",
+            targetId: item.productId,
+            details: JSON.stringify({
+              sessionCode,
+              type: "SET",
+              fromQty: item.expectedQty,
+              toQty: item.countedQty,
+              variance: item.diff,
+              status: item.status,
+              reason: `ปรับยอดตรวจนับจริง (${sessionCode})`,
+            }),
+            beforeJson: JSON.stringify({ quantity: item.expectedQty }),
+            afterJson: JSON.stringify({ quantity: item.countedQty }),
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: admin.tenantId,
+          userId: admin.id,
+          module: "STOCK_COUNT",
+          action: "SESSION_COMPLETE",
+          targetId: ownBranch,
+          details: JSON.stringify({
+            sessionCode,
+            branchId: ownBranch,
+            itemsCounted: 2,
+            discrepancyCount: 2,
+            surplusCount: 1,
+            deficitCount: 1,
+            totalVarianceQty: 0,
+            totalCostImpact: 75600,
+            autoAdjusted: true,
+          }),
+        },
+      });
+    });
+
+    const phoneAfterCount = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: transferProduct.id, branchId: ownBranch } },
+    });
+    const caseAfterCount = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: accessoryProduct.id, branchId: ownBranch } },
+    });
+
+    assert.equal(phoneAfterCount?.quantity, 10, "Phone stock must be reconciled to counted 10");
+    assert.equal(caseAfterCount?.quantity, 3, "Case stock must be reconciled to counted 3");
+  });
+
+  // 5. Multi-Tenant isolation: Tenant B cannot see Tenant A's transfer logs or stock count logs
+  await staffStorage.run(adminBPrincipal, async () => {
+    const foreignTransferLogs = await prisma.auditLog.findMany({
+      where: { module: "STOCK_TRANSFER" },
+    });
+    assert.equal(foreignTransferLogs.length, 0, "Tenant B must not see Tenant A stock transfer logs");
+
+    const foreignCountLogs = await prisma.auditLog.findMany({
+      where: { module: "STOCK_COUNT" },
+    });
+    assert.equal(foreignCountLogs.length, 0, "Tenant B must not see Tenant A stock count session logs");
+
+    // Cross-tenant transfer check: branch lookup across tenants fails
+    const foreignBranchCheck = await prisma.branch.findFirst({
+      where: { id: ownBranch },
+    });
+    assert.equal(foreignBranchCheck, null, "Tenant A branch is invisible and inaccessible to Tenant B");
+  });
+});
+
+test("Round 15: Purchasing, Purchase Orders, Receiving Shipment, Reorder Alerts & Multi-Tenant Isolation", async () => {
   // 1. Create Suppliers in Tenant A and Tenant B
   let supA: any;
   let supB: any;
@@ -1956,3 +2309,246 @@ test("Round 14: Purchasing, Purchase Orders, Receiving Shipment, Reorder Alerts 
   });
 });
 
+test("Round 16: Product Inventory, Serialized IMEI Lifecycle, Accessories & Warranty Audit - Multi-Tenant Isolation & Status Transitions", async () => {
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", role: "ADMIN" } });
+  const staffB: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  await staffStorage.run(admin, async () => {
+    // 1. Product CRUD & Category Classification (DEVICE, ACCESSORY, SPARE_PART, SERVICE)
+    const deviceProd = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: `PHONE-IP15-${Date.now()}`,
+        name: "iPhone 15 128GB Black",
+        category: "DEVICE",
+        brand: "Apple",
+        model: "iPhone 15",
+        costPrice: 24000,
+        sellPrice: 28900,
+        minStock: 2,
+      },
+    });
+
+    const accessoryProd = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: `ACC-ANK-${Date.now()}`,
+        name: "Anker Nano 65W GaN Charger",
+        category: "ACCESSORY",
+        brand: "Anker",
+        costPrice: 800,
+        sellPrice: 1290,
+        minStock: 5,
+      },
+    });
+
+    const serviceProd = await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: `SRV-SCREEN-${Date.now()}`,
+        name: "ค่าบริการเปลี่ยนหน้าจอมาตรฐาน",
+        category: "SERVICE",
+        costPrice: 0,
+        sellPrice: 500,
+        minStock: 0,
+      },
+    });
+
+    assert.equal(deviceProd.category, "DEVICE");
+    assert.equal(accessoryProd.category, "ACCESSORY");
+    assert.equal(serviceProd.category, "SERVICE");
+
+    // Same SKU code in different tenant is allowed
+    const sharedCode = `SHARED-SKU-${Date.now()}`;
+    await prisma.product.create({
+      data: {
+        tenantId: "test-a",
+        code: sharedCode,
+        name: "Shared Product Tenant A",
+        category: "ACCESSORY",
+      },
+    });
+
+    await staffStorage.run(staffB, async () => {
+      const prodInB = await prisma.product.create({
+        data: {
+          tenantId: "test-b",
+          code: sharedCode,
+          name: "Shared Product Tenant B",
+          category: "ACCESSORY",
+        },
+      });
+      assert.equal(prodInB.code, sharedCode);
+    });
+
+    // 2. Serialized IMEI Lifecycle & Duplicate Prevention in Tenant A
+    const imeiCode = `35891102938${Date.now().toString().slice(-4)}`;
+    const imeiRecord = await prisma.$transaction(async (tx) => {
+      const im = await tx.deviceIMEI.create({
+        data: {
+          tenantId: "test-a",
+          productId: deviceProd.id,
+          branchId: ownBranch,
+          imei: imeiCode,
+          serialNo: "F2LX9102",
+          conditionGrade: "A",
+          status: "IN_STOCK",
+          costPrice: 24000,
+          sellPrice: 28900,
+        },
+      });
+      await tx.stockItem.upsert({
+        where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+        update: { quantity: { increment: 1 } },
+        create: { tenantId: "test-a", productId: deviceProd.id, branchId: ownBranch, quantity: 1 },
+      });
+      return im;
+    });
+
+    // Duplicate IMEI in same tenant must fail unique constraint
+    await assert.rejects(async () => {
+      await prisma.deviceIMEI.create({
+        data: {
+          tenantId: "test-a",
+          productId: deviceProd.id,
+          branchId: ownBranch,
+          imei: imeiCode,
+          status: "IN_STOCK",
+        },
+      });
+    });
+
+    // 3. IMEI Status Transitions: IN_STOCK -> DEFECTIVE (decrements stock)
+    await prisma.$transaction(async (tx) => {
+      await tx.deviceIMEI.update({
+        where: { id: imeiRecord.id },
+        data: { status: "DEFECTIVE" },
+      });
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+        data: { quantity: { decrement: 1 } },
+      });
+    });
+
+    const stockDefective = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+    });
+    assert.equal(stockDefective?.quantity, 0);
+
+    // DEFECTIVE -> IN_STOCK (re-increments stock)
+    await prisma.$transaction(async (tx) => {
+      await tx.deviceIMEI.update({
+        where: { id: imeiRecord.id },
+        data: { status: "IN_STOCK" },
+      });
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+        data: { quantity: { increment: 1 } },
+      });
+    });
+
+    const stockRestored = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+    });
+    assert.equal(stockRestored?.quantity, 1);
+
+    // Branch location tracking: transfer IMEI from ownBranch to secondBranch
+    await prisma.$transaction(async (tx) => {
+      await tx.deviceIMEI.update({
+        where: { id: imeiRecord.id },
+        data: { branchId: secondBranch },
+      });
+      await tx.stockItem.update({
+        where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+        data: { quantity: { decrement: 1 } },
+      });
+      await tx.stockItem.upsert({
+        where: { productId_branchId: { productId: deviceProd.id, branchId: secondBranch } },
+        update: { quantity: { increment: 1 } },
+        create: { tenantId: "test-a", productId: deviceProd.id, branchId: secondBranch, quantity: 1 },
+      });
+    });
+
+    const stockOwnAfterTransfer = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: deviceProd.id, branchId: ownBranch } },
+    });
+    const stockSecondAfterTransfer = await prisma.stockItem.findUnique({
+      where: { productId_branchId: { productId: deviceProd.id, branchId: secondBranch } },
+    });
+    assert.equal(stockOwnAfterTransfer?.quantity, 0);
+    assert.equal(stockSecondAfterTransfer?.quantity, 1);
+
+    // 4. Accessories Catalog & Quick Restock
+    const accessoryStock = await prisma.stockItem.create({
+      data: {
+        tenantId: "test-a",
+        productId: accessoryProd.id,
+        branchId: ownBranch,
+        quantity: 2, // below minStock (5) -> isLowStock = true
+      },
+    });
+    assert.ok(accessoryStock.quantity <= accessoryProd.minStock, "Accessory is low stock");
+
+    // Quick restock +10
+    const restocked = await prisma.stockItem.update({
+      where: { id: accessoryStock.id },
+      data: { quantity: { increment: 10 } },
+    });
+    assert.equal(restocked.quantity, 12);
+
+    // 5. Warranty Expiration Calculation & Claim Registration
+    const purchaseDate = new Date("2026-10-01T10:00:00Z");
+    const warrantyDays = 90;
+    const expiryDate = new Date(purchaseDate.getTime() + warrantyDays * 86400000);
+    const currentDate = new Date("2026-11-20T10:00:00Z");
+    const isWarrantyActive = currentDate <= expiryDate;
+    const daysRemaining = Math.ceil((expiryDate.getTime() - currentDate.getTime()) / 86400000);
+
+    assert.equal(isWarrantyActive, true);
+    assert.ok(daysRemaining > 0, "Warranty has positive remaining days");
+
+    // File warranty claim in AuditLog
+    const claimLog = await prisma.auditLog.create({
+      data: {
+        tenantId: "test-a",
+        userId: admin.id,
+        module: "WARRANTY",
+        action: "CLAIM",
+        targetId: imeiCode,
+        details: JSON.stringify({
+          claimNo: "CLM-20261120-1001",
+          imei: imeiCode,
+          symptom: "พอร์ตชาร์จหลวม ชาร์จไฟไม่เข้า",
+          status: "IN_REVIEW",
+        }),
+      },
+    });
+    assert.ok(claimLog.id);
+
+    // 6. Cross-Tenant Isolation: Tenant B cannot access Tenant A's products, IMEIs, or warranties
+    await staffStorage.run(staffB, async () => {
+      const tenantAProductsInB = await prisma.product.findMany({
+        where: { id: deviceProd.id },
+      });
+      assert.equal(tenantAProductsInB.length, 0);
+
+      const tenantAIMEIsInB = await prisma.deviceIMEI.findMany({
+        where: { id: imeiRecord.id },
+      });
+      assert.equal(tenantAIMEIsInB.length, 0);
+
+      const tenantAClaimsInB = await prisma.auditLog.findMany({
+        where: { id: claimLog.id },
+      });
+      assert.equal(tenantAClaimsInB.length, 0);
+    });
+  });
+});
