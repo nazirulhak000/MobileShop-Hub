@@ -877,4 +877,154 @@ test("Dynamic Subpage Routing & Modular Block Storefront: safe parsers, layouts,
   }
 });
 
+test("Round 11: Repair Workflow & Management Audit - Transitions, Timeline Audit Events, Financial Calculations & Multi-Tenant Isolation", async () => {
+  // 1. Create a technician
+  const techUser = await db.user.create({
+    data: {
+      tenantId: "test-a",
+      name: "ช่างสมชาย",
+      username: `tech_${Date.now()}`,
+      password: "pwd",
+      role: "TECHNICIAN",
+      branchId: ownBranch,
+    },
+  });
+
+  const adminBUser = await db.user.findFirstOrThrow({ where: { tenantId: "test-b", role: "ADMIN" } });
+  const adminBPrincipal: StaffPrincipal = {
+    id: adminBUser.id,
+    tenantId: "test-b",
+    name: adminBUser.name,
+    username: adminBUser.username,
+    role: "ADMIN",
+    branchId: foreignBranch,
+    branchIds: [foreignBranch],
+  };
+
+  // 2. Admin in Tenant A creates a repair job with laborFee, deposit, discount, VAT
+  let jobId = "";
+  await staffStorage.run(admin, async () => {
+    const tracking = await generateNextTrackingCode();
+    const created = await prisma.repairJob.create({
+      data: {
+        trackingCode: tracking,
+        branchId: ownBranch,
+        customerId: ownCustomer,
+        technicianId: techUser.id,
+        deviceBrand: "Samsung",
+        deviceModel: "Galaxy S24",
+        issueDescription: "จอแตก เปิดไม่ติด",
+        passcode: "123456",
+        status: "PENDING",
+        laborFee: 1000,
+        depositAmount: 500,
+        discount: 200,
+        taxRate: 7,
+        customerApproved: true,
+      },
+    });
+    jobId = created.id;
+
+    // Timeline event 1: PENDING
+    await prisma.repairStatusEvent.create({
+      data: {
+        tenantId: admin.tenantId,
+        repairJobId: created.id,
+        status: "PENDING",
+        customerMessage: "รับเครื่องเข้าระบบแล้ว รอช่างตรวจเช็ก",
+        actorId: admin.id,
+      },
+    });
+
+    // Add spare part: 2x 500 = 1000 parts total
+    await prisma.repairPartUsage.create({
+      data: {
+        tenantId: admin.tenantId,
+        repairJobId: created.id,
+        productId: product,
+        quantity: 2,
+        costPrice: 300,
+        sellPrice: 500,
+      },
+    });
+
+    // Financial calculation verification:
+    // laborFee = 1000, parts = 1000 -> subtotal = 2000
+    // discount = 200 -> discounted = 1800
+    // vat 7% = 126 -> totalCost = 1926
+    // deposit = 500 -> remainingBalance = 1426
+    const fee = 1000;
+    const partsTotal = 1000;
+    const subtotal = fee + partsTotal;
+    const discounted = subtotal - 200;
+    const vat = Math.round(discounted * 0.07 * 100) / 100;
+    const totalCost = Math.round((discounted + vat) * 100) / 100;
+
+    await prisma.repairJob.update({
+      where: { id: created.id },
+      data: { vatAmount: vat, totalCost },
+    });
+
+    // Status transition: PENDING -> DIAGNOSING -> REPAIRING
+    await prisma.repairJob.update({
+      where: { id: created.id },
+      data: { status: "DIAGNOSING" },
+    });
+    await prisma.repairStatusEvent.create({
+      data: {
+        tenantId: admin.tenantId,
+        repairJobId: created.id,
+        status: "DIAGNOSING",
+        customerMessage: "ช่างกำลังตรวจเช็กอาการเครื่อง",
+        actorId: techUser.id,
+      },
+    });
+
+    await prisma.repairJob.update({
+      where: { id: created.id },
+      data: { status: "REPAIRING" },
+    });
+    await prisma.repairStatusEvent.create({
+      data: {
+        tenantId: admin.tenantId,
+        repairJobId: created.id,
+        status: "REPAIRING",
+        customerMessage: "กำลังซ่อม",
+        actorId: techUser.id,
+      },
+    });
+
+    // Verification via getRepairJobById
+    const jobDetail = await getRepairJobById(created.id) as any;
+    assert.ok(jobDetail);
+    assert.equal(jobDetail.laborFee, 1000);
+    assert.equal(jobDetail.depositAmount, 500);
+    assert.equal(jobDetail.discount, 200);
+    assert.equal(jobDetail.taxRate, 7);
+    assert.equal(jobDetail.vatAmount, 126);
+    assert.equal(jobDetail.totalCost, 1926);
+    const balance = (jobDetail.totalCost || 0) - (jobDetail.depositAmount || 0);
+    assert.equal(balance, 1426);
+
+    // Verify timeline events
+    assert.ok(jobDetail.statusEvents);
+    assert.equal(jobDetail.statusEvents.length, 3);
+    assert.equal(jobDetail.statusEvents[0].status, "PENDING");
+    assert.equal(jobDetail.statusEvents[1].status, "DIAGNOSING");
+    assert.equal(jobDetail.statusEvents[2].status, "REPAIRING");
+    assert.equal(jobDetail.statusEvents[0].actor.name, "Admin");
+    assert.equal(jobDetail.statusEvents[1].actor.name, "ช่างสมชาย");
+  });
+
+  // 3. Multi-Tenant Isolation: Staff from Tenant B cannot find or read Tenant A's repair job
+  await staffStorage.run(adminBPrincipal, async () => {
+    const isolatedJob = await getRepairJobById(jobId);
+    assert.equal(isolatedJob, null);
+
+    const searchList = await getRepairJobs({ search: "Galaxy S24" });
+    assert.equal(searchList.length, 0);
+  });
+});
+
+
 

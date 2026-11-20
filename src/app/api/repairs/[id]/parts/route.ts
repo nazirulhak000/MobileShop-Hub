@@ -25,14 +25,18 @@ async function readJson(request: NextRequest) {
   }
 }
 
-/** Recompute job totalCost = laborFee + sum(parts sellPrice * qty), inside the given tx. */
-async function recomputeTotal(tx: Prisma.TransactionClient, jobId: string, laborFee: number) {
-  const usages = await tx.repairPartUsage.findMany({ where: { repairJobId: jobId } });
+/** Recompute job totalCost = laborFee + sum(parts sellPrice * qty) - discount + vat, inside the given tx. */
+async function recomputeTotal(tx: Prisma.TransactionClient, jobId: string, tenantId: string) {
+  const job = await tx.repairJob.findFirstOrThrow({ where: { id: jobId, tenantId } });
+  const usages = await tx.repairPartUsage.findMany({ where: { repairJobId: jobId, tenantId } });
   const partsTotal = usages.reduce((sum, p) => sum + p.sellPrice * p.quantity, 0);
-  const totalCost = Math.round((laborFee + partsTotal) * 100) / 100;
+  const subtotal = Math.max(0, job.laborFee + partsTotal);
+  const discounted = Math.max(0, subtotal - job.discount);
+  const vat = job.taxRate > 0 ? Math.round(discounted * (job.taxRate / 100) * 100) / 100 : 0;
+  const totalCost = Math.round((discounted + vat) * 100) / 100;
   return tx.repairJob.update({
     where: { id: jobId },
-    data: { totalCost },
+    data: { vatAmount: vat, totalCost },
     include: JOB_INCLUDE,
   });
 }
@@ -45,24 +49,25 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
   const quantity = reqInt(body?.quantity, "quantity", 1, 100);
 
   const { updatedJob, productName } = await prisma.$transaction(async (tx) => {
-    const job = await tx.repairJob.findFirst({ where: { id: jobId } });
+    const job = await tx.repairJob.findFirst({ where: { id: jobId, tenantId: actor.tenantId } });
     if (!job) throw new AccessError(404, "ไม่พบข้อมูลใบงานซ่อม");
     if (LOCKED_STATUSES.includes(job.status)) {
       throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถเบิกอะไหล่เพิ่มได้");
     }
 
-    const product = await tx.product.findFirst({ where: { id: productId } });
+    const product = await tx.product.findFirst({ where: { id: productId, tenantId: actor.tenantId } });
     if (!product) throw new AccessError(404, "ไม่พบข้อมูลสินค้าอะไหล่");
 
     // Atomic guarded decrement: fails if another request consumed the stock first.
     const { count } = await tx.stockItem.updateMany({
-      where: { productId, branchId: job.branchId, quantity: { gte: quantity } },
+      where: { productId, branchId: job.branchId, tenantId: actor.tenantId, quantity: { gte: quantity } },
       data: { quantity: { decrement: quantity } },
     });
     if (count !== 1) throw new AccessError(409, "อะไหล่ในสต็อกไม่พอ");
 
     const usage = await tx.repairPartUsage.create({
       data: {
+        tenantId: actor.tenantId,
         repairJobId: job.id,
         productId,
         quantity,
@@ -71,7 +76,7 @@ async function handlePOST(request: NextRequest, { params }: { params: { id: stri
       },
     });
 
-    const updated = await recomputeTotal(tx, job.id, job.laborFee);
+    const updated = await recomputeTotal(tx, job.id, actor.tenantId);
 
     await tx.auditLog.create({
       data: {
@@ -106,16 +111,18 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
 
   const updatedJob = await prisma.$transaction(async (tx) => {
     const usage = await tx.repairPartUsage.findFirst({
-      where: { id: usageId },
+      where: { id: usageId, tenantId: actor.tenantId },
       include: { repairJob: true },
     });
-    if (!usage || usage.repairJobId !== jobId) throw new AccessError(404, "ไม่พบรายการเบิกอะไหล่นี้");
+    if (!usage || usage.repairJobId !== jobId || usage.repairJob.tenantId !== actor.tenantId) {
+      throw new AccessError(404, "ไม่พบรายการเบิกอะไหล่นี้");
+    }
     if (LOCKED_STATUSES.includes(usage.repairJob.status)) {
       throw new AccessError(409, "ใบงานนี้ปิดแล้ว ไม่สามารถคืนอะไหล่ได้");
     }
 
     // Delete first (deleteMany guards against a concurrent double-return).
-    const del = await tx.repairPartUsage.deleteMany({ where: { id: usageId, repairJobId: jobId } });
+    const del = await tx.repairPartUsage.deleteMany({ where: { id: usageId, repairJobId: jobId, tenantId: actor.tenantId } });
     if (del.count !== 1) throw new AccessError(409, "รายการนี้ถูกยกเลิกไปแล้ว");
 
     await tx.stockItem.upsert({
@@ -123,6 +130,7 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
         productId_branchId: { productId: usage.productId, branchId: usage.repairJob.branchId },
       },
       create: {
+        tenantId: actor.tenantId,
         productId: usage.productId,
         branchId: usage.repairJob.branchId,
         quantity: usage.quantity,
@@ -130,7 +138,7 @@ async function handleDELETE(request: NextRequest, { params }: { params: { id: st
       update: { quantity: { increment: usage.quantity } },
     });
 
-    const updated = await recomputeTotal(tx, jobId, usage.repairJob.laborFee);
+    const updated = await recomputeTotal(tx, jobId, actor.tenantId);
 
     await tx.auditLog.create({
       data: {

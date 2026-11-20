@@ -93,6 +93,7 @@ export default function RepairsListPage() {
     { key: "QC_PASSED", label: "ผ่าน QC" },
     { key: "READY", label: "พร้อมรับเครื่อง" },
     { key: "COMPLETED", label: "ส่งมอบแล้ว" },
+    { key: "CANCELLED", label: "ยกเลิกแล้ว" },
   ];
 
   return (
@@ -280,8 +281,27 @@ export default function RepairsListPage() {
                 </tr>
               ) : repairs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400">
-                    ไม่พบรายการใบรับซ่อมที่ตรงกับเงื่อนไข
+                  <td colSpan={7} className="text-center py-16 text-slate-400">
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <Wrench className="w-8 h-8 text-slate-300" />
+                      <div className="font-semibold text-slate-600 text-sm">ไม่พบรายการใบรับซ่อมที่ตรงกับเงื่อนไข</div>
+                      <p className="text-xs text-slate-400">ลองปรับเปลี่ยนตัวกรอง หรือค้นหาด้วยคำอื่น</p>
+                      {(selectedStatus !== "ALL" || selectedBranchId !== "ALL" || selectedTechId !== "ALL" || searchQuery) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedStatus("ALL");
+                            setSelectedBranchId("ALL");
+                            setSelectedTechId("ALL");
+                            setSearchQuery("");
+                          }}
+                          className="mt-2 text-xs"
+                        >
+                          ล้างตัวกรองทั้งหมด
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -362,9 +382,15 @@ export default function RepairsListPage() {
                         <div className="font-bold text-slate-900 text-sm">
                           {formatTHB(job.totalCost || job.estimatedCost || 0)}
                         </div>
-                        <div className="text-[10px] text-slate-400">
-                          {job.status === "COMPLETED" ? "ชำระแล้ว" : "ราคาประเมิน"}
-                        </div>
+                        {job.depositAmount > 0 ? (
+                          <div className="text-[10px] text-emerald-600 font-medium">
+                            มัดจำ {formatTHB(job.depositAmount)} / คงเหลือ {formatTHB(Math.max(0, (job.totalCost || job.estimatedCost || 0) - job.depositAmount))}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-400">
+                            {job.status === "COMPLETED" ? "ชำระแล้ว" : "ยอดสุทธิ"}
+                          </div>
+                        )}
                       </td>
 
                       {/* Actions */}

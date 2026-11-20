@@ -36,6 +36,10 @@ interface ThermalSlipModalProps {
     preCheckData?: string | null;
     laborFee?: number;
     estimatedCost?: number;
+    totalCost?: number;
+    depositAmount?: number;
+    discount?: number;
+    vatAmount?: number;
     estimatedFinish?: Date | string | null;
     customerSignature?: string | null;
   } | null;
@@ -259,11 +263,23 @@ export function ThermalSlipModal({
             {/* Cost & Estimates */}
             <div className="py-2 border-b border-dashed border-black space-y-1">
               <div className="flex justify-between text-xs">
-                <span>ราคาประเมินเบื้องต้น:</span>
+                <span>ยอดรวมทั้งสิ้น:</span>
                 <span className="font-bold">
-                  {formatTHB(job.estimatedCost || job.laborFee || 0)}
+                  {formatTHB(job.totalCost || job.estimatedCost || job.laborFee || 0)}
                 </span>
               </div>
+              {Number(job.depositAmount) > 0 && (
+                <div className="flex justify-between text-[11px] text-gray-700 font-medium">
+                  <span>หักเงินมัดจำล่วงหน้า:</span>
+                  <span>- {formatTHB(Number(job.depositAmount))}</span>
+                </div>
+              )}
+              {Number(job.depositAmount) > 0 && (
+                <div className="flex justify-between text-xs font-bold text-black border-t border-dotted border-gray-400 pt-0.5">
+                  <span>คงเหลือชำระวันรับเครื่อง:</span>
+                  <span>{formatTHB(Math.max(0, (job.totalCost || job.estimatedCost || 0) - Number(job.depositAmount)))}</span>
+                </div>
+              )}
               {job.estimatedFinish && (
                 <div className="flex justify-between text-[10px] text-gray-600">
                   <span>กำหนดเสร็จประมาณ:</span>
