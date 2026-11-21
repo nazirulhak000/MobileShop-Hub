@@ -58,11 +58,80 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Self-healing bootstrap if FixMe flagship store is missing in fresh production DB
+      if (!tenant && (explicitSlug === "fixme" || explicitSlug === "fixme-service")) {
+        try {
+          const passwordHash = await bcrypt.hash("password123", 12);
+          tenant = await db.tenant.create({
+            data: {
+              id: "tenant-fixme-hq-main",
+              name: "FixMe ซ่อมมือถือ",
+              slug: "fixme",
+              plan: "ENTERPRISE",
+              status: "ACTIVE",
+              maxBranches: 10,
+              maxUsers: 50,
+            },
+          });
+          const branch = await db.branch.create({
+            data: {
+              tenantId: tenant.id,
+              name: "FixMe HQ (สำนักงานใหญ่)",
+              code: "HQ001",
+              address: "กรุงเทพมหานคร",
+              phone: "02-123-4567",
+              taxId: "0105561234567",
+            },
+          });
+          await db.user.create({
+            data: {
+              tenantId: tenant.id,
+              name: "FixMe Administrator",
+              username: "admin",
+              password: passwordHash,
+              email: "admin@fixme.co.th",
+              role: "ADMIN",
+              branchId: branch.id,
+              isActive: true,
+            },
+          });
+        } catch {
+          tenant = await db.tenant.findFirst({
+            where: { slug: { in: ["fixme", "fixme-service"] } },
+          });
+        }
+      }
+
       if (tenant && ["ACTIVE", "TRIAL"].includes(tenant.status)) {
-        const user = await db.user.findFirst({
+        let user = await db.user.findFirst({
           where: { tenantId: tenant.id, username: body.username.trim() },
           include: { branch: true },
         });
+
+        // Ensure default admin user exists in FixMe if missing
+        if (!user && (explicitSlug === "fixme" || explicitSlug === "fixme-service") && body.username.trim().toLowerCase() === "admin") {
+          try {
+            const branch = await db.branch.findFirst({ where: { tenantId: tenant.id } });
+            if (branch) {
+              const passwordHash = await bcrypt.hash("password123", 12);
+              user = await db.user.create({
+                data: {
+                  tenantId: tenant.id,
+                  name: "FixMe Administrator",
+                  username: "admin",
+                  password: passwordHash,
+                  email: "admin@fixme.co.th",
+                  role: "ADMIN",
+                  branchId: branch.id,
+                  isActive: true,
+                },
+                include: { branch: true },
+              });
+            }
+          } catch {
+            // concurrent create
+          }
+        }
 
         const isHash = user?.password.startsWith("$2");
         const valid = await bcrypt.compare(body.password, isHash ? user!.password : dummyHash);
@@ -75,15 +144,86 @@ export async function POST(request: NextRequest) {
     } else {
       // 2. No shop slug specified: resolve tenant automatically from username & password!
       // Priority A: check user in 'fixme' or 'fixme-service' flagship store
-      const flagshipTenants = await db.tenant.findMany({
+      let flagshipTenants = await db.tenant.findMany({
         where: { slug: { in: ["fixme", "fixme-service"] }, status: { in: ["ACTIVE", "TRIAL"] } },
       });
 
+      // Self-healing bootstrap if FixMe flagship store is missing in fresh production DB
+      if (flagshipTenants.length === 0) {
+        try {
+          const passwordHash = await bcrypt.hash("password123", 12);
+          const newTenant = await db.tenant.create({
+            data: {
+              id: "tenant-fixme-hq-main",
+              name: "FixMe ซ่อมมือถือ",
+              slug: "fixme",
+              plan: "ENTERPRISE",
+              status: "ACTIVE",
+              maxBranches: 10,
+              maxUsers: 50,
+            },
+          });
+          const branch = await db.branch.create({
+            data: {
+              tenantId: newTenant.id,
+              name: "FixMe HQ (สำนักงานใหญ่)",
+              code: "HQ001",
+              address: "กรุงเทพมหานคร",
+              phone: "02-123-4567",
+              taxId: "0105561234567",
+            },
+          });
+          await db.user.create({
+            data: {
+              tenantId: newTenant.id,
+              name: "FixMe Administrator",
+              username: "admin",
+              password: passwordHash,
+              email: "admin@fixme.co.th",
+              role: "ADMIN",
+              branchId: branch.id,
+              isActive: true,
+            },
+          });
+          flagshipTenants = [newTenant];
+        } catch {
+          flagshipTenants = await db.tenant.findMany({
+            where: { slug: { in: ["fixme", "fixme-service"] }, status: { in: ["ACTIVE", "TRIAL"] } },
+          });
+        }
+      }
+
       for (const tenant of flagshipTenants) {
-        const user = await db.user.findFirst({
+        let user = await db.user.findFirst({
           where: { tenantId: tenant.id, username: body.username.trim(), isActive: true },
           include: { branch: true },
         });
+
+        // Ensure default admin user exists if logging in as admin on FixMe
+        if (!user && body.username.trim().toLowerCase() === "admin") {
+          try {
+            const branch = await db.branch.findFirst({ where: { tenantId: tenant.id } });
+            if (branch) {
+              const passwordHash = await bcrypt.hash("password123", 12);
+              user = await db.user.create({
+                data: {
+                  tenantId: tenant.id,
+                  name: "FixMe Administrator",
+                  username: "admin",
+                  password: passwordHash,
+                  email: "admin@fixme.co.th",
+                  role: "ADMIN",
+                  branchId: branch.id,
+                  isActive: true,
+                },
+                include: { branch: true },
+              });
+            }
+          } catch {
+            // concurrent create
+          }
+        }
+
         if (user && user.branch.tenantId === tenant.id) {
           const isHash = user.password.startsWith("$2");
           const valid = await bcrypt.compare(body.password, isHash ? user.password : dummyHash);
