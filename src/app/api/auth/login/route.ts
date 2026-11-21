@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       // Self-healing bootstrap if FixMe flagship store is missing in fresh production DB
       if (!tenant && (explicitSlug === "fixme" || explicitSlug === "fixme-service")) {
         try {
-          const passwordHash = await bcrypt.hash("password123", 12);
+          const defaultPasswordHash = await bcrypt.hash("P@ssw0rd123!", 12);
           tenant = await db.tenant.create({
             data: {
               id: "tenant-fixme-hq-main",
@@ -86,9 +86,21 @@ export async function POST(request: NextRequest) {
           await db.user.create({
             data: {
               tenantId: tenant.id,
+              name: "Amirulhak (Admin)",
+              username: "amirulhak",
+              password: defaultPasswordHash,
+              email: "amirulhak@fixme.co.th",
+              role: "ADMIN",
+              branchId: branch.id,
+              isActive: true,
+            },
+          });
+          await db.user.create({
+            data: {
+              tenantId: tenant.id,
               name: "FixMe Administrator",
-              username: "admin",
-              password: passwordHash,
+              username: "fixme_admin",
+              password: defaultPasswordHash,
               email: "admin@fixme.co.th",
               role: "ADMIN",
               branchId: branch.id,
@@ -103,24 +115,37 @@ export async function POST(request: NextRequest) {
       }
 
       if (tenant && ["ACTIVE", "TRIAL"].includes(tenant.status)) {
+        // Ensure legacy 'admin' is removed from FixMe store
+        if (explicitSlug === "fixme" || explicitSlug === "fixme-service") {
+          try {
+            await db.user.deleteMany({
+              where: { tenantId: tenant.id, username: "admin" },
+            });
+          } catch {
+            // ignore
+          }
+        }
+
         let user = await db.user.findFirst({
           where: { tenantId: tenant.id, username: body.username.trim() },
           include: { branch: true },
         });
 
-        // Ensure default admin user exists in FixMe if missing
-        if (!user && (explicitSlug === "fixme" || explicitSlug === "fixme-service") && body.username.trim().toLowerCase() === "admin") {
+        // Ensure target admin users (amirulhak / fixme_admin) exist in FixMe if missing
+        const allowedAdmins = ["amirulhak", "fixme_admin"];
+        const lowerUsername = body.username.trim().toLowerCase();
+        if (!user && (explicitSlug === "fixme" || explicitSlug === "fixme-service") && allowedAdmins.includes(lowerUsername)) {
           try {
             const branch = await db.branch.findFirst({ where: { tenantId: tenant.id } });
             if (branch) {
-              const passwordHash = await bcrypt.hash("password123", 12);
+              const defaultPasswordHash = await bcrypt.hash("P@ssw0rd123!", 12);
               user = await db.user.create({
                 data: {
                   tenantId: tenant.id,
-                  name: "FixMe Administrator",
-                  username: "admin",
-                  password: passwordHash,
-                  email: "admin@fixme.co.th",
+                  name: lowerUsername === "amirulhak" ? "Amirulhak (Admin)" : "FixMe Administrator",
+                  username: lowerUsername,
+                  password: defaultPasswordHash,
+                  email: `${lowerUsername}@fixme.co.th`,
                   role: "ADMIN",
                   branchId: branch.id,
                   isActive: true,
@@ -151,7 +176,7 @@ export async function POST(request: NextRequest) {
       // Self-healing bootstrap if FixMe flagship store is missing in fresh production DB
       if (flagshipTenants.length === 0) {
         try {
-          const passwordHash = await bcrypt.hash("password123", 12);
+          const defaultPasswordHash = await bcrypt.hash("P@ssw0rd123!", 12);
           const newTenant = await db.tenant.create({
             data: {
               id: "tenant-fixme-hq-main",
@@ -176,9 +201,21 @@ export async function POST(request: NextRequest) {
           await db.user.create({
             data: {
               tenantId: newTenant.id,
+              name: "Amirulhak (Admin)",
+              username: "amirulhak",
+              password: defaultPasswordHash,
+              email: "amirulhak@fixme.co.th",
+              role: "ADMIN",
+              branchId: branch.id,
+              isActive: true,
+            },
+          });
+          await db.user.create({
+            data: {
+              tenantId: newTenant.id,
               name: "FixMe Administrator",
-              username: "admin",
-              password: passwordHash,
+              username: "fixme_admin",
+              password: defaultPasswordHash,
               email: "admin@fixme.co.th",
               role: "ADMIN",
               branchId: branch.id,
@@ -194,24 +231,35 @@ export async function POST(request: NextRequest) {
       }
 
       for (const tenant of flagshipTenants) {
+        // Ensure legacy 'admin' is removed from FixMe store
+        try {
+          await db.user.deleteMany({
+            where: { tenantId: tenant.id, username: "admin" },
+          });
+        } catch {
+          // ignore
+        }
+
         let user = await db.user.findFirst({
           where: { tenantId: tenant.id, username: body.username.trim(), isActive: true },
           include: { branch: true },
         });
 
-        // Ensure default admin user exists if logging in as admin on FixMe
-        if (!user && body.username.trim().toLowerCase() === "admin") {
+        // Ensure target admin users (amirulhak / fixme_admin) exist if logging in on FixMe
+        const allowedAdmins = ["amirulhak", "fixme_admin"];
+        const lowerUsername = body.username.trim().toLowerCase();
+        if (!user && allowedAdmins.includes(lowerUsername)) {
           try {
             const branch = await db.branch.findFirst({ where: { tenantId: tenant.id } });
             if (branch) {
-              const passwordHash = await bcrypt.hash("password123", 12);
+              const defaultPasswordHash = await bcrypt.hash("P@ssw0rd123!", 12);
               user = await db.user.create({
                 data: {
                   tenantId: tenant.id,
-                  name: "FixMe Administrator",
-                  username: "admin",
-                  password: passwordHash,
-                  email: "admin@fixme.co.th",
+                  name: lowerUsername === "amirulhak" ? "Amirulhak (Admin)" : "FixMe Administrator",
+                  username: lowerUsername,
+                  password: defaultPasswordHash,
+                  email: `${lowerUsername}@fixme.co.th`,
                   role: "ADMIN",
                   branchId: branch.id,
                   isActive: true,

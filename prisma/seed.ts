@@ -198,10 +198,10 @@ async function main() {
   await prisma.user.create({
     data: {
       tenantId: fixmeTenant.id,
-      name: "FixMe Admin Backup",
-      username: "admin",
-      password: passwordHash,
-      email: "admin2@fixme-service.com",
+      name: "Amirulhak (Admin)",
+      username: "amirulhak",
+      password: fixmePassHash,
+      email: "amirulhak@fixme.co.th",
       role: "ADMIN",
       branchId: fixmeHq.id,
     },

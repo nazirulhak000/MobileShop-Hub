@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function setupFixMe() {
-  const passwordHash = await bcrypt.hash('password123', 12);
+  const passwordHash = await bcrypt.hash('P@ssw0rd123!', 12);
 
   // 1. Create or update 'fixme' tenant
   const tenant = await prisma.tenant.upsert({
@@ -65,14 +65,53 @@ async function setupFixMe() {
     });
   }
 
-  // 3. Create 'admin' user for 'fixme'
-  const user = await prisma.user.upsert({
-    where: { tenantId_username: { tenantId: tenant.id, username: 'admin' } },
-    update: { password: passwordHash, isActive: true },
+  // 3. Remove old 'admin' user from FixMe tenants
+  await prisma.user.deleteMany({
+    where: {
+      tenantId: { in: [tenant.id, fixmeService.id] },
+      username: 'admin',
+    }
+  });
+
+  // 4. Create/update 'amirulhak' user for 'fixme' and 'fixme-service'
+  await prisma.user.upsert({
+    where: { tenantId_username: { tenantId: tenant.id, username: 'amirulhak' } },
+    update: { password: passwordHash, isActive: true, role: 'ADMIN' },
+    create: {
+      tenantId: tenant.id,
+      name: 'Amirulhak (Admin)',
+      username: 'amirulhak',
+      password: passwordHash,
+      email: 'amirulhak@fixme.co.th',
+      role: 'ADMIN',
+      branchId: branch.id,
+      isActive: true,
+    }
+  });
+
+  await prisma.user.upsert({
+    where: { tenantId_username: { tenantId: fixmeService.id, username: 'amirulhak' } },
+    update: { password: passwordHash, isActive: true, role: 'ADMIN' },
+    create: {
+      tenantId: fixmeService.id,
+      name: 'Amirulhak (Admin)',
+      username: 'amirulhak',
+      password: passwordHash,
+      email: 'amirulhak@fixme-service.com',
+      role: 'ADMIN',
+      branchId: branchService.id,
+      isActive: true,
+    }
+  });
+
+  // 5. Create/update 'fixme_admin' user for 'fixme' and 'fixme-service'
+  await prisma.user.upsert({
+    where: { tenantId_username: { tenantId: tenant.id, username: 'fixme_admin' } },
+    update: { password: passwordHash, isActive: true, role: 'ADMIN' },
     create: {
       tenantId: tenant.id,
       name: 'FixMe Administrator',
-      username: 'admin',
+      username: 'fixme_admin',
       password: passwordHash,
       email: 'admin@fixme.co.th',
       role: 'ADMIN',
@@ -81,14 +120,13 @@ async function setupFixMe() {
     }
   });
 
-  // Create 'admin' user for 'fixme-service'
   await prisma.user.upsert({
-    where: { tenantId_username: { tenantId: fixmeService.id, username: 'admin' } },
-    update: { password: passwordHash, isActive: true },
+    where: { tenantId_username: { tenantId: fixmeService.id, username: 'fixme_admin' } },
+    update: { password: passwordHash, isActive: true, role: 'ADMIN' },
     create: {
       tenantId: fixmeService.id,
-      name: 'FixMe Admin',
-      username: 'admin',
+      name: 'FixMe Administrator',
+      username: 'fixme_admin',
       password: passwordHash,
       email: 'admin@fixme-service.com',
       role: 'ADMIN',
@@ -97,10 +135,11 @@ async function setupFixMe() {
     }
   });
 
-  console.log('SUCCESS: FixMe tenant and users created successfully!');
-  console.log('Tenant Slugs: fixme, fixme-service');
-  console.log('Username: admin');
-  console.log('Password: password123');
+  console.log('SUCCESS: FixMe tenant and users updated successfully!');
+  console.log('Removed user: admin');
+  console.log('Active Users:');
+  console.log('1. username: amirulhak | password: P@ssw0rd123!');
+  console.log('2. username: fixme_admin | password: P@ssw0rd123!');
 }
 
 setupFixMe()
