@@ -93,8 +93,8 @@ export interface LandingFaqProps {
   customFaqs?: any[];
 }
 
-export function LandingFaq({ lineId, themeColor = "emerald", customFaqs }: LandingFaqProps = {}) {
-  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+export function LandingFaq({ lineId, themeColor = "blue", customFaqs }: LandingFaqProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.blue;
   const faqsList = React.useMemo(() => {
     if (customFaqs && Array.isArray(customFaqs) && customFaqs.length > 0) {
       const valid = customFaqs.filter((item) => Boolean(item && typeof item === "object"));
@@ -198,13 +198,13 @@ export function LandingFaq({ lineId, themeColor = "emerald", customFaqs }: Landi
         {/* Bottom CTA Box */}
         <div className="mt-12 p-6 rounded-2xl bg-slate-900 text-white flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800 shadow-2xs">
           <div className="flex items-center gap-3 text-center sm:text-left">
-            <div className="h-11 w-11 rounded-xl bg-slate-800 text-emerald-400 flex items-center justify-center shrink-0 border border-slate-700">
+            <div className={`h-11 w-11 rounded-xl bg-slate-800 ${theme.accentText} flex items-center justify-center shrink-0 border border-slate-700`}>
               <MessageCircle className="h-5 w-5" />
             </div>
             <div>
               <h4 className="text-sm font-semibold text-white">ต้องการสอบถามอาการเสียเพิ่มเติม</h4>
               <p className="text-xs text-slate-300 mt-0.5">
-                ทักแชทปรึกษาช่างเทคนิคผู้ชำนาญการโดยตรงได้ทันที ตรวจเช็ควิเคราะห์อาการเบื้องต้นฟรี
+                ทักแชทปรึกษาช่างเทคนิคผู้ชำนาญการโดยตรงได้ทันที ตรวจเช็ควิเคราะห์อาการเบื้องต้นฟรี 0.-
               </p>
             </div>
           </div>
@@ -214,7 +214,7 @@ export function LandingFaq({ lineId, themeColor = "emerald", customFaqs }: Landi
             href={lineAddFriendUrl(lineId)}
             target="_blank"
             rel="noreferrer"
-            className="min-h-[44px] px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shrink-0 shadow-2xs transition-colors duration-150 motion-reduce:transition-none flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            className={`min-h-[44px] px-6 py-2.5 rounded-xl ${theme.primaryButton} font-semibold text-xs shrink-0 shadow-2xs transition-colors duration-150 motion-reduce:transition-none flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing}`}
           >
             <MessageCircle className="h-4 w-4" />
             <span>ปรึกษาช่างทาง LINE</span>

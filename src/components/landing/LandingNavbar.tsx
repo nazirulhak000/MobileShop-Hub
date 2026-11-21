@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { extractTrackingToken, TRACKING_INPUT_ERROR } from "./trackingToken";
 import { NavigationMenuItem, StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { FixMeLogo } from "./FixMeLogo";
 import {
   Smartphone,
   Search,
@@ -95,14 +96,14 @@ interface LandingNavbarProps {
 }
 
 export function LandingNavbar({
-  shopName = "MobileShop-Hub",
+  shopName = "FixMe ซ่อมมือถือ",
   phone,
   shopSlug,
   lineId,
   hiddenSections = [],
   navigationMenu,
   isSubpage = false,
-  themeColor = "emerald",
+  themeColor = "blue",
   logoUrl,
 }: LandingNavbarProps = {}) {
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
@@ -269,24 +270,28 @@ export function LandingNavbar({
                   alt={shopName}
                   className="h-10 w-10 rounded-xl object-cover border border-slate-200 shadow-xs"
                 />
-              ) : (
+              ) : shopName && !shopName.includes("FixMe") ? (
                 <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-xs">
                   <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
                 </div>
+              ) : (
+                <FixMeLogo size="md" variant="dark" />
               )}
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-lg text-slate-900 tracking-tight">
-                    {shopName}
-                  </span>
-                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${theme.lightBg} ${theme.lightText} border ${theme.lightBorder}`}>
-                    Store
-                  </span>
+              {(!shopName || !shopName.includes("FixMe") || logoUrl) && (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-lg text-slate-900 tracking-tight">
+                      {shopName}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${theme.lightBg} ${theme.lightText} border ${theme.lightBorder}`}>
+                      Store
+                    </span>
+                  </div>
+                  <p className="text-xs font-normal text-slate-500 hidden sm:block">
+                    ศูนย์บริการซ่อมมือถือด่วนและตรวจเช็คมาตรฐานแล็บ
+                  </p>
                 </div>
-                <p className="text-xs font-normal text-slate-500 hidden sm:block">
-                  ศูนย์บริการซ่อมมือถือด่วนและตรวจเช็คมาตรฐานแล็บ
-                </p>
-              </div>
+              )}
             </Link>
 
             {/* Desktop Navigation Links */}

@@ -160,7 +160,7 @@ export function ServicesBento({
   showEstimate = true,
   showLiveTracking = true,
   showLocation = true,
-  themeColor = "emerald",
+  themeColor = "blue",
 }: ServicesBentoProps = {}) {
   const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -198,22 +198,22 @@ export function ServicesBento({
       <div
         className="pointer-events-none absolute -inset-px opacity-70 transition-opacity duration-300"
         style={{
-          background: `radial-gradient(650px circle at ${mousePos.x}px ${mousePos.y}px, rgba(16, 185, 129, 0.08), transparent 75%)`,
+          background: `radial-gradient(650px circle at ${mousePos.x}px ${mousePos.y}px, ${theme.hex}18, transparent 75%)`,
         }}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12 sm:mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium border border-slate-200">
+          <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${theme.lightBg} ${theme.lightText} text-xs font-semibold border ${theme.lightBorder}`}>
             <Wrench className={`h-3.5 w-3.5 ${theme.lightAccentText}`} />
             <span>บริการมาตรฐานวิศวกรรมอิเล็กทรอนิกส์</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
-            บริการหลักของศูนย์บริการ MobileShop-Hub
+            บริการหลักของศูนย์บริการ FixMe ซ่อมมือถือ
           </h2>
           <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-            ศูนย์บริการครบวงจร รองรับงานซ่อมแล็บด่วน ตรวจสอบสถานะงานซ่อมผ่านระบบออนไลน์ เทิร์นเครื่องตรวจสอบเลข IMEI และบริการอะไหล่มาตรฐาน มอก. แตะที่การ์ดเพื่อดูเครื่องมือแล็บและขั้นตอนละเอียด
+            ศูนย์บริการครบวงจร ตรวจเช็กอาการฟรี 0 บาททุกรุ่น รองรับงานซ่อมแล็บด่วน รอรับได้ใน 30-60 นาที ตรวจสอบสถานะงานซ่อมผ่านระบบออนไลน์ 24 ชม. และบริการอะไหล่มาตรฐาน มอก. พร้อมใบรับประกัน
           </p>
         </div>
 
@@ -222,13 +222,18 @@ export function ServicesBento({
           {/* Card 1: Express Lab Repairs (Span 2 cols on lg) */}
           <div className="lg:col-span-2 rounded-3xl bg-slate-900 p-6 sm:p-8 text-white relative border border-slate-800 shadow-md flex flex-col justify-between group hover:border-slate-700 transition-all duration-200">
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className={`h-11 w-11 rounded-2xl bg-slate-800 ${theme.accentText} flex items-center justify-center border border-slate-700 transition-transform group-hover:scale-105`}>
                   <Wrench className="h-5 w-5" />
                 </div>
-                <span className={`px-3 py-1 rounded-full ${theme.badge.bg} ${theme.badge.text} text-xs font-medium border ${theme.badge.border} font-mono tabular-nums`}>
-                  Express Lab 30-60 นาที
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-full bg-blue-500/20 text-cyan-300 text-xs font-semibold border border-cyan-400/30">
+                    ตรวจเช็กฟรี 0.-
+                  </span>
+                  <span className={`px-3 py-1 rounded-full ${theme.badge.bg} ${theme.badge.text} text-xs font-medium border ${theme.badge.border} font-mono tabular-nums`}>
+                    Express Lab 30-60 นาที
+                  </span>
+                </div>
               </div>
 
               <div>

@@ -10,12 +10,16 @@ import {
   Car,
   Train,
   MessageCircle,
+  Sparkles,
+  Camera,
 } from "lucide-react";
 import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
 
 interface ShopLocationProps {
   shopName?: string;
   branchName?: string;
+  shopSlug?: string;
+  storefrontImageUrl?: string | null;
   /** Real branch address. When missing, map / navigation buttons are hidden. */
   address?: string | null;
   /** Real branch phone. When missing, the call button is hidden. */
@@ -48,21 +52,24 @@ function lineHref(lineId: string) {
 }
 
 export function ShopLocation({
-  shopName = "MobileShop-Hub",
+  shopName = "FixMe ซ่อมมือถือ",
   branchName,
+  shopSlug,
+  storefrontImageUrl,
   address,
   phone,
   lineId,
   googleMapsUrl,
   demo = false,
-  themeColor = "emerald",
+  themeColor = "blue",
 }: ShopLocationProps = {}) {
-  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.blue;
   const shownBranch = branchName || (demo ? DEMO.branchName : shopName);
   const shownAddress = address || (demo ? DEMO.address : "");
   const mapsQuery = address ? encodeURIComponent(`${shopName} ${address}`) : "";
   const mapsHref = googleMapsUrl || (mapsQuery ? `https://www.google.com/maps/search/?api=1&query=${mapsQuery}` : "");
   const mapsEmbed = mapsQuery ? `https://www.google.com/maps?q=${mapsQuery}&output=embed` : "";
+  const storefrontPhoto = storefrontImageUrl || (shopSlug === "fixme" ? "/images/fixme/storefront.jpg" : null);
   const showRightColumn = Boolean(mapsEmbed || lineId || googleMapsUrl);
 
   return (
@@ -91,6 +98,34 @@ export function ShopLocation({
             className={`${showRightColumn ? "lg:col-span-7" : "lg:col-span-12"} space-y-6 flex flex-col justify-between`}
           >
             <div className="space-y-6">
+              {/* Real Storefront Photo Card */}
+              {storefrontPhoto && (
+                <div className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm group bg-slate-900">
+                  <div className="aspect-[16/9] w-full overflow-hidden">
+                    <img
+                      src={storefrontPhoto}
+                      alt={`ภาพถ่ายหน้าร้านจริง ${shownBranch}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/30 to-transparent flex flex-col justify-end p-4 sm:p-5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-1 rounded-full bg-blue-600 text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-xs">
+                        <Camera className="h-3.5 w-3.5 text-cyan-300" />
+                        <span>ภาพถ่ายหน้าร้านจริง {shownBranch}</span>
+                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-slate-900/90 text-cyan-300 border border-cyan-500/30 text-[11px] font-medium backdrop-blur-sm flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" />
+                        <span>ตรวจเช็กฟรี 0.- • มีที่จอดรถหน้าร้าน</span>
+                      </span>
+                    </div>
+                    <p className="text-white text-xs sm:text-sm mt-1.5 font-medium drop-shadow-sm">
+                      ยินดีต้อนรับทุกท่าน นำเครื่องมาตรวจเช็คได้ทันทีโดยไม่ต้องรอคิวนาน
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Main Store Info Card */}
               <div className="p-6 sm:p-7 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-4">
                 <div className="flex items-start justify-between gap-4">

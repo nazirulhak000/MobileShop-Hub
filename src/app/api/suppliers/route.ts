@@ -6,36 +6,7 @@ import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-// Email regex pattern
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Validate 13-digit Thai Tax ID (or numeric string)
-export function validateTaxId(taxId?: string | null): string | null {
-  if (!taxId) return null;
-  const cleaned = taxId.replace(/[\s-]/g, "");
-  if (!cleaned) return null;
-  if (!/^\d{13}$/.test(cleaned)) {
-    throw new AccessError(400, "เลขประจำตัวผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก");
-  }
-  return cleaned;
-}
-
-// Validate Email format if supplied
-export function validateEmail(email?: string | null): string | null {
-  if (!email) return null;
-  const trimmed = email.trim();
-  if (!trimmed) return null;
-  if (!EMAIL_REGEX.test(trimmed)) {
-    throw new AccessError(400, "รูปแบบอีเมลไม่ถูกต้อง");
-  }
-  return trimmed;
-}
-
-// Normalize phone digits/format
-export function normalizePhone(phone?: string | null): string {
-  if (!phone) return "";
-  return phone.trim();
-}
+import { validateTaxId, validateEmail, normalizePhone } from "@/lib/supplier-utils";
 
 // GET /api/suppliers
 async function handleGET(request: NextRequest) {

@@ -775,7 +775,7 @@ export default function PurchaseHistoryLedgerPage() {
                 {/* Header */}
                 <div className="flex justify-between items-start pb-4 border-b-2 border-slate-800">
                   <div>
-                    <h2 className="text-base font-bold text-slate-900">MobileShop-Hub Service</h2>
+                    <h2 className="text-base font-bold text-slate-900">FixMe Service</h2>
                     <div className="text-[11px] text-slate-600 mt-0.5">
                       สาขา: {printPo.branch?.name} ({printPo.branch?.code})
                     </div>
@@ -898,14 +898,14 @@ export default function PurchaseHistoryLedgerPage() {
                 </div>
 
                 <div className="text-right text-[11px] text-slate-600">
-                  ทำขึ้น ณ {printContract.branch?.name || "MobileShop-Hub"} วันที่ {formatDateThai(printContract.startDate)}
+                  ทำขึ้น ณ {printContract.branch?.name || "FixMe"} วันที่ {formatDateThai(printContract.startDate)}
                 </div>
 
                 <div className="space-y-2 text-justify">
                   <p>
                     สัญญาฉบับนี้ทำขึ้นระหว่าง <strong>{printContract.customer?.name}</strong> เลขประจำตัวประชาชน{" "}
                     <strong>{printContract.nationalId}</strong> เบอร์โทรศัพท์ <strong>{printContract.customer?.phone}</strong> (ซึ่งต่อไปในสัญญานี้เรียกว่า &ldquo;ผู้ขาย&rdquo;) ฝ่ายหนึ่ง กับ{" "}
-                    <strong>{printContract.branch?.name || "MobileShop-Hub"}</strong> (ซึ่งต่อไปในสัญญานี้เรียกว่า &ldquo;ผู้ซื้อ&rdquo;) อีกฝ่ายหนึ่ง
+                    <strong>{printContract.branch?.name || "FixMe"}</strong> (ซึ่งต่อไปในสัญญานี้เรียกว่า &ldquo;ผู้ซื้อ&rdquo;) อีกฝ่ายหนึ่ง
                   </p>
                   <p>
                     ผู้ขายตกลงขาย และผู้ซื้อตกลงซื้อโทรศัพท์เคลื่อนที่ ยี่ห้อ <strong>{printContract.deviceBrand}</strong> รุ่น{" "}

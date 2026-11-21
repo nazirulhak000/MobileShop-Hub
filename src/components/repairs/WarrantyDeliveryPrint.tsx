@@ -131,7 +131,7 @@ export function WarrantyDeliveryPrint({
               <div className="flex justify-between items-start pb-4 border-b-2 border-slate-900">
                 <div>
                   <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                    {job.branch?.name || "MobileShop-Hub Service Center"}
+                    {job.branch?.name || "FixMe Service Center"}
                   </h1>
                   <p className="text-slate-600 mt-1 max-w-md">
                     {job.branch?.address}
@@ -371,7 +371,7 @@ export function WarrantyDeliveryPrint({
             >
               <div className="text-center pb-2 border-b border-dashed border-black">
                 <h2 className="text-sm font-bold">
-                  {job.branch?.name || "MobileShop-Hub Service"}
+                  {job.branch?.name || "FixMe Service"}
                 </h2>
                 <div className="mt-1 font-bold text-xs uppercase bg-black text-white py-0.5 px-2 inline-block rounded-xs">
                   ใบส่งมอบเครื่อง & ใบรับประกัน
@@ -428,7 +428,7 @@ export function WarrantyDeliveryPrint({
                   </div>
                 )}
                 <div className="text-[8px] text-gray-400 pt-1">
-                  MobileShop-Hub • ขอบคุณที่วางใจใช้บริการ
+                  FixMe • ขอบคุณที่วางใจใช้บริการ
                 </div>
               </div>
             </div>

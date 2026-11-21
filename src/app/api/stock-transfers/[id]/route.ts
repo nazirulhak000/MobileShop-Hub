@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AccessError, staffContext } from "@/lib/staff-context";
 import { withStaff, readJson, safeError, reqId } from "@/lib/staff-http";
-import { getTenantTransfers } from "../route";
+import { getTenantTransfers } from "@/lib/stock-transfer-store";
 
 export const dynamic = "force-dynamic";
 

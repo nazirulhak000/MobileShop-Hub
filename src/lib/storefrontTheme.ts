@@ -168,54 +168,54 @@ export const THEME_PALETTES: Record<StorefrontThemeColor, ThemePalette> = {
   },
   blue: {
     id: "blue",
-    label: "น้ำเงินรอยัล (Royal Blue)",
-    labelEn: "Blue",
-    hex: "#3b82f6",
-    primary: "#3b82f6",
-    gradient: "from-blue-400 via-indigo-300 to-cyan-400",
-    gradientText: "from-blue-400 via-indigo-300 to-cyan-400",
-    button: "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20",
-    primaryButton: "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20",
-    primaryButtonHover: "hover:bg-blue-500",
+    label: "น้ำเงินรอยัล (FixMe Royal Blue)",
+    labelEn: "Royal Blue & Cyan",
+    hex: "#0B57D0",
+    primary: "#0B57D0",
+    gradient: "from-blue-500 via-sky-400 to-cyan-400",
+    gradientText: "from-blue-400 via-sky-300 to-cyan-300",
+    button: "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20",
+    primaryButton: "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-blue-900/25",
+    primaryButtonHover: "hover:from-blue-700 hover:to-blue-800",
     badge: {
-      bg: "bg-blue-950/80",
-      text: "text-blue-300",
+      bg: "bg-blue-950/90",
+      text: "text-cyan-300",
       border: "border-blue-800/80",
-      radarPing: "bg-blue-400",
-      radarDot: "bg-blue-500",
+      radarPing: "bg-cyan-400",
+      radarDot: "bg-cyan-400",
       lightBg: "bg-blue-50",
-      lightText: "text-blue-900",
+      lightText: "text-blue-950",
       lightBorder: "border-blue-200",
     },
     radar: {
-      ping: "bg-blue-400",
-      dot: "bg-blue-500",
-      sweep: "via-blue-400",
-      shadow: "#3b82f6",
+      ping: "bg-cyan-400",
+      dot: "bg-cyan-400",
+      sweep: "via-cyan-400",
+      shadow: "#0084FF",
     },
     announcement: {
-      bg: "bg-blue-950",
-      text: "text-blue-200",
-      border: "border-blue-800/60",
+      bg: "bg-slate-950",
+      text: "text-cyan-200",
+      border: "border-blue-900/60",
       badgeBg: "bg-blue-900/90",
-      badgeText: "text-blue-200",
+      badgeText: "text-cyan-200",
     },
-    accentText: "text-blue-400",
-    accentBorder: "border-blue-500/40",
-    accentBg: "bg-blue-500/10",
-    accentRing: "focus-visible:ring-blue-500",
-    iconColor: "text-blue-400",
-    glowBg: "bg-blue-500/10",
+    accentText: "text-cyan-400",
+    accentBorder: "border-cyan-500/40",
+    accentBg: "bg-cyan-500/10",
+    accentRing: "focus-visible:ring-cyan-500",
+    iconColor: "text-cyan-400",
+    glowBg: "bg-blue-600/15",
     lightBg: "bg-blue-50",
     lightText: "text-blue-900",
     lightBorder: "border-blue-200",
-    darkBg: "bg-blue-950",
-    darkBorder: "border-blue-800",
-    radarSweep: "via-blue-400",
-    radarShadow: "#3b82f6",
-    activePill: "bg-blue-600 text-white border-blue-400 shadow-sm",
-    activeTile: "bg-blue-500 border-blue-300 text-slate-950 font-bold shadow-[0_0_8px_#3b82f6]",
-    navCta: "bg-blue-600 hover:bg-blue-700 text-white",
+    darkBg: "bg-slate-950",
+    darkBorder: "border-blue-900",
+    radarSweep: "via-cyan-400",
+    radarShadow: "#0084FF",
+    activePill: "bg-gradient-to-r from-blue-600 to-cyan-600 text-white border-cyan-400 shadow-sm",
+    activeTile: "bg-blue-600 border-cyan-300 text-white font-bold shadow-[0_0_12px_#0084FF]",
+    navCta: "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white shadow-sm shadow-blue-900/20",
     focusRing: "focus:ring-blue-600 focus:border-blue-600",
     focusVisibleRing: "focus-visible:ring-blue-600",
     lightAccentText: "text-blue-700",
@@ -724,16 +724,36 @@ export function safeParsePricingRates(raw: unknown): any[] | null {
     .map((item, idx) => {
       const rawPrice = item.basePrice !== undefined ? item.basePrice : item.price;
       const num = typeof rawPrice === "number" ? rawPrice : parseFloat(String(rawPrice || "").replace(/,/g, ""));
-      const basePrice = !isNaN(num) && num > 0 ? num : 990;
+      const basePrice = !isNaN(num) && num >= 0 ? num : 990;
 
       return {
         id: String(item.id || `rate-${idx + 1}`),
         name: String(item.name || item.service || item.title || "บริการซ่อมบำรุง"),
-        badge: String(item.badge || "มาตรฐานศูนย์"),
+        badge: String(item.badge || (basePrice === 0 ? "ฟรี 0 บาท" : "มาตรฐานศูนย์")),
         basePrice,
         timeEst: String(item.timeEst || item.time || "30 นาที"),
       };
     });
+
+  return sanitized.length > 0 ? sanitized : null;
+}
+
+export function safeParseReviews(raw: unknown): any[] | null {
+  const parsed = safeParseJson<unknown>(raw, null);
+  if (!Array.isArray(parsed) || parsed.length === 0) return null;
+
+  const sanitized = parsed
+    .filter((item): item is Record<string, any> => Boolean(item && typeof item === "object"))
+    .map((item, idx) => ({
+      id: String(item.id || `rev-${idx + 1}`),
+      name: String(item.name || "ลูกค้าผู้รับบริการ"),
+      category: (["all", "screen", "battery", "board"].includes(item.category) ? item.category : "all") as "all" | "screen" | "battery" | "board",
+      rating: typeof item.rating === "number" ? Math.max(1, Math.min(5, Math.round(item.rating))) : 5,
+      device: String(item.device || "สมาร์ตโฟน"),
+      date: String(item.date || "รีวิวเร็วๆ นี้"),
+      avatarColor: String(item.avatarColor || "bg-blue-600"),
+      comment: String(item.comment || item.text || "บริการยอดเยี่ยม ช่างซ่อมรวดเร็ว ราคาประทับใจ"),
+    }));
 
   return sanitized.length > 0 ? sanitized : null;
 }

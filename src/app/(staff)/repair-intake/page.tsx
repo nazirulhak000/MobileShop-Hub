@@ -36,6 +36,7 @@ import { SignaturePad } from "@/components/repairs/SignaturePad";
 import { PreCheckMatrix, PRE_CHECK_DEFINITIONS } from "@/components/repairs/PreCheckMatrix";
 import { PhysicalDamageInspector } from "@/components/repairs/PhysicalDamageInspector";
 import { ThermalSlipModal } from "@/components/repairs/ThermalSlipModal";
+import { PhotoCaptureField } from "@/components/common/PhotoCaptureField";
 
 const POPULAR_BRANDS = [
   "Apple",
@@ -104,6 +105,7 @@ export default function ReceptionIntakePage() {
   // Physical Damage Mapping & Notes
   const [damageLocations, setDamageLocations] = useState<string[]>([]);
   const [damageNotes, setDamageNotes] = useState("");
+  const [devicePhoto, setDevicePhoto] = useState<string | null>(null);
 
   // Issue & Estimate
   const [issueDescription, setIssueDescription] = useState("");
@@ -221,6 +223,7 @@ export default function ReceptionIntakePage() {
         estimatedCost: Math.max(0, Number(estimatedCost) || Number(laborFee) || 0),
         estimatedFinish: estimatedFinish || null,
         notes: intakeNotes.trim() || null,
+        photos: devicePhoto ? [devicePhoto] : [],
       };
 
       const res = await fetch("/api/repairs", {
@@ -599,6 +602,18 @@ export default function ReceptionIntakePage() {
               damageNotes={damageNotes}
               onChangeNotes={setDamageNotes}
             />
+
+            {/* Real Device Photo Capture */}
+            <div className="pt-3 border-t border-slate-100">
+              <PhotoCaptureField
+                label="ภาพถ่ายสภาพตัวเครื่องก่อนซ่อม / รอยแตก / ตำหนิ"
+                value={devicePhoto}
+                onChange={setDevicePhoto}
+                guideType="device"
+                placeholderText="ถ่ายภาพสภาพเครื่อง / แนบรูป"
+                helperText="ถ่ายภาพรอบตัวเครื่องหรือรอยแตกก่อนรับเข้าซ่อม เพื่อป้องกันข้อพิพาทเรื่องรอยตำหนิ"
+              />
+            </div>
           </CardContent>
         </Card>
 

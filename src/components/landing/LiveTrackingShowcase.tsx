@@ -21,6 +21,8 @@ import {
   Zap,
   Fingerprint,
 } from "lucide-react";
+import { StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { FixMePhoneIcon } from "./FixMeLogo";
 
 interface StepData {
   step: number;
@@ -110,7 +112,12 @@ const STEPS: StepData[] = [
   },
 ];
 
-export function LiveTrackingShowcase() {
+interface LiveTrackingShowcaseProps {
+  themeColor?: StorefrontThemeColor;
+}
+
+export function LiveTrackingShowcase({ themeColor = "blue" }: LiveTrackingShowcaseProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.blue;
   const [activeStep, setActiveStep] = useState<number>(3);
   const [isApprovedDemo, setIsApprovedDemo] = useState<boolean>(true);
 
@@ -143,8 +150,8 @@ export function LiveTrackingShowcase() {
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-12 sm:mb-16">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white text-slate-800 text-xs font-medium border border-slate-200 shadow-2xs">
-            <Activity className="h-3.5 w-3.5 text-emerald-600" />
-            <span>ภาพจำลองการติดตามงานซ่อม (ตัวอย่าง)</span>
+            <Activity className={`h-3.5 w-3.5 ${theme.iconColor}`} />
+            <span>ภาพจำลองการติดตามงานซ่อม (FixMe Live Tracking)</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
             ขั้นตอนการซ่อมที่ตรวจสอบภาพถ่ายและสถานะได้จริง
@@ -169,24 +176,24 @@ export function LiveTrackingShowcase() {
                   aria-selected={isActive}
                   aria-label={`ขั้นตอนที่ ${s.step}: ${s.title}`}
                   onClick={() => setActiveStep(s.step)}
-                  className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-medium transition-all duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
+                  className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-medium transition-all duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} ${
                     isActive
                       ? "bg-slate-900 text-white shadow-xs scale-[1.02]"
                       : isPast
-                      ? "text-emerald-800 hover:bg-slate-50"
+                      ? "text-blue-900 hover:bg-slate-50"
                       : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                   }`}
                 >
                   <span
                     className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-mono tabular-nums font-semibold shrink-0 transition-colors ${
                       isActive
-                        ? "bg-emerald-500 text-slate-950"
+                        ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white"
                         : isPast
-                        ? "bg-emerald-100 text-emerald-800"
+                        ? "bg-blue-100 text-blue-800"
                         : "bg-slate-100 text-slate-600"
                     }`}
                   >
-                    {isPast ? <CheckCircle2 className="h-4 w-4 text-emerald-700" /> : s.step}
+                    {isPast ? <CheckCircle2 className="h-4 w-4 text-blue-600" /> : s.step}
                   </span>
                   <span className="truncate">{s.title.split(". ")[1]}</span>
                 </button>
@@ -213,7 +220,7 @@ export function LiveTrackingShowcase() {
               <h3 className="text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight">
                 {current.title}
               </h3>
-              <p className="text-xs font-mono text-emerald-700 font-medium tracking-wide">
+              <p className="text-xs font-mono text-cyan-600 font-medium tracking-wide">
                 {current.subtitle}
               </p>
               <p className="text-sm text-slate-600 leading-relaxed pt-1">
@@ -225,7 +232,7 @@ export function LiveTrackingShowcase() {
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-900 flex items-center gap-2">
-                  <Wrench className="h-4 w-4 text-emerald-700" />
+                  <Wrench className="h-4 w-4 text-blue-600" />
                   <span>บันทึกช่างเทคนิคผู้ดูแล (Technician Log)</span>
                 </span>
                 <span className="text-xs font-mono text-slate-500 tabular-nums">
@@ -235,8 +242,8 @@ export function LiveTrackingShowcase() {
               <p className="text-xs text-slate-700 leading-relaxed font-mono">
                 {current.technicianNote}
               </p>
-              <div className="pt-1 text-xs font-medium text-emerald-800 flex items-center gap-1.5 tabular-nums">
-                <Activity className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+              <div className="pt-1 text-xs font-medium text-blue-950 flex items-center gap-1.5 tabular-nums">
+                <Activity className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
                 <span>ผลการตรวจวัด: {current.voltageOrSpec}</span>
               </div>
             </div>
@@ -266,9 +273,9 @@ export function LiveTrackingShowcase() {
                 <button
                   type="button"
                   onClick={() => setIsApprovedDemo(!isApprovedDemo)}
-                  className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium transition-all duration-150 flex items-center gap-2 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${
+                  className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium transition-all duration-150 flex items-center gap-2 shrink-0 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} ${
                     isApprovedDemo
-                      ? "bg-emerald-600 text-white shadow-xs"
+                      ? `${theme.primaryButton} text-white shadow-xs`
                       : "bg-slate-200 text-slate-800 hover:bg-slate-300"
                   }`}
                 >
@@ -282,7 +289,7 @@ export function LiveTrackingShowcase() {
             <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 text-white border border-slate-800 space-y-3 shadow-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <div className={`h-7 w-7 rounded-lg ${theme.darkBg} ${theme.accentText} flex items-center justify-center border ${theme.darkBorder}`}>
                     <ShieldCheck className="h-4 w-4" />
                   </div>
                   <div>
@@ -320,7 +327,7 @@ export function LiveTrackingShowcase() {
                           onClick={() => handleDotTouch(dot)}
                           className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-mono font-bold transition-all ${
                             isConnected
-                              ? "bg-emerald-500 text-slate-950 ring-2 ring-emerald-300 scale-105 shadow-[0_0_10px_#10b981]"
+                              ? "bg-blue-600 text-white ring-2 ring-cyan-300 scale-105 shadow-[0_0_12px_#0084FF]"
                               : "bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white"
                           }`}
                           aria-label={`จุดปลดล็อคที่ ${dot}`}
@@ -339,7 +346,7 @@ export function LiveTrackingShowcase() {
                         ลองแตะเชื่อมจุด Pattern Lock เพื่อทดสอบระบบจำลอง
                       </span>
                     ) : (
-                      <span className="text-emerald-400 font-mono flex items-center gap-1">
+                      <span className={`${theme.accentText} font-mono flex items-center gap-1`}>
                         <Lock className="h-3.5 w-3.5" /> ลำดับจุดที่เลือก:{" "}
                         {patternDots.join(" ➔ ")}
                       </span>
@@ -357,7 +364,7 @@ export function LiveTrackingShowcase() {
               <span className="text-xs text-slate-500">ข้อมูลในภาพจำลองนี้เป็นตัวอย่าง ไม่ใช่งานซ่อมจริง</span>
               <Link
                 href="/track"
-                className="min-h-[44px] inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:underline"
+                className={`min-h-[44px] inline-flex items-center gap-1.5 text-xs font-medium ${theme.lightAccentText} hover:underline`}
               >
                 <span>ติดตามงานซ่อมของคุณ (ใช้ลิงก์จากใบรับเครื่อง)</span>
                 <ExternalLink className="h-3.5 w-3.5" />
@@ -380,13 +387,13 @@ export function LiveTrackingShowcase() {
                   <span className="text-[11px] font-mono font-medium text-slate-300">09:41</span>
                   {/* Dynamic Island Pill */}
                   <div className="h-6 px-3 rounded-full bg-black border border-slate-800 flex items-center gap-2 shadow-lg">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[10px] font-mono text-emerald-300">Lab Station 01</span>
+                    <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-[10px] font-mono text-cyan-300">Lab Station 01</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-slate-300 text-[11px]">
                     <span className="text-[10px] font-mono font-bold">5G</span>
                     <span className="h-2.5 w-4 rounded-xs border border-slate-400 flex items-center p-0.5">
-                      <span className="h-full w-full bg-emerald-400 rounded-2xs" />
+                      <span className="h-full w-full bg-cyan-400 rounded-2xs" />
                     </span>
                   </div>
                 </div>
@@ -395,12 +402,12 @@ export function LiveTrackingShowcase() {
                 <div className="flex-1 space-y-3 pt-1">
                   {/* Card Header inside Mockup */}
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                    <div className="flex items-center gap-1.5">
-                      <Smartphone className="h-4 w-4 text-emerald-400" />
-                      <span className="text-xs font-semibold text-white">MobileShop Live</span>
+                    <div className="flex items-center gap-2">
+                      <FixMePhoneIcon size={20} />
+                      <span className="text-xs font-bold text-white tracking-tight">FixMe Live Tracking</span>
                     </div>
-                    <span className="text-[11px] font-mono bg-slate-900 text-emerald-400 font-semibold px-2 py-0.5 rounded border border-slate-700 tabular-nums">
-                      ตัวอย่าง (DEMO)
+                    <span className="text-[11px] font-mono bg-blue-950 text-cyan-400 font-semibold px-2 py-0.5 rounded border border-blue-800/80 tabular-nums">
+                      ระบบติดตามสด 24 ชม.
                     </span>
                   </div>
 
@@ -416,7 +423,7 @@ export function LiveTrackingShowcase() {
                       className="w-full h-full object-cover transition-opacity duration-300"
                     />
                     <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 backdrop-blur-xs p-2.5 text-white">
-                      <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono tabular-nums">
+                      <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-mono tabular-nums">
                         <Camera className="h-3.5 w-3.5" />
                         <span>ภาพถ่ายขั้นตอนที่ {current.step} จาก 5</span>
                       </div>
@@ -430,19 +437,19 @@ export function LiveTrackingShowcase() {
                   <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-white font-medium truncate">{current.title}</span>
-                      <span className="text-[11px] font-mono text-emerald-400 shrink-0">
+                      <span className="text-[11px] font-mono text-cyan-400 shrink-0">
                         {current.step * 20}%
                       </span>
                     </div>
                     <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                        className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-300"
                         style={{ width: `${current.step * 20}%` }}
                       />
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 flex items-center justify-between pt-0.5">
                       <span>{current.voltageOrSpec.split(" • ")[0]}</span>
-                      <span className="text-emerald-400">QC Verified</span>
+                      <span className="text-cyan-400">QC Verified</span>
                     </div>
                   </div>
                 </div>

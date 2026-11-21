@@ -734,11 +734,11 @@ export default function InvoicesPage() {
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-teal-600" />
                     <h2 className="font-black text-xl text-slate-900 tracking-tight">
-                      บริษัท โมบายช็อป ฮับ จำกัด
+                      บริษัท ฟิกซ์มี เซอร์วิส จำกัด
                     </h2>
                   </div>
                   <div className="font-bold text-xs text-slate-700">
-                    MobileShop HQ ({selectedPOS?.branchName || currentBranch.name})
+                    FixMe HQ ({selectedPOS?.branchName || currentBranch.name})
                   </div>
                   <div className="text-xs text-slate-600 max-w-md leading-relaxed">
                     123/45 ถนนสุขุมวิท ซอย 55 แขวงคลองเตยเหนือ เขตวัฒนา กรุงเทพฯ 10110
@@ -747,7 +747,7 @@ export default function InvoicesPage() {
                     เลขประจำตัวผู้เสียภาษีอากร: <strong>0105561234567</strong> (สำนักงานใหญ่)
                   </div>
                   <div className="text-xs text-slate-600">
-                    โทร: 02-123-4567 • www.mobileshophub.com
+                    โทร: 02-123-4567 • www.fixme-service.com
                   </div>
                 </div>
 

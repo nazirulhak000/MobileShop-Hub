@@ -40,7 +40,9 @@ import {
   ArrowUpRight,
   Receipt,
   Users,
+  Camera,
 } from "lucide-react";
+import { CameraCaptureModal } from "@/components/common/CameraCaptureModal";
 import { useApp } from "@/context/AppContext";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -248,6 +250,7 @@ export default function ExpensesPage() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isReceiptCameraOpen, setIsReceiptCameraOpen] = useState(false);
 
   // Live Tax Calculations for Form
   const liveCalculations = useMemo(() => {
@@ -1513,6 +1516,17 @@ export default function ExpensesPage() {
               <Button
                 type="button"
                 variant="outline"
+                onClick={() => setIsReceiptCameraOpen(true)}
+                disabled={uploadingReceipt}
+                className="text-xs h-9 gap-1.5 border-slate-300 hover:bg-slate-50 text-blue-700"
+              >
+                <Camera className="h-3.5 w-3.5 text-blue-600" />
+                <span>ถ่ายภาพสลิป</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploadingReceipt}
                 className="text-xs h-9 gap-1.5 border-dashed border-slate-300 hover:bg-slate-50"
@@ -1522,8 +1536,18 @@ export default function ExpensesPage() {
                 ) : (
                   <UploadCloud className="h-3.5 w-3.5 text-blue-600" />
                 )}
-                {uploadingReceipt ? "กำลังอัปโหลด..." : "เลือกไฟล์แนบ (JPG, PNG, PDF)"}
+                {uploadingReceipt ? "กำลังอัปโหลด..." : "เลือกไฟล์แนบ"}
               </Button>
+
+              <CameraCaptureModal
+                isOpen={isReceiptCameraOpen}
+                onClose={() => setIsReceiptCameraOpen(false)}
+                onCapture={(url) => {
+                  setFormReceiptUrl(url);
+                }}
+                title="ถ่ายภาพใบเสร็จ / บิลค่าใช้จ่าย"
+                guideType="general"
+              />
 
               {formReceiptUrl && (
                 <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">

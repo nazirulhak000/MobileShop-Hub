@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 export default function RegisterPage() {
+  const [selectedPlan, setSelectedPlan] = useState<"free" | "pro" | "enterprise">("free");
   const [formData, setFormData] = useState({
     shopName: "",
     shopSlug: "",
@@ -27,6 +28,17 @@ export default function RegisterPage() {
     password: "",
     phone: "",
   });
+
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search).get("plan")?.toLowerCase();
+      if (p === "pro" || p === "enterprise") {
+        setSelectedPlan(p as "pro" | "enterprise");
+      } else {
+        setSelectedPlan("free");
+      }
+    }
+  }, []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -58,7 +70,7 @@ export default function RegisterPage() {
       const res = await fetch("/api/auth/register-tenant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, plan: selectedPlan }),
       });
 
       const data = await res.json();
@@ -90,7 +102,7 @@ export default function RegisterPage() {
             </div>
             <div>
               <span className="text-lg font-bold text-slate-900 tracking-tight">
-                MobileShop<span className="text-emerald-700">-Hub</span>
+                FixMe
               </span>
               <span className="block text-[11px] text-slate-500 font-medium">
                 ระบบบริหารร้านมือถือ & ศูนย์บริการครบวงจร (SaaS)
@@ -191,6 +203,68 @@ export default function RegisterPage() {
                   {error}
                 </div>
               )}
+
+              {/* Plan Selection Tabs */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-2">
+                  เลือกแพ็กเกจที่คุณต้องการเริ่มต้น
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPlan("free")}
+                    className={`p-3 rounded-2xl border text-left transition-all ${
+                      selectedPlan === "free"
+                        ? "border-emerald-500 bg-emerald-50/70 shadow-sm ring-2 ring-emerald-500/20"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-slate-900">Free Forever</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">
+                        ฿0
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 line-clamp-1">ฟรีตลอดชีพ 1 สาขา</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPlan("pro")}
+                    className={`p-3 rounded-2xl border text-left transition-all relative ${
+                      selectedPlan === "pro"
+                        ? "border-blue-600 bg-blue-50/70 shadow-sm ring-2 ring-blue-500/20"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-blue-900">Pro Studio</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-blue-100 text-blue-800">
+                        ฿199
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 line-clamp-1">Live Tracking + LINE</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPlan("enterprise")}
+                    className={`p-3 rounded-2xl border text-left transition-all ${
+                      selectedPlan === "enterprise"
+                        ? "border-purple-600 bg-purple-50/70 shadow-sm ring-2 ring-purple-500/20"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-purple-900">Enterprise</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-purple-100 text-purple-800">
+                        ฿399
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 line-clamp-1">หลายสาขา + จำนำ</p>
+                  </button>
+                </div>
+              </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Shop Name */}
@@ -344,7 +418,7 @@ export default function RegisterPage() {
                 </div>
 
                 <p className="text-[11px] text-center text-slate-500 leading-relaxed pt-1">
-                  การกดสร้างร้านค้า ถือว่าท่านยอมรับข้อตกลงการให้บริการและนโยบายความเป็นส่วนตัวของ MobileShop-Hub
+                  การกดสร้างร้านค้า ถือว่าท่านยอมรับข้อตกลงการให้บริการและนโยบายความเป็นส่วนตัวของ FixMe
                 </p>
               </form>
             </div>
@@ -410,7 +484,7 @@ export default function RegisterPage() {
 
       {/* Simple Footer */}
       <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
-        © 2026 MobileShop-Hub SaaS Platform. ระบบบริหารร้านมือถือและศูนย์บริการครบวงจร
+        © 2026 FixMe SaaS Platform. ระบบบริหารร้านมือถือและศูนย์บริการครบวงจร
       </footer>
     </div>
   );

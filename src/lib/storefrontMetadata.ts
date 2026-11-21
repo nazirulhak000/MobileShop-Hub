@@ -7,7 +7,7 @@ import { safeParseCustomPages } from "@/lib/storefrontTheme";
 export function buildStoreMetadata(tenant: any, shopSlug: string): Metadata {
   if (!tenant) {
     return {
-      title: "MobileShop-Hub | ไม่พบร้านค้า",
+      title: "FixMe | ไม่พบร้านค้า",
       description: "ไม่พบข้อมูลร้านค้าในระบบ",
       robots: {
         index: false,
@@ -85,7 +85,7 @@ export function buildSubpageMetadata(
 ): Metadata {
   if (!tenant) {
     return {
-      title: "MobileShop-Hub | ไม่พบร้านค้า",
+      title: "FixMe | ไม่พบร้านค้า",
       description: "ไม่พบร้านค้าที่ต้องการในระบบ",
       robots: {
         index: false,

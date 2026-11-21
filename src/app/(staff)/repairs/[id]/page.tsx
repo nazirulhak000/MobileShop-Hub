@@ -24,7 +24,10 @@ import {
   FileCheck2,
   RotateCcw,
   Sparkles,
+  Camera,
+  Eye,
 } from "lucide-react";
+import { CameraCaptureModal } from "@/components/common/CameraCaptureModal";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -124,6 +127,55 @@ export default function TechnicianWorkspacePage() {
   useEffect(() => {
     fetchJob();
   }, [id]);
+
+  // Repair Photos State & Handlers
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+
+  const repairPhotos: string[] = job?.photos
+    ? Array.isArray(job.photos)
+      ? job.photos
+      : typeof job.photos === "string"
+      ? (() => {
+          try {
+            const parsed = JSON.parse(job.photos);
+            return Array.isArray(parsed) ? parsed : [job.photos];
+          } catch {
+            return [job.photos];
+          }
+        })()
+      : []
+    : [];
+
+  const handleAddRepairPhoto = async (newUrl: string) => {
+    if (!job) return;
+    const updated = [...repairPhotos, newUrl];
+    try {
+      await fetch(`/api/repairs/${job.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photos: updated }),
+      });
+      setJob((prev: any) => ({ ...prev, photos: updated }));
+    } catch (e) {
+      console.error("Save repair photo error:", e);
+    }
+  };
+
+  const handleRemoveRepairPhoto = async (indexToRemove: number) => {
+    if (!job) return;
+    const updated = repairPhotos.filter((_, i) => i !== indexToRemove);
+    try {
+      await fetch(`/api/repairs/${job.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photos: updated }),
+      });
+      setJob((prev: any) => ({ ...prev, photos: updated }));
+    } catch (e) {
+      console.error("Delete repair photo error:", e);
+    }
+  };
 
   // Transition state
   const handleTransitionState = async (newStatus: RepairStatusType) => {
@@ -740,6 +792,96 @@ export default function TechnicianWorkspacePage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Repair Photos & Camera Evidence */}
+          <Card className="border-slate-200">
+            <CardHeader className="flex flex-row items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <CardTitle className="text-base text-slate-900 flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-blue-600" />
+                  <span>ภาพถ่ายงานซ่อม & หลักฐานตัวเครื่อง (Repair Photos & Camera)</span>
+                </CardTitle>
+                <CardDescription>
+                  ถ่ายภาพขั้นตอนซ่อม อะไหล่ที่เปลี่ยน หรือสภาพเครื่องก่อน/หลังซ่อม
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPhotoModalOpen(true)}
+                className="text-xs text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100 gap-1.5"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>ถ่ายภาพ / เพิ่มรูป</span>
+              </Button>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {repairPhotos.length === 0 ? (
+                <div className="text-center py-8 px-4 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+                  <Camera className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-slate-600">ยังไม่มีภาพถ่ายในงานซ่อมนี้</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    กดปุ่ม &quot;ถ่ายภาพ / เพิ่มรูป&quot; เพื่อเปิดกล้องถ่ายภาพอะไหล่หรือสภาพเครื่อง
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {repairPhotos.map((url, idx) => (
+                    <div
+                      key={idx}
+                      className="group relative h-28 rounded-xl border border-slate-200 overflow-hidden bg-slate-900 shadow-xs"
+                    >
+                      <img src={url} alt={`Repair photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewPhotoUrl(url)}
+                          className="p-1.5 rounded-lg bg-white/90 hover:bg-white text-slate-800"
+                          title="ดูรูปขนาดใหญ่"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRepairPhoto(idx)}
+                          className="p-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white"
+                          title="ลบรูปภาพ"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Camera Capture Modal for Repairs */}
+          <CameraCaptureModal
+            isOpen={isPhotoModalOpen}
+            onClose={() => setIsPhotoModalOpen(false)}
+            onCapture={handleAddRepairPhoto}
+            title="ถ่ายภาพงานซ่อม / อะไหล่"
+            guideType="device"
+          />
+
+          {/* Fullscreen Photo Lightbox */}
+          {previewPhotoUrl && (
+            <div
+              onClick={() => setPreviewPhotoUrl(null)}
+              className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-pointer"
+            >
+              <div className="relative max-w-3xl max-h-[85vh]">
+                <img
+                  src={previewPhotoUrl}
+                  alt="Full Preview"
+                  className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                />
+                <p className="text-center text-xs text-white/70 mt-2">แตะหรือคลิกเพื่อปิด</p>
+              </div>
+            </div>
+          )}
 
           {/* Technician Notes & Warranty Days */}
           <Card className="border-slate-200">

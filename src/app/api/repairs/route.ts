@@ -161,6 +161,7 @@ async function handlePOST(request: NextRequest) {
           customerApproved: true,
           estimatedFinish: parsedFinish,
           notes: notes || null,
+          photos: body.photos ? (Array.isArray(body.photos) ? JSON.stringify(body.photos) : String(body.photos)) : null,
         },
         include: {
           customer: {

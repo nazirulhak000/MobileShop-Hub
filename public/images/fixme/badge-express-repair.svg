@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <defs>
+    <linearGradient id="gf" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ea580c" />
+      <stop offset="100%" stop-color="#c2410c" />
+    </linearGradient>
+  </defs>
+  <circle cx="120" cy="120" r="110" fill="url(#gf)" fill-opacity="0.1" stroke="#ea580c" stroke-width="4" stroke-dasharray="6 6"/>
+  <circle cx="120" cy="120" r="92" fill="#ea580c"/>
+  <!-- Bolt Icon -->
+  <path d="M125 58L98 122H122L115 168L146 106H122L125 58Z" fill="#fed7aa" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+  <text x="120" y="162" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="20" fill="#ffffff" letter-spacing="1">30 MINS</text>
+  <text x="120" y="179" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="11" fill="#ffedd5" letter-spacing="0.5">EXPRESS SAME-DAY</text>
+</svg>

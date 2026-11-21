@@ -65,7 +65,7 @@ export function CtaBlock({
     data?.subtitle ||
     "ปรึกษาอาการเครื่องเสีย ตรวจสอบราคาอะไหล่แท้ และจองคิวซ่อมด่วนกับช่างผู้เชี่ยวชาญ";
   const resolvedBadge = badge || data?.badge || "⚡ สิทธิพิเศษลูกค้าออนไลน์";
-  const resolvedLineId = lineId || data?.lineId || "@mobileshop";
+  const resolvedLineId = lineId || data?.lineId || "@fixme";
   const resolvedLineUrl = lineUrl || data?.lineUrl;
   const resolvedPhone = phone || data?.phone || "081-234-5678";
   const resolvedBenefits = Array.isArray(benefits)

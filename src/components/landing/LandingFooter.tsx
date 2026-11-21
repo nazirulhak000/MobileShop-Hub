@@ -11,6 +11,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { CustomPage, FooterSocialLinks, StorefrontThemeColor, THEME_PALETTES } from "@/lib/storefrontTheme";
+import { FixMeLogo } from "./FixMeLogo";
 
 interface LandingFooterProps {
   /** Shop display name. Defaults to the platform name on the demo landing. */
@@ -21,6 +22,8 @@ interface LandingFooterProps {
   phone?: string | null;
   /** Tenant shop slug for tenant-scoped portal navigation. */
   shopSlug?: string;
+  /** Shop logo URL (e.g. /images/fixme/logo.jpg) */
+  logoUrl?: string | null;
   /** Section anchors not rendered on this page (e.g. "#estimate"). */
   hiddenSections?: string[];
   /** Whether the current page is a subpage */
@@ -34,13 +37,14 @@ interface LandingFooterProps {
 }
 
 export function LandingFooter({
-  shopName,
+  shopName = "FixMe ซ่อมมือถือ",
   address,
   phone,
   shopSlug,
+  logoUrl,
   hiddenSections = [],
   isSubpage = false,
-  themeColor = "emerald",
+  themeColor = "blue",
   customPages,
   footerSocialLinks,
 }: LandingFooterProps = {}) {
@@ -105,24 +109,29 @@ export function LandingFooter({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           {/* Col 1: Brand & Bio (2 cols on lg) */}
           <div className="lg:col-span-2 space-y-4">
-            <Link href={shopSlug ? `/store/${shopSlug}` : "/landing"} className={`flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} rounded-lg p-1`}>
-              <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-2xs">
-                <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
-              </div>
-              <div className="flex items-center gap-2">
-                {shopName ? (
+            <Link href={shopSlug ? `/store/${shopSlug}` : "/landing"} className={`inline-flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} rounded-lg p-1`}>
+              {logoUrl ? (
+                <div className="flex items-center gap-3">
+                  <img
+                    src={logoUrl}
+                    alt={shopName}
+                    className="h-10 w-10 rounded-xl object-cover border border-slate-700 shadow-2xs"
+                  />
+                  <div>
+                    <span className="font-semibold text-lg text-white tracking-tight">{shopName}</span>
+                    <span className={`block text-[11px] ${theme.accentText} font-medium`}>ศูนย์บริการซ่อมมือถือด่วน</span>
+                  </div>
+                </div>
+              ) : shopName && !shopName.includes("FixMe") ? (
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center border border-slate-800 shadow-2xs">
+                    <Smartphone className={`h-5 w-5 ${theme.accentText}`} />
+                  </div>
                   <span className="font-semibold text-lg text-white tracking-tight">{shopName}</span>
-                ) : (
-                  <>
-                    <span className="font-semibold text-lg text-white tracking-tight">
-                      MobileShop
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                      Hub
-                    </span>
-                  </>
-                )}
-              </div>
+                </div>
+              ) : (
+                <FixMeLogo variant="light" size="md" />
+              )}
             </Link>
 
             <p className="text-slate-400 leading-relaxed text-xs max-w-sm">
@@ -354,7 +363,7 @@ export function LandingFooter({
         {/* Bottom Disclaimer & Copyright */}
         <div className="mt-12 pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-500 text-xs">
           <div className="tabular-nums">
-            © {new Date().getFullYear()} {shopName ?? "MobileShop-Hub"} สงวนลิขสิทธิ์ทุกประการ
+            © {new Date().getFullYear()} {shopName ?? "FixMe ซ่อมมือถือ"} สงวนลิขสิทธิ์ทุกประการ
           </div>
           <div className="flex items-center gap-4">
             <span className="hover:text-slate-300 cursor-pointer">นโยบายความเป็นส่วนตัว</span>

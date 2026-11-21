@@ -351,8 +351,8 @@ export function CustomerPortal({ shopSlug, initialTab = "home" }: { shopSlug: st
             <RefreshCw className="h-4 w-4" />
             <span>ลองใหม่อีกครั้ง</span>
           </button>
-          <Link href="/landing" className={secondary}>
-            กลับหน้าหลัก
+          <Link href={shopSlug ? `/store/${shopSlug}` : "/"} className={secondary}>
+            กลับหน้าร้าน
           </Link>
         </div>
       </main>

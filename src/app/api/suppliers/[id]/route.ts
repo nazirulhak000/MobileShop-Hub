@@ -2,7 +2,7 @@ import { AccessError, staffContext } from "@/lib/staff-context";
 import { readJson, reqId, withStaff } from "@/lib/staff-http";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateEmail, validateTaxId, normalizePhone } from "../route";
+import { validateEmail, validateTaxId, normalizePhone } from "@/lib/supplier-utils";
 
 export const dynamic = "force-dynamic";
 

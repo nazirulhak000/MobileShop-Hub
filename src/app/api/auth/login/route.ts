@@ -10,34 +10,128 @@ export const dynamic = "force-dynamic";
 const dummyHash = bcrypt.hashSync("unavailable-account", 12);
 const WINDOW = 15 * 60_000;
 // Login abuse limits (all fixed 15-minute windows):
-//  - IP + shop + username: 10  → brute force from one source; a remote attacker cannot lock a real user
-//                                 out of THEIR network because the bucket includes the attacker's IP.
-//  - IP (any shop/user):   50  → credential stuffing / username spraying from one source.
-//  - shop + username:      50  → distributed guessing ceiling on one account (high enough that a single
-//                                 attacker IP, capped at 10, cannot exhaust it alone).
-//  - shop:               1000  → circuit breaker only; far above any legitimate shop's login volume.
-const LIMITS = { ipUser: 10, ip: 50, user: 50, shop: 1000 };
+//  - IP + username: 10  → brute force from one source on a single account.
+//  - IP (any user): 50  → credential stuffing / username spraying from one source.
+//  - username:      50  → distributed guessing ceiling on one account.
+//  - global:      1000  → circuit breaker.
+const LIMITS = { ipUser: 10, ip: 50, user: 50, global: 1000 };
+
 export async function POST(request: NextRequest) {
   try {
     checkOrigin(request);
     const body = await readJson(request);
-    if (!body || typeof body !== "object" || typeof body.shopSlug !== "string" || typeof body.username !== "string" || typeof body.password !== "string" || !body.username.trim() || body.password.length > 256 || body.username.length > 100 || body.shopSlug.length > 100) throw new AccessError(400, "กรุณาระบุร้าน ชื่อผู้ใช้ และรหัสผ่านให้ครบ");
-    const slug = body.shopSlug.trim().toLowerCase();
+    if (
+      !body ||
+      typeof body !== "object" ||
+      typeof body.username !== "string" ||
+      typeof body.password !== "string" ||
+      !body.username.trim() ||
+      body.password.length > 256 ||
+      body.username.length > 100
+    ) {
+      throw new AccessError(400, "กรุณาระบุชื่อผู้ใช้และรหัสผ่านให้ครบ");
+    }
+
     const username = body.username.trim().toLowerCase();
+    const explicitSlug =
+      typeof body.shopSlug === "string" && body.shopSlug.trim().length > 0
+        ? body.shopSlug.trim().toLowerCase()
+        : null;
+
     const ip = clientIp(request);
-    const ipUserKey = `staff-login-ipuser:${ip}:${slug}:${username}`;
-    // Most specific (attacker-attributable) buckets first, so a blocked source stops consuming shared buckets.
+    const ipUserKey = `staff-login-ipuser:${ip}:${username}`;
+
     await throttle(ipUserKey, LIMITS.ipUser, WINDOW);
     if (isKnownIp(ip)) await throttle(`staff-login-ip:${ip}`, LIMITS.ip, WINDOW);
-    await throttle(`staff-login-user:${slug}:${username}`, LIMITS.user, WINDOW);
-    await throttle(`staff-login-shop:${slug}`, LIMITS.shop, WINDOW);
-    const tenant = await db.tenant.findUnique({ where: { slug } });
-    const user = tenant ? await db.user.findFirst({ where: { tenantId: tenant.id, username: body.username.trim() }, include: { branch: true } }) : null;
-    const isHash = user?.password.startsWith("$2");
-    const valid = await bcrypt.compare(body.password, isHash ? user!.password : dummyHash);
-    if (!valid || !isHash || !user || !user.isActive || !tenant || !["ACTIVE", "TRIAL"].includes(tenant.status) || user.branch.tenantId !== tenant.id) throw new AccessError(401, "ร้าน ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง");
+    await throttle(`staff-login-user:${username}`, LIMITS.user, WINDOW);
+    await throttle("staff-login-global", LIMITS.global, WINDOW);
+
+    let targetUser: any = null;
+    let targetTenantId: string | null = null;
+
+    if (explicitSlug) {
+      // 1. Explicit shop slug specified
+      let tenant = await db.tenant.findUnique({ where: { slug: explicitSlug } });
+      if (!tenant && (explicitSlug === "fixme" || explicitSlug === "fixme-service")) {
+        tenant = await db.tenant.findFirst({
+          where: { slug: { in: ["fixme", "fixme-service"] } },
+        });
+      }
+
+      if (tenant && ["ACTIVE", "TRIAL"].includes(tenant.status)) {
+        const user = await db.user.findFirst({
+          where: { tenantId: tenant.id, username: body.username.trim() },
+          include: { branch: true },
+        });
+
+        const isHash = user?.password.startsWith("$2");
+        const valid = await bcrypt.compare(body.password, isHash ? user!.password : dummyHash);
+
+        if (valid && user && user.isActive && user.branch.tenantId === tenant.id) {
+          targetUser = user;
+          targetTenantId = tenant.id;
+        }
+      }
+    } else {
+      // 2. No shop slug specified: resolve tenant automatically from username & password!
+      // Priority A: check user in 'fixme' or 'fixme-service' flagship store
+      const flagshipTenants = await db.tenant.findMany({
+        where: { slug: { in: ["fixme", "fixme-service"] }, status: { in: ["ACTIVE", "TRIAL"] } },
+      });
+
+      for (const tenant of flagshipTenants) {
+        const user = await db.user.findFirst({
+          where: { tenantId: tenant.id, username: body.username.trim(), isActive: true },
+          include: { branch: true },
+        });
+        if (user && user.branch.tenantId === tenant.id) {
+          const isHash = user.password.startsWith("$2");
+          const valid = await bcrypt.compare(body.password, isHash ? user.password : dummyHash);
+          if (valid) {
+            targetUser = user;
+            targetTenantId = tenant.id;
+            break;
+          }
+        }
+      }
+
+      // Priority B: if not matched in flagship, search across all candidate tenants
+      if (!targetUser) {
+        const candidateUsers = await db.user.findMany({
+          where: { username: body.username.trim(), isActive: true },
+          include: { branch: true, tenant: true },
+          take: 10,
+        });
+
+        for (const candidate of candidateUsers) {
+          if (
+            candidate.tenant &&
+            ["ACTIVE", "TRIAL"].includes(candidate.tenant.status) &&
+            candidate.branch.tenantId === candidate.tenant.id
+          ) {
+            const isHash = candidate.password.startsWith("$2");
+            const valid = await bcrypt.compare(body.password, isHash ? candidate.password : dummyHash);
+            if (valid) {
+              targetUser = candidate;
+              targetTenantId = candidate.tenant.id;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!targetUser || !targetTenantId) {
+      throw new AccessError(401, "ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง");
+    }
+
     await resetThrottle(ipUserKey);
-    await createStaffSession(user.id, tenant.id);
-    return NextResponse.json({ success: true }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch (error) { return safeError(error); }
+    await createStaffSession(targetUser.id, targetTenantId);
+    return NextResponse.json(
+      { success: true },
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
+  } catch (error) {
+    return safeError(error);
+  }
 }

@@ -33,6 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from "@/components/ui/Dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/Table";
 import { formatTHB, formatDateThai, validateThaiNationalId } from "@/lib/utils";
+import { PhotoCaptureField } from "@/components/common/PhotoCaptureField";
 
 interface TradeInContractItem {
   id: string;
@@ -84,9 +85,7 @@ export default function TradeInPage() {
   const [custPhone, setCustPhone] = useState("");
   const [custNationalId, setCustNationalId] = useState("");
   const [custAddress, setCustAddress] = useState("");
-  const [customerPhotoUrl, setCustomerPhotoUrl] = useState(
-    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300"
-  );
+  const [customerPhotoUrl, setCustomerPhotoUrl] = useState<string | null>(null);
 
   // Device & Inspection State
   const [deviceBrand, setDeviceBrand] = useState("Apple");
@@ -825,34 +824,16 @@ export default function TradeInPage() {
                     />
                   </div>
 
-                  {/* ID / Photo Upload Mock */}
-                  <div>
-                    <label className="text-xs font-semibold text-slate-700 mb-1 block">
-                      ภาพถ่ายบัตรประชาชน / ใบหน้าลูกค้า
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-lg border border-slate-300 overflow-hidden bg-slate-100 shrink-0">
-                        <img
-                          src={customerPhotoUrl}
-                          alt="Customer ID"
-                          className="h-full w-full object-cover"
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setCustomerPhotoUrl(
-                            "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300"
-                          )
-                        }
-                        className="text-xs gap-1.5"
-                      >
-                        <Camera className="h-3.5 w-3.5" />
-                        <span>จำลองถ่ายภาพบัตร</span>
-                      </Button>
-                    </div>
+                  {/* Real ID / Photo Upload & Camera Capture */}
+                  <div className="md:col-span-2">
+                    <PhotoCaptureField
+                      label="ภาพถ่ายบัตรประชาชน / ใบหน้าลูกค้า"
+                      value={customerPhotoUrl}
+                      onChange={(url) => setCustomerPhotoUrl(url)}
+                      guideType="id-card"
+                      placeholderText="ถ่ายภาพบัตร / อัปโหลดรูป"
+                      helperText="ถ่ายบัตรประชาชน หรือใบหน้าลูกค้าเพื่อเป็นหลักฐานความบริสุทธิ์ตามกฎหมาย"
+                    />
                   </div>
                 </div>
               </div>

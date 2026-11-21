@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
 import { formatTHB, formatDateThai, validateThaiNationalId } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
+import { PhotoCaptureField } from "@/components/common/PhotoCaptureField";
 
 export default function PawnContractsPage() {
   const { currentBranch } = useApp();
@@ -43,6 +44,7 @@ export default function PawnContractsPage() {
   const [loanAmount, setLoanAmount] = useState(12000);
   const [interestRate, setInterestRate] = useState(2.5);
   const [durationMonths, setDurationMonths] = useState(1);
+  const [customerPhoto, setCustomerPhoto] = useState<string | null>(null);
 
   const fetchContracts = async () => {
     try {
@@ -132,6 +134,7 @@ export default function PawnContractsPage() {
           deviceBrand: brand,
           deviceModel: model,
           imei: imei.trim(),
+          customerPhoto,
           agreedPrice: loanAmount,
           interestRateMonthly: interestRate,
           durationMonths,
@@ -480,6 +483,18 @@ export default function PawnContractsPage() {
                   value={nationalId}
                   onChange={(e) => setNationalId(e.target.value)}
                   className="text-xs font-mono"
+                />
+              </div>
+
+              {/* Photo of ID / Customer Face */}
+              <div>
+                <PhotoCaptureField
+                  label="ภาพถ่ายบัตรประชาชน / ใบหน้าลูกค้า"
+                  value={customerPhoto}
+                  onChange={(url) => setCustomerPhoto(url)}
+                  guideType="id-card"
+                  placeholderText="ถ่ายภาพบัตร / แนบรูป"
+                  helperText="ถ่ายบัตรประชาชนของผู้จำนำเพื่อเก็บเป็นหลักฐานทางกฎหมาย"
                 />
               </div>
 

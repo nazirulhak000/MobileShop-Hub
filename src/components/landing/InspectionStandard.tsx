@@ -143,9 +143,9 @@ export interface InspectionStandardProps {
 export function InspectionStandard({
   showEstimate = true,
   showBench = true,
-  themeColor = "emerald",
+  themeColor = "blue",
 }: InspectionStandardProps = {}) {
-  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.blue;
   const [mode, setMode] = useState<"pre" | "post">("post");
   const [activeBench, setActiveBench] = useState<"touch" | "battery" | "audio" | "faceid" | "camera">("touch");
 
@@ -239,9 +239,9 @@ export function InspectionStandard({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-10 sm:mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium border border-slate-200">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-            <span>มาตรฐานการตรวจสอบ 10 จุด</span>
+          <div className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full ${theme.lightBg} ${theme.lightText} text-xs font-semibold border ${theme.lightBorder}`}>
+            <ShieldCheck className={`h-3.5 w-3.5 ${theme.lightAccentText}`} />
+            <span>ตรวจเช็กฟรี 0 บาท • มาตรฐานการตรวจสอบ 10 จุด</span>
           </div>
           <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-slate-900 tracking-tight">
             เกณฑ์การตรวจเช็คมาตรฐานก่อนและหลังการซ่อม
@@ -261,22 +261,22 @@ export function InspectionStandard({
               role="tab"
               aria-selected={mode === "pre"}
               onClick={() => setMode("pre")}
-              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 text-center ${
+              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} text-center ${
                 mode === "pre"
-                  ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                  ? "bg-white text-slate-900 shadow-xs border border-slate-200 font-semibold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              1. ตรวจก่อนซ่อม (Pre-Check รายการแรกเข้า)
+              1. ตรวจก่อนซ่อม (Pre-Check รายการแรกเข้า ฟรี 0.-)
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={mode === "post"}
               onClick={() => setMode("post")}
-              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 text-center ${
+              className={`min-h-[44px] px-5 py-2 rounded-xl text-xs font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} text-center ${
                 mode === "post"
-                  ? "bg-slate-900 text-white shadow-xs"
+                  ? "bg-slate-900 text-white shadow-xs font-semibold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -802,11 +802,11 @@ export function InspectionStandard({
         <div className="mt-10 p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-center sm:text-left">
             <div className="h-11 w-11 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 border border-slate-800">
-              <FileCheck className="h-5 w-5 text-emerald-400" />
+              <FileCheck className={`h-5 w-5 ${theme.accentText}`} />
             </div>
             <div>
               <div className="text-sm font-semibold text-slate-900">
-                ใบรายงานผลตรวจเช็ค 10 จุด แนบพร้อมสลิปส่งมอบทุกเครื่อง
+                ใบรายงานผลตรวจเช็ค 10 จุด แนบพร้อมสลิปส่งมอบทุกเครื่อง (ฟรี 0.-)
               </div>
               <div className="text-xs text-slate-600 mt-0.5">
                 ลูกค้าได้รับเอกสารตรวจเช็คที่มีลายเซ็นช่างผู้ดูแล พร้อมสแกน QR Code ดูผลย้อนหลังได้ 24 ชั่วโมง
@@ -817,7 +817,7 @@ export function InspectionStandard({
           {showEstimate && (
           <a
             href="#estimate"
-            className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium shrink-0 shadow-2xs transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 inline-flex items-center justify-center"
+            className={`min-h-[44px] px-5 py-2.5 rounded-xl ${theme.primaryButton} font-semibold text-xs shrink-0 shadow-2xs transition-colors duration-150 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 ${theme.focusVisibleRing} inline-flex items-center justify-center`}
           >
             ประเมินราคาซ่อมเครื่องของคุณ
           </a>

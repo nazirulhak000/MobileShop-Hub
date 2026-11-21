@@ -39,7 +39,7 @@ export const DEFAULT_STORE_SETTINGS: GeneralStoreSettings = {
   shopName: "FixMe Mobile & Service Hub",
   shopSlogan: "ศูนย์บริการซ่อมมือถือด่วนและจำหน่ายอุปกรณ์แท้ครบวงจร",
   phone: "02-123-4567",
-  email: "contact@mobileshop.co.th",
+  email: "contact@fixme.co.th",
   address: "เลขที่ 888 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110",
   taxId: "0105558123451",
   branchCode: "00000",

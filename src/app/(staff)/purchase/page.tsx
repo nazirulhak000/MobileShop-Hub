@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { formatTHB } from "@/lib/utils";
 import { useApp } from "@/context/AppContext";
+import { PhotoCaptureField } from "@/components/common/PhotoCaptureField";
 
 export default function PurchasingAndBuybackPage() {
   const router = useRouter();
@@ -266,6 +267,7 @@ export default function PurchasingAndBuybackPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [nationalId, setNationalId] = useState("");
+  const [customerPhoto, setCustomerPhoto] = useState<string | null>(null);
   const [declarationAgreed, setDeclarationAgreed] = useState(true);
 
   const BASE_PRICES: Record<string, number> = {
@@ -325,6 +327,7 @@ export default function PurchasingAndBuybackPage() {
         imei,
         conditionGrade,
         declarationAgreed,
+        customerPhoto,
         inspectionData: { batteryHealth, screenOriginal, faceIdOk, housingOk, estimatedBuybackPrice },
         agreedPrice: price,
       };
@@ -910,6 +913,18 @@ export default function PurchasingAndBuybackPage() {
                     className="text-xs font-mono"
                   />
                 </div>
+              </div>
+
+              {/* Customer ID / Face Photo */}
+              <div className="pt-2">
+                <PhotoCaptureField
+                  label="ภาพถ่ายบัตรประชาชน / ใบหน้าผู้ขาย"
+                  value={customerPhoto}
+                  onChange={(url) => setCustomerPhoto(url)}
+                  guideType="id-card"
+                  placeholderText="ถ่ายภาพบัตร / แนบรูป"
+                  helperText="ถ่ายบัตรประชาชน หรือภาพถ่ายผู้ขายคู่กับตัวเครื่องเพื่อป้องกันคดีรับของโจร"
+                />
               </div>
 
               {/* Anti-Theft Legal Notice */}

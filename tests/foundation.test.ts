@@ -2873,7 +2873,7 @@ test("Round 19: Supplier Management & CRM Audit - Profile, Tax ID, Credit Terms,
 
   await staffStorage.run(admin, async () => {
     // Validation: Invalid taxId throws
-    const { validateTaxId, validateEmail } = await import("../src/app/api/suppliers/route");
+    const { validateTaxId, validateEmail } = await import("../src/lib/supplier-utils");
     assert.throws(() => validateTaxId("123"), /13 หลัก/);
     assert.equal(validateTaxId("010-5-56001-234-5"), "0105560012345");
     assert.throws(() => validateEmail("invalid-email"), /รูปแบบอีเมลไม่ถูกต้อง/);

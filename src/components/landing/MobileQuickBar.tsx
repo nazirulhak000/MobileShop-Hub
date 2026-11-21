@@ -29,8 +29,8 @@ interface MobileQuickBarProps {
   themeColor?: StorefrontThemeColor;
 }
 
-export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, themeColor = "emerald" }: MobileQuickBarProps = {}) {
-  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.emerald;
+export function MobileQuickBar({ phone, lineId, shopSlug, showEstimate = true, themeColor = "blue" }: MobileQuickBarProps = {}) {
+  const theme = THEME_PALETTES[themeColor] || THEME_PALETTES.blue;
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [quickCode, setQuickCode] = useState("");
   const [modalError, setModalError] = useState("");

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <defs>
+    <linearGradient id="gp" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#3730a3" />
+    </linearGradient>
+  </defs>
+  <circle cx="120" cy="120" r="110" fill="url(#gp)" fill-opacity="0.1" stroke="#4f46e5" stroke-width="4" stroke-dasharray="6 6"/>
+  <circle cx="120" cy="120" r="92" fill="#4f46e5"/>
+  <!-- Check Ribbon / Quality Star -->
+  <circle cx="120" cy="110" r="30" stroke="#c7d2fe" stroke-width="4" stroke-dasharray="3 3"/>
+  <path d="M109 110L117 118L132 102" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="120" y="156" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="16" fill="#ffffff" letter-spacing="1">GENUINE OEM</text>
+  <text x="120" y="174" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="11" fill="#c7d2fe" letter-spacing="0.5">GRADE-A QUALITY</text>
+</svg>

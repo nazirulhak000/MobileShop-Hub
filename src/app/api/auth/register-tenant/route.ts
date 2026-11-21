@@ -26,7 +26,14 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const { shopName, shopSlug, ownerName, username, password, phone } = body;
+    const { shopName, shopSlug, ownerName, username, password, phone, plan: rawPlan } = body;
+
+    const requestedPlan = String(rawPlan || "free").toLowerCase();
+    const planConfig = requestedPlan === "enterprise"
+      ? { plan: "ENTERPRISE", maxBranches: 99, maxUsers: 99, pricePerMonth: 399, status: "TRIAL" }
+      : requestedPlan === "pro"
+      ? { plan: "PRO", maxBranches: 3, maxUsers: 20, pricePerMonth: 199, status: "TRIAL" }
+      : { plan: "FREE", maxBranches: 1, maxUsers: 3, pricePerMonth: 0, status: "ACTIVE" };
 
     if (![shopName, shopSlug, ownerName, username, password].every(value => typeof value === "string" && value.trim().length > 0 && value.length <= 100) || typeof password !== "string" || password.length < 12) {
       return NextResponse.json(
@@ -76,10 +83,10 @@ export async function POST(req: NextRequest) {
         data: {
           name: String(shopName).trim(),
           slug: cleanedSlug,
-          plan: "STARTER",
-          status: "TRIAL",
-          maxBranches: 1,
-          maxUsers: 5,
+          plan: planConfig.plan,
+          status: planConfig.status,
+          maxBranches: planConfig.maxBranches,
+          maxUsers: planConfig.maxUsers,
         },
       });
 
@@ -87,13 +94,13 @@ export async function POST(req: NextRequest) {
       await tx.subscription.create({
         data: {
           tenantId: tenant.id,
-          plan: "STARTER",
-          status: "TRIAL",
+          plan: planConfig.plan,
+          status: planConfig.status,
           billingCycle: "MONTHLY",
-          pricePerMonth: 990,
-          trialEndsAt: trialEndsAt,
+          pricePerMonth: planConfig.pricePerMonth,
+          trialEndsAt: planConfig.status === "TRIAL" ? trialEndsAt : null,
           currentPeriodStart: new Date(),
-          currentPeriodEnd: trialEndsAt,
+          currentPeriodEnd: planConfig.status === "TRIAL" ? trialEndsAt : new Date(Date.now() + 365 * 24 * 3600 * 1000),
         },
       });
 
@@ -117,6 +124,18 @@ export async function POST(req: NextRequest) {
           username: String(username).trim(),
           password: passwordHash,
           role: "ADMIN",
+        },
+      });
+
+      // 5. Create default StorefrontConfig for this shop
+      await tx.storefrontConfig.create({
+        data: {
+          tenantId: tenant.id,
+          themeColor: "emerald",
+          fontFamily: "anuphan",
+          headline: `${String(shopName).trim()} ศูนย์บริการซ่อมมือถือมาตรฐาน`,
+          subheadline: "บริการซ่อมด่วน รอรับได้ พร้อมระบบตรวจสอบสถานะสด 24 ชั่วโมง",
+          phone: phone ? String(phone).trim() : null,
         },
       });
 

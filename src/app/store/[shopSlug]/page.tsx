@@ -25,6 +25,7 @@ import {
   safeParseBeforeAfterCases,
   safeParsePricingRates,
   safeParseFaqs,
+  safeParseReviews,
   safeParseSectionsOrder,
   safeParseCustomSections,
   safeParseNavMenu,
@@ -89,7 +90,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
               href="/"
               className="w-full min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-800 font-medium text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 transition-colors"
             >
-              <span>กลับสู่หน้าหลัก MobileShop-Hub</span>
+              <span>กลับสู่หน้าหลัก FixMe</span>
             </Link>
           </div>
         </div>
@@ -154,6 +155,15 @@ export default async function TenantStorePage({ params }: StorePageProps) {
   const parsedCases = (safeParseBeforeAfterCases(config.customBeforeAfterCases) as BeforeAfterCase[]) || undefined;
   const parsedPricingRates = safeParsePricingRates(config.customPricingRates) || undefined;
   const parsedFaqs = safeParseFaqs(config.customFaqs) || undefined;
+  const parsedReviews = safeParseReviews(
+    (rawConfig as any)?.customerReviews ||
+    (rawConfig?.footerSocialLinks ? (() => {
+      try {
+        const parsed = JSON.parse(rawConfig.footerSocialLinks);
+        return parsed.customerReviews;
+      } catch { return null; }
+    })() : null)
+  ) || undefined;
   const parsedSectionsOrder = safeParseSectionsOrder(config.sectionsOrder);
   const parsedCustomSections = safeParseCustomSections(config.customSections);
   const parsedNavMenu = safeParseNavMenu(config.navigationMenu);
@@ -218,6 +228,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             headline={config.headline}
             subheadline={config.subheadline}
             badge={config.badge}
+            logoUrl={tenant.logoUrl || (shopSlug === "fixme" ? "/images/fixme/logo.jpg" : null)}
             themeColor={themeColor}
             showScanner={config.showHardwareScanner}
             showLiveTracking={config.showLiveTracking}
@@ -241,7 +252,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
 
       case "tracking":
         if (!config.showLiveTracking) return null;
-        return <LiveTrackingShowcase key="section-tracking" />;
+        return <LiveTrackingShowcase key="section-tracking" themeColor={themeColor} />;
 
       case "inspection":
       case "bench":
@@ -262,6 +273,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             key="section-estimator"
             phone={config.phone}
             lineId={config.lineId}
+            shopSlug={shopSlug}
             themeColor={themeColor}
             customRates={parsedPricingRates}
           />
@@ -276,6 +288,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             showSlider={config.showBeforeAfterSlider}
             showReviews={config.showCustomerReviews}
             customCases={parsedCases}
+            customReviews={parsedReviews}
             themeColor={themeColor}
           />
         );
@@ -287,10 +300,12 @@ export default async function TenantStorePage({ params }: StorePageProps) {
             key="section-location"
             shopName={shopName}
             branchName={branchName}
+            shopSlug={shopSlug}
             address={address}
             phone={config.phone}
             lineId={config.lineId}
             googleMapsUrl={config.googleMapsUrl}
+            storefrontImageUrl={tenant.slug === "fixme" ? "/images/fixme/storefront.jpg" : undefined}
             themeColor={themeColor}
           />
         );
@@ -372,7 +387,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         navigationMenu={parsedNavMenu}
         isSubpage={false}
         themeColor={themeColor}
-        logoUrl={tenant.logoUrl}
+        logoUrl={tenant.logoUrl || (shopSlug === "fixme" ? "/images/fixme/logo.jpg" : null)}
       />
 
       <main id="main-content">
@@ -465,6 +480,7 @@ export default async function TenantStorePage({ params }: StorePageProps) {
         shopSlug={shopSlug}
         address={address}
         phone={config.phone}
+        logoUrl={tenant.logoUrl || (shopSlug === "fixme" ? "/images/fixme/logo.jpg" : null)}
         hiddenSections={hiddenSections}
         themeColor={themeColor}
         customPages={safeParseCustomPages(config.customPages)}
