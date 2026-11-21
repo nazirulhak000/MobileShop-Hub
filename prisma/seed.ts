@@ -93,6 +93,20 @@ async function main() {
     },
   });
 
+  const fixmeTenant = await prisma.tenant.upsert({
+    where: { slug: "fixme-service" },
+    update: {},
+    create: {
+      id: "tenant-fixme-service-dev-id",
+      name: "FixMe Service Center",
+      slug: "fixme-service",
+      plan: "ENTERPRISE",
+      status: "ACTIVE",
+      maxBranches: 10,
+      maxUsers: 50,
+    },
+  });
+
   await prisma.storefrontConfig.upsert({
     where: { tenantId: defaultTenant.id },
     update: {},
@@ -154,6 +168,42 @@ async function main() {
       email: "admin@mobileshop.co.th",
       role: "ADMIN",
       branchId: hq.id,
+    },
+  });
+
+  // Seed FixMe-Service HQ branch & users
+  const fixmeHq = await prisma.branch.create({
+    data: {
+      tenantId: fixmeTenant.id,
+      name: "FixMe HQ (สำนักงานใหญ่)",
+      code: "00000",
+      address: "FixMe Tower, สุขุมวิท กรุงเทพฯ 10110",
+      phone: "02-000-9999",
+      taxId: "0105561234999",
+    },
+  });
+
+  const fixmePassHash = await bcrypt.hash("P@ssw0rd123!", 12);
+  await prisma.user.create({
+    data: {
+      tenantId: fixmeTenant.id,
+      name: "FixMe Administrator",
+      username: "fixme_admin",
+      password: fixmePassHash,
+      email: "admin@fixme-service.com",
+      role: "ADMIN",
+      branchId: fixmeHq.id,
+    },
+  });
+  await prisma.user.create({
+    data: {
+      tenantId: fixmeTenant.id,
+      name: "FixMe Admin Backup",
+      username: "admin",
+      password: passwordHash,
+      email: "admin2@fixme-service.com",
+      role: "ADMIN",
+      branchId: fixmeHq.id,
     },
   });
 
