@@ -75,9 +75,17 @@ export default function StaffLoginPage() {
 
           {/* Password Field */}
           <div>
-            <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-              รหัสผ่าน (Password)
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-semibold text-slate-800">
+                รหัสผ่าน (Password)
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                ลืมรหัสผ่าน?
+              </Link>
+            </div>
             <input
               name="password"
               type="password"

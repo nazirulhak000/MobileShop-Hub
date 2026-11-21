@@ -4,11 +4,12 @@ import bcrypt from "bcryptjs";
 import { checkOrigin, throttle } from "@/lib/staff-auth";
 import { safeError } from "@/lib/staff-http";
 import { clientIp, isKnownIp } from "@/lib/client-ip";
+import { verifyOtpChallenge } from "@/lib/email-service";
 
 const HOUR = 3_600_000;
 // Per-IP limits run first so a single source is stopped before it drains the global bucket; the global
 // bucket is a much higher circuit breaker so one attacker cannot block every legitimate signup.
-const LIMITS = { ipHourly: 3, ipDaily: 10, globalPerMinute: 30 };
+const LIMITS = { ipHourly: 5, ipDaily: 15, globalPerMinute: 30 };
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,7 +27,27 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const { shopName, shopSlug, ownerName, username, password, phone, plan: rawPlan } = body;
+    const { shopName, shopSlug, ownerName, username, password, phone, email, otpCode, verificationToken, plan: rawPlan } = body;
+
+    // Validate email & OTP
+    if (!email || typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return NextResponse.json(
+        { error: "กรุณากรอกอีเมลที่ถูกต้องเพื่อรับรหัสยืนยัน" },
+        { status: 400 }
+      );
+    }
+
+    if (!otpCode || !verificationToken) {
+      return NextResponse.json(
+        { error: "กรุณายืนยันรหัส OTP 6 หลักที่ส่งไปยังอีเมลของคุณ" },
+        { status: 400 }
+      );
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Verify OTP challenge
+    await verifyOtpChallenge(cleanEmail, String(otpCode), String(verificationToken), "register");
 
     const requestedPlan = String(rawPlan || "free").toLowerCase();
     const planConfig = requestedPlan === "enterprise"
@@ -37,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     if (![shopName, shopSlug, ownerName, username, password].every(value => typeof value === "string" && value.trim().length > 0 && value.length <= 100) || typeof password !== "string" || password.length < 12) {
       return NextResponse.json(
-        { error: "กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน" },
+        { error: "กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน และรหัสผ่านต้องมีความยาวอย่างน้อย 12 ตัวอักษร" },
         { status: 400 }
       );
     }
@@ -122,6 +143,7 @@ export async function POST(req: NextRequest) {
           branchId: branch.id,
           name: String(ownerName).trim(),
           username: String(username).trim(),
+          email: cleanEmail,
           password: passwordHash,
           role: "ADMIN",
         },
